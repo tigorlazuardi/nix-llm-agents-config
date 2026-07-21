@@ -53,13 +53,25 @@ in
         "tui.editor.cursorLeft" = "left";
       };
     assert default.config.programs.pi-coding-agent.models == { };
+    assert default.config.programs.pi-coding-agent.context == ./config/AGENTS.md;
+    assert
+      default.config.home.file."${default.config.programs.pi-coding-agent.configDir}/AGENTS.md".source
+      == ./config/AGENTS.md;
     assert builtins.elem expectedPackage default.config.home.packages;
     assert
       !(builtins.elem disabled.config.programs.pi-coding-agent.package disabled.config.home.packages);
-    assert !(disabled.config.home.file ? ".pi/agent/settings.json");
-    assert !(disabled.config.home.file ? ".pi/agent/keybindings.json");
-    assert !(disabled.config.home.file ? ".pi/agent/models.json");
-    assert !(disabled.config.home.file ? ".pi/agent/AGENTS.md");
+    assert
+      !(
+        disabled.config.home.file ? "${disabled.config.programs.pi-coding-agent.configDir}/settings.json"
+      );
+    assert
+      !(
+        disabled.config.home.file ? "${disabled.config.programs.pi-coding-agent.configDir}/keybindings.json"
+      );
+    assert
+      !(disabled.config.home.file ? "${disabled.config.programs.pi-coding-agent.configDir}/models.json");
+    assert
+      !(disabled.config.home.file ? "${disabled.config.programs.pi-coding-agent.configDir}/AGENTS.md");
     assert overridden.config.programs.pi-coding-agent.package == overridePackage;
     assert builtins.elem overridePackage overridden.config.home.packages;
     assert settingsOverridden.config.programs.pi-coding-agent.settings.theme == "light";

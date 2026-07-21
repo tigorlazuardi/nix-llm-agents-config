@@ -26,5 +26,6 @@ in
     package = lib.mkIf cfg.enable (lib.mkDefault pinnedPkgs.pi-coding-agent);
     settings = lib.mapAttrsRecursive (_: lib.mkDefault) defaultSettings;
     keybindings = lib.mapAttrsRecursive (_: lib.mkDefault) defaultKeybindings;
+    context = lib.mkDefault ../config/AGENTS.md;
   };
 }
