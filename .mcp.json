@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "nixos": {
+      "command": "nix",
+      "args": ["run", "github:utensils/mcp-nixos", "--"]
+    },
+    "noogle": {
+      "command": "nix",
+      "args": ["run", "github:AlejandroGomezFrieiro/noogle_mcp_server"]
+    }
+  }
+}
