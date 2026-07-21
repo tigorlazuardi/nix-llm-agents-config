@@ -28,4 +28,11 @@ in
     keybindings = lib.mapAttrsRecursive (_: lib.mkDefault) defaultKeybindings;
     context = lib.mkDefault ../config/AGENTS.md;
   };
+
+  home.file = lib.mkIf cfg.enable {
+    "${cfg.configDir}/prompts" = {
+      source = ../config/prompts;
+      force = true;
+    };
+  };
 }

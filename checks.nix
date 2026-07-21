@@ -57,6 +57,11 @@ in
     assert
       default.config.home.file."${default.config.programs.pi-coding-agent.configDir}/AGENTS.md".source
       == ./config/AGENTS.md;
+    assert
+      default.config.home.file."${default.config.programs.pi-coding-agent.configDir}/prompts".source
+      == ./config/prompts;
+    assert
+      default.config.home.file."${default.config.programs.pi-coding-agent.configDir}/prompts".force;
     assert builtins.elem expectedPackage default.config.home.packages;
     assert
       !(builtins.elem disabled.config.programs.pi-coding-agent.package disabled.config.home.packages);
@@ -72,6 +77,8 @@ in
       !(disabled.config.home.file ? "${disabled.config.programs.pi-coding-agent.configDir}/models.json");
     assert
       !(disabled.config.home.file ? "${disabled.config.programs.pi-coding-agent.configDir}/AGENTS.md");
+    assert
+      !(disabled.config.home.file ? "${disabled.config.programs.pi-coding-agent.configDir}/prompts");
     assert overridden.config.programs.pi-coding-agent.package == overridePackage;
     assert builtins.elem overridePackage overridden.config.home.packages;
     assert settingsOverridden.config.programs.pi-coding-agent.settings.theme == "light";
@@ -89,4 +96,11 @@ in
         nixfmt --check ${./flake.nix} ${./checks.nix} ${./modules/pi-coding-agent.nix}
         touch $out
       '';
+
+  prompt-templates = pkgs.runCommandLocal "pi-prompt-templates" { } ''
+    set -- ${./config/prompts}/*.md
+    test "$#" -eq 3
+    ! grep -RE '^(model|skill|thinking|chain|loop|subagent|deterministic):' ${./config/prompts}
+    touch $out
+  '';
 }
