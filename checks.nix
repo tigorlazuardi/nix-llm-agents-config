@@ -24,6 +24,13 @@ let
   disabled = evaluate { programs.pi-coding-agent.enable = false; };
   overridePackage = pkgs.writeShellScriptBin "pi" "exit 0";
   overridden = evaluate { programs.pi-coding-agent.package = overridePackage; };
+  settingsOverridden = evaluate {
+    programs.pi-coding-agent.settings = {
+      theme = "light";
+      retry.maxRetries = 3;
+    };
+    programs.pi-coding-agent.keybindings."app.tools.expand" = "ctrl+e";
+  };
 
   expectedPackage = nixpkgs-unstable.legacyPackages.x86_64-linux.pi-coding-agent;
 in
@@ -32,6 +39,20 @@ in
     assert default.config.programs.pi-coding-agent.enable;
     assert !disabled.config.programs.pi-coding-agent.enable;
     assert default.config.programs.pi-coding-agent.package == expectedPackage;
+    assert
+      default.config.programs.pi-coding-agent.settings == {
+        defaultThinkingLevel = "medium";
+        quietStartup = true;
+        theme = "dark";
+        hideThinkingBlock = false;
+        showCacheMissNotices = false;
+      };
+    assert
+      default.config.programs.pi-coding-agent.keybindings == {
+        "app.tools.expand" = "ctrl+o";
+        "tui.editor.cursorLeft" = "left";
+      };
+    assert default.config.programs.pi-coding-agent.models == { };
     assert builtins.elem expectedPackage default.config.home.packages;
     assert
       !(builtins.elem disabled.config.programs.pi-coding-agent.package disabled.config.home.packages);
@@ -41,6 +62,13 @@ in
     assert !(disabled.config.home.file ? ".pi/agent/AGENTS.md");
     assert overridden.config.programs.pi-coding-agent.package == overridePackage;
     assert builtins.elem overridePackage overridden.config.home.packages;
+    assert settingsOverridden.config.programs.pi-coding-agent.settings.theme == "light";
+    assert settingsOverridden.config.programs.pi-coding-agent.settings.retry.maxRetries == 3;
+    assert
+      settingsOverridden.config.programs.pi-coding-agent.keybindings == {
+        "app.tools.expand" = "ctrl+e";
+        "tui.editor.cursorLeft" = "left";
+      };
     pkgs.runCommandLocal "pi-home-manager-module-evaluation" { } "touch $out";
 
   formatting =
