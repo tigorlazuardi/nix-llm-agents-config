@@ -1,0 +1,374 @@
+---
+title: Declarative Pi Home Manager configuration
+description: Specify portable Pi configuration, immutable plugin packaging, safe runtime secret references, checks, and daily checked updates.
+status: draft
+date: 2026-07-17
+draft: true
+---
+
+# Declarative Pi Home Manager configuration
+
+## Problem Statement
+
+Pi currently combines portable configuration with machine-local runtime state under `~/.pi/agent`. Configuration is not reproducibly synchronized across machines, while an earlier Bun installation accidentally supplied modules needed by user-installed plugins. After that installation was removed, `@juicesharp/rpiv-ask-user-question` could no longer resolve `@earendil-works/pi-tui` from Nix-packaged Pi.
+
+The owner needs one public, commit-pinnable Home Manager module that preserves Pi's native behavior, keeps secrets and runtime state local, packages plugins with complete immutable dependency closures, and stays current through checked updates.
+
+## Solution
+
+Export a Home Manager module as `homeManagerModules.default`. Importing it enables Home Manager's native `programs.pi-coding-agent` module through `lib.mkDefault true`, selects Pi from this repository's pinned `nixpkgs-unstable`, applies audited portable defaults, links only resources Home Manager does not already support, and supplies Nix-built plugins as immutable local package paths through Pi's native `settings.packages` mechanism.
+
+The module adds one option only: `programs.pi-coding-agent.apiKeyFiles.<provider>`. It converts each runtime secret-file path into Pi's native shell-command key resolution without placing secret content in Git or the Nix store.
+
+One daily GitHub Actions workflow updates pinned `nixpkgs` and Home Manager together, checks the result, then independently updates each registered plugin. Consumers remain reproducible because they pin a commit of this repository and advance it deliberately.
+
+## User Stories
+
+1. As the repository owner, I want one Home Manager module, so that Pi configuration is reusable across my machines.
+2. As the repository owner, I want importing the module to enable Pi by default, so that use requires no redundant enable option.
+3. As a consumer, I want enablement to use `lib.mkDefault`, so that I can disable Pi explicitly.
+4. As a consumer who disables Pi, I want no Pi package, plugin, managed value, or resource linked, so that disabling has zero Pi-related effect.
+5. As the repository owner, I want Home Manager's existing Pi options used wherever possible, so that this module does not duplicate upstream behavior.
+6. As the repository owner, I want only unsupported Pi resources linked with `home.file`, so that each target path has one declarative owner.
+7. As the repository owner, I want current homeserver configuration audited through an allowlist, so that portable configuration migrates without copying unknown state.
+8. As a consumer, I want user-relative generated paths based on `home.homeDirectory`, so that Linux and Darwin users do not inherit homeserver paths.
+9. As the repository owner, I want raw resources to remain portable without templating, so that resource behavior stays close to Pi's native layout.
+10. As the repository owner, I want authentication, sessions, caches, logs, crash state, trust state, and generated package-manager state left local, so that mutable data is not managed by Nix.
+11. As a consumer, I want activation conflicts and backups handled by my Home Manager deployment policy, so that this module does not impose migration behavior.
+12. As a consumer, I want provider API keys read from runtime files, so that sops-nix or another secret manager can provision credentials safely.
+13. As a consumer, I want the runtime-secret API to be secret-manager agnostic, so that this repository does not depend on sops-nix.
+14. As a consumer, I want an error when an `apiKeyFiles` entry lacks a matching model provider, so that configuration mistakes fail during evaluation.
+15. As a consumer, I want an error when both `apiKey` and `apiKeyFiles` configure one provider, so that key precedence is unambiguous.
+16. As the repository owner, I want Pi sourced from this repository's checked `nixpkgs-unstable` pin, so that consumers get a known Pi version independent of their nixpkgs.
+17. As a consumer, I want the Pi package assignment to use `lib.mkDefault`, so that I can override it when accepting unsupported plugin compatibility.
+18. As the repository owner, I want third-party Pi packages described in one derivation-like JSON registry, so that updates and Nix builds are mechanical.
+19. As the repository owner, I want npm packages pinned by exact version and hashes, so that runtime installation is offline-capable and reproducible.
+20. As the repository owner, I want git packages pinned by exact revision while tracking an explicitly reviewed branch, so that updates are reproducible without hiding update intent.
+21. As the repository owner, I want each plugin packaged with all runtime and peer dependencies, so that it does not depend on Pi's internal Nix-store layout or user `node_modules`.
+22. As the repository owner, I want each local extension isolated with adjacent dependency metadata, so that one extension's dependency closure does not mask another's.
+23. As the repository owner, I want plugins loaded through Pi's native package discovery, so that package manifests and resource discovery retain upstream behavior.
+24. As the repository owner, I want `settings.packages` owned solely by this module, so that consumer list merges cannot create duplicate or mutable package sources.
+25. As the repository owner, I want current npm packages and local extensions audited before migration, so that obsolete, duplicate, or invalid resources are excluded with reasons.
+26. As the repository owner, I want each plugin update independently checked and committed, so that one broken package does not block healthy package updates.
+27. As the repository owner, I want input updates checked with the current plugin set, so that a new Pi cannot land while breaking existing plugins.
+28. As the repository owner, I want plugin updates to continue against the last valid default branch when input updates fail, so that unrelated maintenance continues.
+29. As the repository owner, I want update jobs to avoid empty commits, so that history contains only real changes.
+30. As the repository owner, I want direct pushes to rebase and recheck relevant concurrent changes, so that automation never force-pushes over human work.
+31. As the repository owner, I want GitHub-native summaries, so that update status is visible without a telemetry service.
+32. As a consumer, I want rollback to mean restoring the prior repository commit pin, so that recovery requires no custom rollback tooling.
+33. As a contributor, I want `nix fmt` and `nix flake check` to prove acceptance, so that local and CI validation use the same entry points.
+34. As a future nix-darwin user, I want the module free of Linux-only assumptions, so that Darwin testing can begin later without redesigning the API.
+
+## Implementation Decisions
+
+### Flake and module surface
+
+- Inputs are `nixpkgs-unstable` and Home Manager; Home Manager follows the pinned nixpkgs.
+- Outputs are limited to `homeManagerModules.default`, `checks.x86_64-linux`, and `formatter`.
+- Formatter is nixpkgs `nixfmt`; no treefmt framework or development shell is added.
+- The module requires the exact minimum Home Manager commit documented in README, or newer, containing `programs.pi-coding-agent`.
+- The repository pins Home Manager for its checks but does not import a second pinned copy into a consumer's module graph.
+- `programs.pi-coding-agent.enable` and `package` are assigned with `lib.mkDefault`.
+- Default package is `pi-coding-agent` from this repository's pinned nixpkgs.
+- Consumer package overrides are allowed, but managed plugin compatibility is guaranteed only for the default package.
+- All module effects are guarded by the final Pi enable value.
+
+### Home Manager ownership
+
+- Home Manager's built-in Pi options exclusively own settings, keybindings, models, global context, package installation, and any other paths it supports.
+- This module does not recreate or separately link a path already owned by Home Manager.
+- Unsupported, repo-owned resources mirror their native Pi layout under `pi/` and are linked immutably with `home.file`.
+- No resource enable flags, per-resource options, writable copies, or raw-resource templating are added.
+- The module exclusively owns `programs.pi-coding-agent.settings.packages`; consumers may specialize other settings but do not merge package entries.
+- Nix-generated user paths use `config.home.homeDirectory`.
+
+### Managed and runtime boundaries
+
+- Migration uses an explicit managed-path allowlist. Unknown paths are excluded.
+- Portable homeserver values become common defaults only after auditing secrets, absolute paths, and machine coupling.
+- Authentication, sessions, logs, caches, crash data, trust data, goals/state, generated npm/git trees, and other mutable state remain machine-local.
+- Home Manager consumer configuration owns conflict backup and activation policy.
+- Claude Code migration remains out of scope until Pi work is accepted.
+
+### Runtime secret API
+
+The only custom option is:
+
+```nix
+programs.pi-coding-agent.apiKeyFiles.<provider> = <runtime-path>;
+```
+
+For each key, the module:
+
+- requires a matching `programs.pi-coding-agent.models.providers.<provider>`;
+- rejects a provider that also defines `apiKey`;
+- shell-escapes the runtime path;
+- merges `apiKey = "!cat <escaped-path>"` into the native models option;
+- never reads secret content during evaluation or activation.
+
+The importing configuration provisions and permissions the runtime file. The API does not mention sops-nix, agenix, or another secret manager.
+
+### Plugin registry
+
+`pi-plugins.json` is an object keyed by stable aliases. Each entry resembles derivation metadata:
+
+- common: `pname`, `version`, protocol-prefixed `src`, `hash`, `npmDepsHash`;
+- git only: manually reviewed branch `track` and exact resolved `rev`;
+- git version: updater-generated `unstable-YYYY-MM-DD`;
+- npm version: exact registry version, never a range.
+
+`src` contains source identity but not version or revision. Registry additions, removals, aliases, source changes, and tracked-branch changes require manual review. Automation may only update npm versions or resolve the configured git branch head, then refresh hashes.
+
+Registry v1 deliberately omits package resource filters and `autoload`. Pi supports `extensions`, `skills`, `prompts`, and `themes` filters, where omission loads all and `[]` disables a type; `autoload: false` supports global/project deltas. Add those fields together only when a concrete selective-loading need appears.
+
+### Plugin and local-extension packaging
+
+- One standard npm-oriented Nix builder handles both registry packages and local extensions.
+- Each output contains its own runtime and peer dependency closure, including compatible Pi internal packages needed at runtime.
+- No user-level npm installation, shared extension dependency bundle, or reliance on Pi's Nix-store internals is permitted.
+- Each local extension lives in its own directory with adjacent source and dependency manifest/lock metadata.
+- No speculative builder override field exists in registry v1. If audit proves a package needs an exception, add the smallest concrete field then.
+- Built plugin closures are passed as immutable local paths through native Pi `settings.packages`.
+- Local extensions live in the repository rather than `pi-plugins.json`.
+
+### Daily update workflow
+
+- Schedule: daily at `03:00 UTC` and parameterless `workflow_dispatch`.
+- Permission: built-in `GITHUB_TOKEN` with `contents: write`; no PAT, deploy key, or GitHub App.
+- Input job updates pinned nixpkgs and Home Manager together, runs full x86_64-linux checks with current plugins, and creates one commit only when changed.
+- Plugin job uses `if: always()` and a fresh checkout of latest `origin/main`.
+- One serialized shell loop processes aliases independently, resetting failed changes before continuing.
+- Each changed plugin gets its own check and conventional commit.
+- A failed input update does not block plugin updates against last valid `main`.
+- A failed plugin does not block later plugins; plugin job reports aggregate failure after processing all aliases.
+- Before each push, automation fetches and rebases current `main`; relevant upstream changes rerun the target check.
+- One bounded retry handles a concurrent update. Automation never force-pushes.
+- No-op updates write summary status but create no commit.
+- Commit subjects use `chore(deps): update nixpkgs and home-manager` and `chore(pi-plugins): update <alias> to <version>`.
+- Shell scripts use Nix, npm metadata commands, git, and jq only.
+
+### Update observability
+
+GitHub Actions status and an always-written step summary are sufficient for this personal repository. Summary includes old/new input revisions or plugin versions, check status, unchanged entries, skipped entries, failures, and concise errors. No OpenTelemetry pipeline, external notifier, JSON artifact, or custom metrics backend is added.
+
+Security-sensitive values never appear in summaries. API keys, auth material, command output containing credentials, and secret-file content are Tier A and always render as `<redacted>` if a field must be named. No Tier B account handles, Tier C KYC data, or Tier D context-dependent user fields are expected. Raw arbitrary command output is not copied into summaries.
+
+### Rollback
+
+Consumers roll back by restoring the previous flake lock entry or repository commit pin. A bad automated commit in this repository may also be reverted normally. No release tags, rollback app, or generated rollback command are added.
+
+## Testing Decisions
+
+The accepted public seam is `nix flake check` on `x86_64-linux`, plus formatter validation. Tests assert external outputs rather than internal helper implementation.
+
+Three focused flake checks are exposed:
+
+1. **Module evaluation** — evaluate a minimal Home Manager configuration importing the module; confirm default enable/package behavior, disable behavior, and `apiKeyFiles` assertions.
+2. **Pi package loading** — build the default Pi and full current plugin/local-extension set, launch Pi offline and headless, and fail on loader or extension issues.
+3. **Managed files** — build a Home Manager activation package and assert expected managed files, immutable plugin paths, omitted runtime-state paths, and secret-free generated JSON.
+
+Daily updater code may use narrower internal derivations to test one plugin, but per-resource checks are not added to public flake output.
+
+Accepted commands:
+
+```sh
+nix fmt -- --check .
+nix flake check
+```
+
+Exact supported formatter-check syntax must be verified against pinned nixpkgs during implementation. No live model API call, credential, mutable install, or network-dependent runtime smoke test is part of acceptance.
+
+## Initial Migration Audit
+
+Final statuses are filled during implementation audit. Exclusion needs a reason; unknown entries default to excluded.
+
+### Configuration and resource paths
+
+| Current category | Target mechanism | Status |
+|---|---|---|
+| `settings.json` | Home Manager `settings` | Audit pending |
+| `keybindings.json` | Home Manager `keybindings` | Audit pending |
+| `models.json` | Home Manager `models`; secrets removed | Audit pending |
+| `AGENTS.md` | Home Manager `context` | Audit pending |
+| `APPEND_SYSTEM.md` | Preserve only if native behavior can be mapped without duplicate ownership | Audit pending |
+| `agents/` | Native-layout repo resource | Audit pending |
+| `extensions/` including `subagent/` | One local package per extension | Audit pending |
+| `prompts/` | Native-layout repo resource | Audit pending |
+| `rules/` | Native-layout repo resource | Audit pending |
+| `skills/` | Native-layout repo resource | Audit pending |
+| `templates/` | Native-layout repo resource | Audit pending |
+| themes, if present | Native-layout repo resource | Audit pending |
+| auth, sessions, cache, logs, trust, crash, goal/state, generated npm/git | Runtime-local | Excluded by policy |
+
+### Current Pi package sources
+
+This inventory mirrors the active `settings.packages` allowlist as of 2026-07-21. Exact installed versions are audit inputs; every npm entry still needs reproducible source and dependency hashes before entering `pi-plugins.json`.
+
+| Package source | Installed version/revision | Status |
+|---|---:|---|
+| `npm:pi-mcp-adapter` | `2.11.0` | Active; audit pending |
+| `npm:pi-rules` | `0.1.1` | Active; audit pending |
+| `npm:pi-prompt-template-model` | `0.10.0` | Active; audit pending |
+| `npm:@koltmcbride/pi-loop` | `0.2.0` | Active; audit pending |
+| `npm:pi-searxng` | `1.0.4` | Active; audit pending |
+| `npm:pi-playwright` | `0.1.1` | Active; audit pending |
+| `npm:pi-subagents` | `0.35.1` | Active; audit pending |
+| `npm:pi-diet-lsp` | `0.1.6` | Active; audit pending |
+| `npm:@juicesharp/rpiv-todo` | `1.20.0` | Active; audit pending |
+| `npm:@mrclrchtr/supi-context` | `2.5.0` | Active; audit pending |
+| `npm:@xynogen/pix-optimizer` | `1.1.17` | Active; audit pending |
+| `npm:@sting8k/pi-vcc` | `0.4.0` | Active; audit pending |
+| `npm:@mrclrchtr/supi-extras` | `2.5.0` | Active; audit pending |
+| `npm:@tifan/pi-rename` | `0.4.2` | Active; audit pending |
+| `npm:@ogulcancelik/pi-herdr` | `0.3.0` | Active; audit pending |
+| `git:github.com/tigorlazuardi/pi-herdr-sudo-task` | `c2c17cf0b1233a1f4837e7e4aff7e65bc98b8705` | Active; audit pending |
+| `npm:pi-ask-herdr` | `0.2.1` | Active; audit pending |
+| `npm:pi-patty-bg-tasks` | `1.1.6` | Active; audit pending |
+| `npm:pi-c2c` | `0.4.14` | Active; requires separately packaged native `c2c` |
+
+Removed from the active allowlist: `@juicesharp/rpiv-ask-user-question`, `@kmmuntasir/pi-nested-subagents`, `@misunders2d/pi-goal`, `@quintinshaw/pi-dynamic-workflows`, `@vanillagreen/pi-background-tasks`, `@yandy0725/pi-memory`, `pi-ask-user`, `pi-observational-memory`, and `remote-pi`. They remain excluded unless a later audit establishes a concrete need.
+
+### `pi-c2c` native runtime boundary
+
+<Decision title="Package pi-c2c extension and c2c binary separately" status="accepted">
+
+`pi-c2c` `0.4.14` is a Pi TypeScript extension loaded through native package discovery; it does not provide a `pi-c2c` executable. Its runtime dependency is native `c2c` `0.13.0`, sourced from the official Linux x64 release and patched for NixOS with SQLite and GMP. The module must provide the immutable binary and set `C2C_BIN` to its absolute path rather than relying on npm's platform binary or ambient `PATH`.
+
+</Decision>
+
+- Extension source: `npm:pi-c2c@0.4.14`; upstream repository `clankercode/pi-c2c`, observed `master` revision `3107d3eb5ba7be2565e4d5bd3d268dc917443a2b`.
+- Extension dependency: `@clanker-code/c2c@0.13.0`; peer dependencies `@earendil-works/pi-coding-agent` and `@earendil-works/pi-tui` must be present in its bundled plugin closure.
+- Native binary source: official `clankercode/c2c` `0.13.0` Linux x64 archive, hash `sha256-d4i4eBIOh55RTPBRdgrpAWhp/DvWrQLhPe6JeflPRVg=`.
+- Runtime configuration: `C2C_BIN` points to `$out/bin/c2c`; managed launchers may set `C2C_PI_ALIAS` to a stable session slug. Poll interval, broker root, and pre-established session variables remain optional runtime configuration.
+- Validation: run `$C2C_BIN --version`, `$C2C_BIN host-id`, `$C2C_BIN status`, then load Pi offline/headless and confirm `c2c_pi_local_info` is registered without an extension issue.
+- Known ceiling: local broker messaging works; relay identity and connector are not configured, so cross-machine routing is out of scope for this migration.
+
+## I/O examples
+
+### Consumer import
+
+Input:
+
+```nix
+{
+  inputs.nix-llm-agents-config.url =
+    "github:tigorlazuardi/nix-llm-agents-config/<commit>";
+
+  imports = [
+    inputs.nix-llm-agents-config.homeManagerModules.default
+  ];
+}
+```
+
+Expected output:
+
+```text
+Home Manager activation contains repo-pinned pi-coding-agent,
+audited portable configuration, and immutable package paths.
+Runtime auth/session/cache paths remain unmanaged.
+```
+
+### Runtime API key file
+
+Input:
+
+```nix
+programs.pi-coding-agent = {
+  models.providers.openrouter = {
+    baseUrl = "https://openrouter.ai/api/v1";
+    api = "openai-completions";
+    models = [ { id = "anthropic/claude-sonnet-4"; } ];
+  };
+
+  apiKeyFiles.openrouter = config.sops.secrets.openrouter.path;
+};
+```
+
+Expected generated provider shape:
+
+```json
+{
+  "providers": {
+    "openrouter": {
+      "baseUrl": "https://openrouter.ai/api/v1",
+      "api": "openai-completions",
+      "apiKey": "!cat '<runtime-secret-path>'",
+      "models": [{ "id": "anthropic/claude-sonnet-4" }]
+    }
+  }
+}
+```
+
+Secret content does not appear in Git, evaluation output, Nix store, generated configuration, or workflow summary.
+
+### Invalid secret reference
+
+Input:
+
+```nix
+programs.pi-coding-agent.apiKeyFiles.missing-provider = "/run/secrets/key";
+```
+
+Expected output:
+
+```text
+Evaluation fails: apiKeyFiles.missing-provider requires
+models.providers.missing-provider.
+```
+
+### Disabled module
+
+Input:
+
+```nix
+programs.pi-coding-agent.enable = false;
+```
+
+Expected output:
+
+```text
+No Pi package, plugin package path, Pi-managed JSON, context,
+or unsupported Pi resource is added by this module.
+```
+
+### Daily update
+
+Input:
+
+```text
+Scheduled workflow finds newer nixpkgs/Home Manager revisions,
+plugin A unchanged, plugin B valid update, plugin C broken update.
+```
+
+Expected output:
+
+```text
+1. Input pair passes full checks and lands as one commit.
+2. Plugin A writes “unchanged” to summary; no commit.
+3. Plugin B passes focused load check and lands as one commit.
+4. Plugin C is reset, recorded as failed, and does not block later aliases.
+5. Plugin job ends failed because at least one alias failed.
+```
+
+## Out of Scope
+
+- Claude Code migration or configuration; it starts after Pi acceptance.
+- Machine profiles such as homeserver, boxes, or home desktop.
+- nix-darwin validation; Darwin is only design-primed.
+- `aarch64-linux` release-gate checks in this phase.
+- Secret storage, encryption, decryption, or secret-manager configuration.
+- Home Manager conflict backup or activation deployment policy.
+- Runtime mutation through `pi install`, `pi update --extensions`, npm, or git package directories.
+- Package resource filters and `autoload` in registry v1.
+- Behavior-level tests for every third-party plugin.
+- Malware detection or manual review of every automated plugin release.
+- Automatic local-extension dependency updates.
+- OpenTelemetry, external notifications, dashboards, or report artifacts.
+- Ready-made `homeConfigurations`, NixOS modules, machine-specific options, or broad custom option surfaces.
+
+## Further Notes
+
+- Automated plugin updates execute third-party code after build and load-only validation. This risk is accepted. Consumer commit pins contain rollout, and reverting the pin is rollback; neither mechanism detects malicious releases.
+- Pi's native package protocol supports npm, git, URL, and local path sources. Registry v1 packages npm and git sources into local immutable paths before Pi sees them.
+- The exact nixpkgs npm build primitive, Nix function signatures, package availability, current Home Manager minimum commit, and formatter command must be confirmed through configured NixOS/Noogle MCP servers or upstream documentation during implementation.
+- Issue-tracker publication is not performed in this planning pass because no issue tracker or `ready-for-agent` label configuration exists in the repository.
