@@ -34,5 +34,9 @@ in
       source = ../config/prompts;
       force = true;
     };
+    "${cfg.configDir}/templates/fleet" = {
+      source = ../config/templates/fleet;
+      force = true;
+    };
   };
 }

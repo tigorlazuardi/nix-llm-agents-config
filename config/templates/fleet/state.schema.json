@@ -1,0 +1,139 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pi.local/schemas/fleet/state.schema.json",
+  "title": "state.json",
+  "description": "Owner: immutable Terra-low orchestrator. One file per DAG; exact-resume task state.",
+  "type": "object",
+  "required": ["meta", "tracker", "nodes", "stopFlag"],
+  "properties": {
+    "meta": {
+      "type": "object",
+      "required": ["runName", "schemaVersion", "specRef", "standardsRef", "baseBranch", "integrationBranch", "orchestrator", "maxFixAttempts", "maxHandoverAttempts", "maxReviewerRetries", "maxCheckRetries"],
+      "properties": {
+        "runName": { "type": "string", "minLength": 1 },
+        "schemaVersion": { "const": 2 },
+        "specRef": { "type": "string", "minLength": 1 },
+        "standardsRef": { "type": "string", "minLength": 1 },
+        "baseBranch": { "type": "string", "minLength": 1 },
+        "integrationBranch": { "type": "string", "pattern": "^fleet/[^/]+/int$" },
+        "orchestrator": {
+          "type": "object",
+          "required": ["agent", "model", "thinking"],
+          "properties": {
+            "agent": { "const": "orchestrator" },
+            "model": { "const": "cx/gpt-5.6-terra" },
+            "thinking": { "const": "low" }
+          },
+          "additionalProperties": false
+        },
+        "maxFixAttempts": { "type": "integer", "minimum": 0, "maximum": 3 },
+        "maxHandoverAttempts": { "type": "integer", "minimum": 0, "maximum": 3 },
+        "maxReviewerRetries": { "type": "integer", "minimum": 0, "maximum": 3 },
+        "maxCheckRetries": { "type": "integer", "minimum": 0, "maximum": 3 }
+      }
+    },
+    "tracker": {
+      "type": "object",
+      "required": ["type", "supportsBlocking"],
+      "properties": { "type": { "type": "string" }, "supportsBlocking": { "type": "boolean" } }
+    },
+    "nodes": { "type": "array", "items": { "$ref": "#/$defs/node" } },
+    "stopFlag": { "$ref": "#/$defs/stopFlag" }
+  },
+  "$defs": {
+    "node": {
+      "type": "object",
+      "required": ["id", "ticket", "dependsOn", "routing", "runtime", "sync", "attributes", "audit"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "ticket": {
+          "type": "object",
+          "required": ["ref", "title"],
+          "properties": { "ref": { "type": "string", "minLength": 1 }, "title": { "type": "string" }, "contentCache": { "type": "string" } }
+        },
+        "dependsOn": { "type": "array", "items": { "type": "string" } },
+        "routing": {
+          "type": "object",
+          "required": ["failureTolerance", "worker", "reviewer", "checkCommand"],
+          "properties": {
+            "failureTolerance": { "enum": ["low", "standard", "trivial"] },
+            "worker": { "enum": ["worker", "frontier"] },
+            "reviewer": { "enum": ["worker", "frontier"] },
+            "checkCommand": { "type": "string", "minLength": 1 }
+          }
+        },
+        "runtime": {
+          "type": "object",
+          "required": ["status", "phase", "currentChild", "reviewAxis", "fixAttempt", "handoverAttempt", "reviewerRetry", "checkRetry", "branch", "commitSha", "evidence"],
+          "properties": {
+            "status": { "enum": ["PENDING", "IMPLEMENTING", "STANDARDS_REVIEW", "CHECKING", "SPEC_REVIEW", "FIXING", "PASSED", "FAILED", "BLOCKED", "ESCALATED"] },
+            "phase": { "enum": ["PENDING", "IMPLEMENTING", "STANDARDS_REVIEW", "CHECKING", "SPEC_REVIEW", "FIXING", "PASSED", "FAILED", "BLOCKED", "ESCALATED"] },
+            "currentChild": {
+              "oneOf": [
+                { "type": "null" },
+                {
+                  "type": "object",
+                  "required": ["role", "axis", "agent", "runId", "reportRef", "startedAt"],
+                  "properties": {
+                    "role": { "enum": ["implementer", "reviewer", "check"] },
+                    "axis": { "enum": [null, "standards", "spec"] },
+                    "agent": { "type": "string", "minLength": 1 },
+                    "runId": { "type": ["string", "null"] },
+                    "reportRef": { "type": "string", "minLength": 1 },
+                    "startedAt": { "type": "string", "format": "date-time" }
+                  }
+                }
+              ]
+            },
+            "reviewAxis": { "enum": [null, "standards", "spec"] },
+            "fixAttempt": { "type": "integer", "minimum": 0, "maximum": 3 },
+            "handoverAttempt": { "type": "integer", "minimum": 0, "maximum": 3 },
+            "reviewerRetry": {
+              "type": "object",
+              "required": ["standards", "spec"],
+              "properties": { "standards": { "type": "integer", "minimum": 0, "maximum": 3 }, "spec": { "type": "integer", "minimum": 0, "maximum": 3 } }
+            },
+            "checkRetry": { "type": "integer", "minimum": 0, "maximum": 3 },
+            "branch": { "type": "string", "pattern": "^fleet/[^/]+/task/[^/]+/[^/]+$" },
+            "commitSha": { "type": ["string", "null"] },
+            "evidence": {
+              "type": "object",
+              "required": ["implementationRef", "standardsReviewRef", "checkRef", "specReviewRef"],
+              "properties": {
+                "implementationRef": { "type": ["string", "null"] },
+                "standardsReviewRef": { "type": ["string", "null"] },
+                "checkRef": { "type": ["string", "null"] },
+                "specReviewRef": { "type": ["string", "null"] }
+              }
+            }
+          }
+        },
+        "sync": { "type": "object", "required": ["mirrored", "pushed"], "properties": { "mirrored": { "type": "boolean" }, "pushed": { "type": "boolean" } } },
+        "attributes": { "type": "object", "additionalProperties": { "type": "string" } },
+        "audit": { "type": "array", "items": { "$ref": "#/$defs/auditSpan" } }
+      }
+    },
+    "auditSpan": {
+      "type": "object",
+      "required": ["role", "agentType", "model", "agentId", "startedAt", "endedAt", "status", "error", "summary", "attributes"],
+      "properties": {
+        "role": { "enum": ["worker", "reviewer", "judge", "orchestrator", "check", "steering"] },
+        "agentType": { "type": "string" },
+        "model": { "type": "string" },
+        "agentId": { "type": ["string", "null"] },
+        "startedAt": { "type": "string", "format": "date-time" },
+        "endedAt": { "type": ["string", "null"], "format": "date-time" },
+        "status": { "enum": ["running", "ok", "error"] },
+        "error": { "type": ["string", "null"] },
+        "summary": { "type": "string" },
+        "attributes": { "type": "object", "additionalProperties": { "type": "string" } },
+        "reportRef": { "type": "string" }
+      }
+    },
+    "stopFlag": {
+      "type": "object",
+      "required": ["stopped", "reason", "stoppedAt"],
+      "properties": { "stopped": { "type": "boolean" }, "reason": { "type": ["string", "null"] }, "stoppedAt": { "type": ["string", "null"], "format": "date-time" } }
+    }
+  }
+}

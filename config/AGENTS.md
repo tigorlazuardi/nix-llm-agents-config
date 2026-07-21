@@ -43,5 +43,5 @@ Debug reproduces, isolates, and verifies root cause before execution. Apply a sm
 ## Context pointers
 - Read each repo's `./AGENTS.md` for project conventions.
 - Frontend work enters through `frontend-design`; delegated frontend work passes its routed skills to writer/reviewer.
-- Fleet mechanics live in `fleet-plan` and `captain` skills.
+- Fleet mechanics live in `/fleet` and `/captain` prompts.
 - Durable project knowledge enters through `promote-rules` or `promote-skills`; normal sessions write it only after explicit permission. Fleet-specific propagation lives in `~/.pi/rules/fleet-knowledge.md`.

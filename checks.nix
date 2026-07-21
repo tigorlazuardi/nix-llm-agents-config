@@ -62,6 +62,11 @@ in
       == ./config/prompts;
     assert
       default.config.home.file."${default.config.programs.pi-coding-agent.configDir}/prompts".force;
+    assert
+      default.config.home.file."${default.config.programs.pi-coding-agent.configDir}/templates/fleet".source
+      == ./config/templates/fleet;
+    assert
+      default.config.home.file."${default.config.programs.pi-coding-agent.configDir}/templates/fleet".force;
     assert builtins.elem expectedPackage default.config.home.packages;
     assert
       !(builtins.elem disabled.config.programs.pi-coding-agent.package disabled.config.home.packages);
@@ -79,6 +84,10 @@ in
       !(disabled.config.home.file ? "${disabled.config.programs.pi-coding-agent.configDir}/AGENTS.md");
     assert
       !(disabled.config.home.file ? "${disabled.config.programs.pi-coding-agent.configDir}/prompts");
+    assert
+      !(
+        disabled.config.home.file ? "${disabled.config.programs.pi-coding-agent.configDir}/templates/fleet"
+      );
     assert overridden.config.programs.pi-coding-agent.package == overridePackage;
     assert builtins.elem overridePackage overridden.config.home.packages;
     assert settingsOverridden.config.programs.pi-coding-agent.settings.theme == "light";
@@ -97,10 +106,16 @@ in
         touch $out
       '';
 
-  prompt-templates = pkgs.runCommandLocal "pi-prompt-templates" { } ''
-    set -- ${./config/prompts}/*.md
-    test "$#" -eq 3
-    ! grep -RE '^(model|skill|thinking|chain|loop|subagent|deterministic):' ${./config/prompts}
-    touch $out
-  '';
+  prompt-templates =
+    pkgs.runCommandLocal "pi-prompt-templates" { nativeBuildInputs = [ pkgs.nodejs_22 ]; }
+      ''
+        set -- ${./config/prompts}/*.md
+        test "$#" -eq 3
+        ! grep -RE '^(model|skill|thinking|chain|loop|subagent|deterministic):' ${./config/prompts}
+        mkdir -p run/dags/d1
+        cp ${./config/templates/fleet/fleet.template.json} run/fleet.json
+        cp ${./config/templates/fleet/state.template.json} run/dags/d1/state.json
+        node ${./config/templates/fleet/validate.mjs} run
+        touch $out
+      '';
 }
