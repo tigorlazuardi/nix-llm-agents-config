@@ -31,6 +31,49 @@ let
     };
     programs.pi-coding-agent.keybindings."app.tools.expand" = "ctrl+e";
   };
+  resolvedAgent = evaluate {
+    programs.pi-coding-agent = {
+      skills.demo = ./config/agents;
+      extensions.demo = ./config/AGENTS.md;
+      agents.custom = {
+        description = "Resolver check";
+        prompt = "Custom prompt.";
+        tools = {
+          allow = [
+            "read"
+            "custom-tool"
+          ];
+          noBuiltins = true;
+        };
+        skills = [ "demo" ];
+        extensions = [ "demo" ];
+      };
+      plugins.pi-subagents.agents.custom = {
+        async = false;
+        defaultContext = "fork";
+      };
+    };
+  };
+  invalidPlugin = evaluate {
+    programs.pi-coding-agent.plugins.pi-subagents.agents.missing = { };
+  };
+  invalidPluginEvaluation = builtins.tryEval (
+    builtins.deepSeq invalidPlugin.config.home.activationPackage true
+  );
+  expectedOrchestrator = ''
+    ---
+    name: orchestrator
+    description: Deterministic black-box one-shot and fleet state machine
+    tools: read, bash, subagent
+    model: gpt-5.6-terra
+    thinking: medium
+    systemPromptMode: replace
+    inheritProjectContext: true
+    inheritSkills: false
+    defaultContext: fresh
+    async: true
+    ---
+    ${builtins.readFile ./config/agents/orchestrator.md}'';
 
   expectedPackage = nixpkgs-unstable.legacyPackages.x86_64-linux.pi-coding-agent;
 in
@@ -57,6 +100,27 @@ in
     assert
       default.config.home.file."${default.config.programs.pi-coding-agent.configDir}/AGENTS.md".source
       == ./config/AGENTS.md;
+    assert builtins.length (builtins.attrNames default.config.programs.pi-coding-agent.agents) == 10;
+    assert
+      default.config.home.file."${default.config.programs.pi-coding-agent.configDir}/agents/orchestrator.md".text
+      == expectedOrchestrator;
+    assert
+      resolvedAgent.config.home.file."${resolvedAgent.config.programs.pi-coding-agent.configDir}/agents/custom.md".text
+      == ''
+        ---
+        name: custom
+        description: Resolver check
+        tools: custom-tool
+        skills: demo
+        extensions: ${toString ./config/AGENTS.md}
+        defaultContext: fork
+        async: false
+        ---
+        Custom prompt.'';
+    assert
+      resolvedAgent.config.home.file."${resolvedAgent.config.programs.pi-coding-agent.configDir}/skills/demo".source
+      == ./config/agents;
+    assert !invalidPluginEvaluation.success;
     assert
       default.config.home.file."${default.config.programs.pi-coding-agent.configDir}/prompts".source
       == ./config/prompts;
@@ -102,7 +166,7 @@ in
   formatting =
     pkgs.runCommandLocal "pi-home-manager-formatting" { nativeBuildInputs = [ pkgs.nixfmt ]; }
       ''
-        nixfmt --check ${./flake.nix} ${./checks.nix} ${./modules/pi-coding-agent.nix}
+        nixfmt --check ${./flake.nix} ${./checks.nix} ${./modules/pi-coding-agent.nix} ${./modules/pi-coding-agent/agents.nix} ${./modules/pi-coding-agent/default-agents.nix} ${./modules/pi-coding-agent/pi-subagents.nix}
         touch $out
       '';
 
