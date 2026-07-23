@@ -92,7 +92,7 @@ One daily GitHub Actions workflow updates pinned `nixpkgs` and Home Manager toge
 
 ### Runtime secret API
 
-The only custom option is:
+Model API keys use this custom option:
 
 ```nix
 programs.pi-coding-agent.apiKeyFiles.<provider> = <runtime-path>;
@@ -107,6 +107,18 @@ For each key, the module:
 - never reads secret content during evaluation or activation.
 
 The importing configuration provisions and permissions the runtime file. The API does not mention sops-nix, agenix, or another secret manager.
+
+### User-level MCP configuration
+
+<Decision title="Reuse Home Manager's MCP registry and runtime secret wrappers" status="accepted">
+
+`programs.mcp.servers` is the single user-level MCP server registry. Pi exposes only `programs.pi-coding-agent.plugins.pi-mcp-adapter.enableMcpIntegration` and adapter-specific `settings`; it does not define a second server schema.
+
+The integration renders enabled user servers into `${programs.pi-coding-agent.configDir}/mcp.json`. Local stdio servers with `env.<name>.file` use Home Manager's `lib.hm.mcp.wrapEnvFilesCommand`: generated JSON contains an immutable wrapper path, while the wrapper reads the runtime file and exports its content only to the MCP child process. Secret content never enters evaluation, generated JSON, the Nix store, or Pi's environment.
+
+The module owns no repository-level `.mcp.json` or `.pi/mcp.json`. `pi-mcp-adapter` may still discover those files at runtime by upstream behavior. File-backed remote HTTP headers are deferred because Home Manager's native wrapper supports only local stdio environment variables; do not use `builtins.readFile` as a substitute.
+
+</Decision>
 
 ### Plugin registry
 
@@ -124,12 +136,244 @@ Registry v1 deliberately omits package resource filters and `autoload`. Pi suppo
 ### Plugin and local-extension packaging
 
 - One standard npm-oriented Nix builder handles both registry packages and local extensions.
-- Each output contains its own runtime and peer dependency closure, including compatible Pi internal packages needed at runtime.
-- No user-level npm installation, shared extension dependency bundle, or reliance on Pi's Nix-store internals is permitted.
+- Each output contains its third-party runtime dependency closure. Pi core packages remain declared peers, are supplied by Pi's package loader, and must pass an offline load smoke test against the pinned Pi package.
+- No user-level npm installation, shared extension dependency bundle, or ad hoc import from Pi's Nix-store internals is permitted.
 - Each local extension lives in its own directory with adjacent source and dependency manifest/lock metadata.
 - No speculative builder override field exists in registry v1. If audit proves a package needs an exception, add the smallest concrete field then.
 - Built plugin closures are passed as immutable local paths through native Pi `settings.packages`.
 - Local extensions live in the repository rather than `pi-plugins.json`.
+
+### Skill sources and knowledge promotion
+
+<Decision title="Manage Matt Pocock skills as a pinned workflow plugin" status="accepted">
+
+`mattpocock/skills` is an engineering and architecture workflow dependency, not an ordinary Pi plugin. Pin its repository as a non-flake input, select skills through an explicit allowlist, and copy each selected complete skill directory into an immutable target-specific output. Initial target is Pi; future harnesses use adapters rather than changing the source contract.
+
+The plugin interface is limited to `enable`, `source`, `skills`, `targets`, and `overrides.<name>.{prepend,append}`. Overrides modify only the selected skill's `SKILL.md`; support for generic patch files is deferred until a concrete need appears. Unknown skills, overrides for unselected skills, duplicate outputs, and target collisions fail evaluation.
+
+`writing-great-skills` is mandatory because prompt contracts, loop contracts, invocation rules, and future skill authoring depend on it. Both `grill-me` and `grill-with-docs` append this instruction:
+
+```text
+Stop asking questions when we reach a shared understanding and big decision was already made, because relatively smaller decisions would automatically derive.
+```
+
+Initial implementation links only the mandatory complete skill directory from the pinned source. The broader target/override adapter remains deferred until a second target or real override exists.
+
+This source is excluded from the automatic plugin update loop for least surprise. Updates are manual, reviewed, lock-pinned, and accepted only after `nix flake check`.
+
+Matt-adjacent local skills `design-an-interface`, `request-refactor-plan`, and `edit-article` are excluded. They are not part of the promoted upstream set and will not be preserved as separate local skills.
+
+</Decision>
+
+<Decision title="Replace frontend skills with a FASE 1 UI designer" status="accepted">
+
+Do not migrate `frontend-design`, `frontend-guidelines`, `frontend-stack`, `ui-color-theming`, `ui-depth`, `ui-responsive-layout`, `ui-spacing`, or `ux-psychology` as independently discovered skills. Consolidate their durable guidance into one `ui-designer` subagent; conditional concerns such as stack specifics and conversion psychology remain conditional inside its prompt. `excalidraw-diagram` is excluded because diagramming is a different seam.
+
+For substantial UI-bearing work, invoke `ui-designer` in FASE 1 after requirements are understood by `grill-with-docs` or `wayfinder` and before `to-spec`. Its small interface accepts the UI goal, users, active stack, constraints, existing UI evidence, and optional reference screenshots. It produces a self-contained HTML "Figma" preview using native HTML and CSS, plus browser-rendered screenshot evidence at supplied or sensible desktop/mobile viewport defaults. No frontend framework, preview application, or new dependency is added.
+
+The preview lives under the active plan scope and may be revised until the user explicitly accepts it. Only then does `to-spec` run: it references the accepted HTML and screenshots, and translates the design into visual direction, hierarchy, tokens, responsive behavior, accessibility, UI states, and measurable acceptance criteria. `to-tickets` carries those requirements into implementation scope. User-supplied screenshots are design evidence for this loop, not implicit acceptance criteria.
+
+`ui-designer` may inspect the repository and browser, then write only its explicitly supplied plan-artifact paths; it does not edit project source. In FASE 2, an accepted preview becomes immutable evidence for the project-local drain's `ui-reviewer`; interaction and error-feedback behavior is independently checked by `ux-reviewer`.
+
+Small mechanical UI fixes bypass `ui-designer`. Future Open Design MCP support is a separate plugin injected into this agent without changing its input/output contract; it is excluded from the current migration.
+
+</Decision>
+
+<Decision title="Consolidate Fleet skills into prompts and agents" status="superseded">
+
+Superseded by the project-local sequential ticket drain below. Do not migrate `captain`, `fleet-plan`, `fleet-draw`, or `dynamic-workflow`; retire their prompts, agents, assets, package, and workflow routes when the drain is accepted in implementation.
+
+</Decision>
+
+<Decision title="Set up project-local sequential ticket drain agents" status="accepted">
+
+Drain roles are repository-local machine policy, not universal user policy and not shared repository content. Manage one global `/setup-drain-agents` prompt, but have it create machine-local definitions under the trusted repository's canonical `.pi/agents/drain/` scope. Project agents override user and builtin agents by runtime name. The prompt must inspect the repository's instructions, tracker conventions, coding standards, checks, stack, UI evidence paths, and database paths; preview every target and refuse overwrite without explicit approval. Model, effort, tools, private skills, report paths, and conditional routing live in the generated agent frontmatter, avoiding project settings mutation, then are validated through live subagent discovery.
+
+Generated `.pi/agents/drain/` and private drain resources are excluded through the clone-local Git exclude file under the repository's Git common directory rather than committed `.gitignore` entries. This keeps drain mechanics private to each clone/machine and avoids changing shared repository policy. Agent-private UI/UX guidance uses `skillPath` plus explicit `skills`, so it is available only inside the relevant child and never enters the parent/global skill catalog. A new clone or machine runs `/setup-drain-agents` again.
+
+### Machine-local drain contract
+
+Use the existing `huly-loop-contract.json` and `HULY-LOOP-PROMPT.md` from `ms-sbn` as behavioral evidence, not files to copy verbatim. They contain useful validation, exact-state, route, dependency, ordering, URL-template, and idempotency lessons, but are coupled to Huly, GitLab, Telegram, systemd, branch deployment, and one employee identity. The generic setup must not import those private values or its monolithic runtime prompt.
+
+`/setup-drain-agents` also creates `.pi/drain/contract.json` from a managed versioned schema and excludes `.pi/drain/` through the same clone-local Git exclude. The contract is the single runtime source of truth; prompts and agent definitions must not restate provider ids, state names, budgets, report paths, branch targets, or routing rules.
+
+Minimum contract sections:
+
+| Section | Required contents |
+|---|---|
+| `schemaVersion` | Exact supported integer; unknown versions and unknown keys fail closed. |
+| `repository` | Resolved Git common directory identity, remote, base branch, delivery branch pattern, PR target, exact check commands as argument arrays, coding-standards path, report root, and accepted UI evidence roots. |
+| `ticketPool` | One provider per clone; provider kind (`github` or `huly` initially), existing auth/tool reference without credentials, workspace/repository and project ids, ticket URL template, ready filter, dependency relation, deterministic ordering, and claim selector. |
+| `ticketStates` | Provider-native selectors and transitions for `ready`, `claimed`, `review`, `readyForHuman`, and `done`; use immutable ids when the provider exposes them, otherwise exact repository-scoped names. State plus required labels must uniquely identify each phase. |
+| `housekeeping` | Review-ticket selector, completion gate (`merge` or `deployment`), MR provider, exact deployment environment/trigger, terminal pipeline selectors, bounded watch interval/timeout, and failure outcome. |
+| `routing` | Changed-path rules for UI, UX, database, and low-tolerance review. Overlapping rules accumulate reviewers; they never remove a mandatory gate. |
+| `budgets` | `quick: 5` and `deep: 3`; setup may lower them but cannot disable a mandatory review. |
+| `ownership` | Machine/clone marker used for comments and claims, plus explicit `claimBeforeSpawn: true`. No secret values. |
+| `telemetry` | Local audit path, configured OTel endpoint reference if present, and redaction policy reference. |
+
+V1 supports exactly one ticket pool, one PR-delivery policy, and one housekeeping policy per clone. Delivery ends at opened PR; a fresh `housekeeper` reconciles asynchronous MR and build-deployment state on each later drain invocation. Auto-merge remains forbidden. Auto-deploy is allowed only for an environment proven to be development or staging; production, production-like, protected-production, and unknown environments are human-only. Hotfixes never bypass review.
+
+Setup runs a fail-closed Doctor before writing agents:
+
+1. detect supported ticket provider and existing authenticated tool;
+2. let the user select the ticket pool, then resolve project, states, labels, assignee, and dependency relation to stable ids;
+3. verify branches, remote, standards, checks, report/UI paths, and provider read/write capabilities;
+4. reject ambiguous states, overlapping claim ownership, missing placeholders, embedded credentials, shell-string checks, or route combinations that can silently skip review;
+5. preview generated files and contract, write only after approval, then perform a read-only candidate query and live agent-discovery smoke test.
+
+Only `delivery-orchestrator`, `housekeeper`, and the invoking main agent may mutate tracker state, comments, labels, or PR/deployment links; only delivery claims ready tickets. Builders and reviewers receive immutable ticket snapshots and return strict verdict/report pointers. This improves the reference Huly design, where implementers and reviewers also mutate tracker state and duplicate notification obligations.
+
+At each drain start, validate the contract again, hash it into the audit record, acquire the Git-common-directory singleton, query one candidate, re-read eligibility immediately before claim, claim remotely, then spawn delivery. Invalid contract, ambiguous remote ids, lost claim, or provider failure makes zero source changes and stops. If delivery dies after claim, the surviving parent—or the next preflight detecting its stale machine claim—moves the ticket to `readyForHuman` with available report pointers; no branch-based crash resume.
+
+### I/O examples
+
+```text
+Input:
+  /setup-drain-agents
+  provider = github
+  pool = issues in owner/repo with label ready-for-agent
+  claimed = remove ready-for-agent, add delivery-running
+  human = remove delivery-running, add ready-for-human
+
+Output:
+  wrote .pi/drain/contract.json
+  wrote .pi/agents/drain/*.md
+  excluded both paths via <git-common-dir>/info/exclude
+  doctor: PASS; candidates=2; next=owner/repo#42
+```
+
+```text
+Input:
+  /drain with ticketStates.ready = "Todo" where provider returns two matching ids
+
+Output:
+  CONTRACT_INVALID ticketStates.ready: ambiguous display name; pin stable provider id
+  mutations=0; agents_spawned=0
+```
+
+### Drain telemetry
+
+Use Pi/subagent runtime tracing rather than a new daemon or backend. One trace covers a drain invocation; child spans cover housekeeping reconciliation, MR lookup, deployment trigger/watch, provider query/claim, ticket delivery, checks, each review gate, PR creation, and terminal transition. Propagate trace context into subagent prompts and reports. Structured local audit events record contract hash, state transition, verdict, report pointer, duration, and trace id; ticket bodies, comments, diffs, credentials, and report contents are excluded.
+
+Metrics use low-cardinality labels only: provider, gate, verdict, and error kind. Emit ticket outcome and review-round counters, active-delivery gauge, provider-call latency histogram `[10, 50, 100, 250, 500, 1000, 2500, 5000, 10000]` ms, and delivery-duration histogram `[1, 10, 60, 300, 900, 1800, 3600, 7200]` seconds. Ticket/project/user ids stay on sampled spans, never metric labels. Auth tokens and headers are Tier A `<redacted>`; no ticket free text enters telemetry. Setup reuses an existing OTLP configuration when present and otherwise keeps the local audit without installing a collector.
+
+### Drain agent definitions
+
+| Agent | Model / effort | Interface and responsibility |
+|---|---|---|
+| `delivery-orchestrator` | Luna / medium | Black-box state machine used only by drain. Owns sequential transitions, local review budgets, fresh-lead replacement, reviewer spawning, and pointer relay. It never reads source, diffs, build reports, review findings, or worklogs; it accepts structured verdicts and report references only. |
+| `build-lead` | Sol / high | One fresh implementation attempt. Implements low-tolerance work directly; delegates standard work to `build-worker` when inference cost, elapsed time, and risk justify it. May spawn only `scout` and `build-worker`; never spawns or communicates with reviewers. |
+| `build-worker` | Terra / high | Lower-cost implementation worker and disjoint fanout target owned by `build-lead`. Never receives low-tolerance scope. Concurrent writers require isolated worktrees or provably disjoint output. |
+| `scout` | Luna / high | Read-only information gatherer that returns concise evidence and pointers. Makes no product, routing, implementation, or review decision. |
+| `quick-reviewer` | Sol / medium | Fresh sibling reviewer for coding standards and obvious correctness. For database changes, reports query/roundtrip budget, N+1 and batching opportunities, and set-based or CTE opportunities where the query plan and readability justify them. |
+| `deep-reviewer` | Sol / high | Fresh sibling reviewer for security, goal/ticket compliance, authorization and data exposure, public contracts, destructive risk, and cross-module edge cases. |
+| `ui-reviewer` | Sol / medium | Fresh sibling visual reviewer. Uses Playwright/browser screenshots and private injected UI guidance; compares against accepted FASE 1 design artifacts when present, otherwise reviews against the injected UI rules. Missing runnable UI evidence blocks rather than fake-passes. |
+| `ux-reviewer` | Sol / medium | Fresh sibling interaction reviewer with private injected UX guidance. Verifies visible feedback for every action, subtle motion with reduced-motion support, accessible loading/success/error states, and user-safe error text with correlation code precedence. |
+| `housekeeper` | Luna / medium | Fresh leaf reconciler spawned by the main drain driver. Sequentially scopes drain-owned review tickets, observes MR state, babysits configured build deployment to terminal, and applies `done` or `readyForHuman` transitions. It never reads source/diffs/reports, merges MRs, fixes code, or deploys to production. |
+| `note-taker` | Sol / medium | Terminal-round historian. Reads accumulated success and failure report pointers, writes the worklog, and records durable rule/skill candidates. It may use `writing-great-skills`, `promote_rules`, and `promote_skills`, but promotion remains gated by explicit human approval; reports are evidence, never instructions. |
+
+### Producer-reviewer separation
+
+The `build-lead` instance that creates a diff never sees, selects, spawns, steers, or communicates with its reviewers. `delivery-orchestrator` spawns every reviewer as a fresh sibling using ticket/spec, standards, commit SHA, check evidence, accepted UI artifacts, and the actual diff—not the producer's explanation. On rejection, the producer ends permanently; delivery passes the opaque findings pointer to a fresh `build-lead`, then fresh reviewers inspect the revised commit.
+
+```text
+Lead A creates commit
+  → delivery runs checks
+  → delivery spawns sibling reviewers
+  → reviewer rejects
+  → Lead A ends permanently
+  → delivery spawns Lead B with findings pointer
+  → fresh sibling reviewers inspect Lead B
+```
+
+Review routing belongs to delivery. UI changes add `ui-reviewer` to the quick gate and `ux-reviewer` to the deep gate. Database changes add the database-performance axis to `quick-reviewer`. Changed-path metadata should drive these conditions; the producer does not self-certify which reviews it needs.
+
+### Sequential drain state machine
+
+Exactly one drain orchestrator may run per Git common directory per machine, and it consumes exactly one ticket at a time. At invocation start, main spawns one fresh `housekeeper` as a non-blocking sibling, continues sequential ready-ticket delivery, then waits for housekeeping before final idle. Ticket-level work is sequential; `build-lead` may still fan out disjoint work inside that ticket. The tracker is durable workflow state: drain queries one open `ready-for-agent` ticket whose blockers are closed, claims it before spawning, and queries the tracker again only after successful delivery. An opened PR completes delivery for that ticket, so another independent ticket may run; dependent tickets remain unavailable until housekeeping verifies the configured merge/deployment completion gate and moves the blocker ticket to `done`.
+
+Review counters are local to one `delivery-orchestrator` invocation and need no persisted resume state:
+
+- quick gate budget: five rounds, each consisting of the exact check, `quick-reviewer`, and conditional `ui-reviewer`;
+- deep gate budget: three rounds, each consisting of `deep-reviewer` and conditional `ux-reviewer`.
+
+A quick-gate rejection spawns a fresh lead and returns to the quick gate. A deep-gate rejection also spawns a fresh lead and restarts at the quick gate because the revision may break checks, standards, or visual fidelity. The originating lead never receives findings. Every spawn returns a strict verdict and report reference; malformed output fails closed.
+
+```text
+ready-for-agent
+  → claimed
+  → fresh build-lead
+  → quick gate (max 5)
+  → deep gate (max 3)
+  → PR opened
+  → query next independent runnable ticket
+
+quick/deep budget exhausted | blocked | escalated | delivery crash
+  → note-taker
+  → NEEDS_HUMAN + worklog/report pointers
+  → main removes ready-for-agent and marks ready-for-human
+  → issue stays open, so dependents remain blocked
+```
+
+Housekeeping scopes candidates by project/repository, configured review selector, drain ownership marker, and drain-authored PR reference; it never sweeps a shared team column by status alone. Open MR is a no-op. Closed-unmerged, missing/inconsistent evidence, terminal failed/cancelled/timed-out deployment, or trigger failure moves the ticket to `readyForHuman` with evidence pointer. Merged MR completes immediately only when `completionGate` is `merge`. For `deployment`, housekeeper first finds a deployment for the exact merged SHA; green moves ticket to `done`, running is watched to terminal, and absent deployment is triggered only when `autoDeploy` is true, current invocation carries outward-action approval, and provider/CI evidence proves the target is development or staging. It never auto-merges, promotes to production, retries failed code, or duplicates a trigger already identifiable by SHA/marker.
+
+A ticket marked `ready-for-human` is never consumed again. Human re-adding `ready-for-agent` is explicit retry authorization and starts a new delivery with fresh local budgets. Local singleton enforcement does not replace the remote tracker claim if multiple machines may drain the same repository.
+
+The terminal delivery contract is pointer-only:
+
+```text
+VERDICT: PASS|REVISE|BLOCKED|ESCALATE|NEEDS_HUMAN
+TICKET_REF: <issue>
+REPORT_REF: <path>
+PR_REF: <url-or-none>
+ATTRIBUTES: ui_touched=<bool>; db_touched=<bool>; build_attempts=<n>; quick_attempts=<n>; deep_attempts=<n>
+```
+
+For UX errors, choose the first available correlation value in this order: `X-Response-ID`, `X-Request-ID`, `X-Trace-ID`, then the trace id extracted from `traceparent`. If none exists, show only the user-safe message. Never expose a raw system error; an expected shape is `5WQDT: Gagal mengambil data dari server`. Cross-origin responses must expose any readable correlation headers.
+
+</Decision>
+
+<Decision title="Use wizard-generated brownfield drain contracts" status="accepted">
+
+This decision supersedes conflicting contract, resume, counter, ticket-outcome, and queue-stop details in the preceding drain decision.
+
+`/drain-wizard` is the sole setup/edit surface. It inspects current tracker/SCM state, interviews one section at a time, reuses brownfield constructs, offers only missing roles/markers, previews remote additions, and writes machine-local `.pi/drain/contract.json` plus provider/policy-specific `.pi/drain/DRAIN-PROMPT.md`. The generated prompt is SHA-256-bound to its sibling contract. `/drain <path-to-DRAIN-PROMPT.md>` is a thin validated loader. `pi-prompt-template-model` is retained; prompt-authoring commands inject `writing-great-skills` through frontmatter.
+
+Contract roles are semantic rather than canonical tracker names: `ready`, `inProgress`, `review`, `needsHumanReview`, and `done`. Every configured project maps these roles and one authoritative ticket work-contract source to existing statuses, fields, labels, comments, or linked specs. Multiple tracker projects may feed one repository; operator guarantees they belong to one vertical product. Human comments remain task context, while structured drain comments are control data rather than task instructions.
+
+Runtime state is an append-only ledger of schema-valid tracker comments. Events persist owner, contract hash, lane, phase, branch/revision, report/MR/deployment refs, and build/quick/deep/deploy-fix counters. A ledger fork fails to `needsHumanReview`. Human requeue to mapped `ready` starts a new generation and resets counters.
+
+Selection re-queries tracker after every ticket and uses this fixed order:
+
+```text
+oldest resumable inProgress
+  → oldest ticket matching first hotfixPolicies[] entry
+  → oldest ticket matching first policies[] entry
+  → wait for housekeeping, then stop until external ticker
+```
+
+Every ticket outcome—PASS, failure, exhaustion, ambiguous, or L/XL—persists its terminal event and continues to next-best ticket. `build-lead` returns `NEEDS_HUMAN_REVIEW` before implementation for ambiguous or L/XL scope; delivery/main performs tracker mutation. Resume requires same owner, valid ledger, and branch ref, and continues persisted budgets.
+
+`hotfixPolicies[]` is a separate tier, not a kind inside normal `policies[]`. Hotfix uses production source, full review, reviewed cherry-pick to a development/staging validation branch, deployment babysitting, then one upstream MR per ticket to production after green. Normal lanes open one active MR per ticket; a code-caused post-merge deployment failure may open a follow-up fix MR. Fresh `deep-reviewer` classifies deployment failure: infrastructure/ambiguous → `needsHumanReview`; code → fresh lead plus all review gates. Deploy-fix budget is two.
+
+Housekeeper reconciles async MR/deployment state on each external tick, opens the hotfix upstream MR after non-production green, and updates mapped ticket roles idempotently. `autoDeploy` is durable authorization only for an exact development or staging environment/trigger. Production, production-like, protected-production, unknown environments, auto-merge, and staging-to-production promotion remain human actions.
+
+</Decision>
+
+<Decision title="Replace legacy agents knowledge skills with promotion tools" status="accepted">
+
+Do not migrate `agents-load`, `agents-setup`, or `agents-update`. They belong to an older `.agents/` lazy-loading workflow, were not reliably selected by agents, and overlap Pi's native skill discovery plus `pi-rules`.
+
+A local extension will instead register two model-callable tools:
+
+- `promote_rules` writes approved path/tool-scoped knowledge to `.pi/rules/<name>.md` for `pi-rules`.
+- `promote_skills` writes approved intent-triggered knowledge to `.pi/skills/<name>/SKILL.md` for native Pi discovery.
+
+Both tools use `promptSnippet` and explicit `promptGuidelines`, following the proven `rpiv-todo` pattern. Guidance tells the model to offer promotion when durable knowledge appears, reject trivia and one-off implementation details, and call a tool only after explicit user approval. File mutation is project-local, queued/atomic, validated, and must not overwrite an existing file without an explicit update mode.
+
+Do not inject a generic reminder from `agent_end` or `agent_settled`: `agent_end` may precede retries or follow-ups, while a settled-event prompt creates noise and turn-loop risk without evidence that durable knowledge exists.
+
+</Decision>
 
 ### Daily update workflow
 
@@ -189,13 +433,14 @@ Final statuses are filled during implementation audit. Exclusion needs a reason;
 | `settings.json` | Home Manager `settings` | Audit pending |
 | `keybindings.json` | Home Manager `keybindings` | Audit pending |
 | `models.json` | Home Manager `models`; secrets removed | Audit pending |
+| `mcp.json` | User-level `programs.mcp.servers` plus Pi adapter integration | Migrated; stdio file secrets resolve in child wrapper |
 | `AGENTS.md` | Home Manager `context` | Audit pending |
 | `APPEND_SYSTEM.md` | Preserve only if native behavior can be mapped without duplicate ownership | Audit pending |
 | `agents/` | Native-layout repo resource | Audit pending |
 | `extensions/` including `subagent/` | One local package per extension | Audit pending |
 | `prompts/` | Native-layout repo resource | Audit pending |
-| `rules/` | Native-layout repo resource | Audit pending |
-| `skills/` | Native-layout repo resource | Audit pending |
+| `rules/` | Native-layout repo resource | Excluded: both current rules are stale or superseded |
+| `skills/` | Pinned source plugins plus audited local skills | Audit in progress; Matt Pocock contract accepted |
 | `templates/` | Native-layout repo resource | Audit pending |
 | themes, if present | Native-layout repo resource | Audit pending |
 | auth, sessions, cache, logs, trust, crash, goal/state, generated npm/git | Runtime-local | Excluded by policy |
@@ -206,9 +451,9 @@ This inventory mirrors the active `settings.packages` allowlist as of 2026-07-21
 
 | Package source | Installed version/revision | Status |
 |---|---:|---|
-| `npm:pi-mcp-adapter` | `2.11.0` | Active; audit pending |
+| `npm:pi-mcp-adapter` | `2.11.0` | Packaged from npm-published git commit, loaded by immutable local path, and integrated with user-level `programs.mcp` |
 | `npm:pi-rules` | `0.1.1` | Active; audit pending |
-| `npm:pi-prompt-template-model` | `0.10.0` | Active runtime only; excluded from migration (unused) |
+| `npm:pi-prompt-template-model` | `0.10.0` | Packaged from exact upstream commit and loaded by immutable local path; drain authoring prompts inject `writing-great-skills` |
 | `npm:@koltmcbride/pi-loop` | `0.2.0` | Active; audit pending |
 | `npm:pi-searxng` | `1.0.4` | Active; audit pending |
 | `npm:pi-playwright` | `0.1.1` | Active; audit pending |
@@ -267,6 +512,31 @@ Home Manager activation contains repo-pinned pi-coding-agent,
 audited portable configuration, and immutable package paths.
 Runtime auth/session/cache paths remain unmanaged.
 ```
+
+### User-level MCP file secret
+
+Input:
+
+```nix
+programs.mcp.servers.example = {
+  command = "/nix/store/.../bin/example-mcp";
+  env.API_TOKEN.file = "/run/secrets/example-mcp";
+};
+```
+
+Expected generated Pi override:
+
+```json
+{
+  "mcpServers": {
+    "example": {
+      "command": "/nix/store/...-mcp-example-wrapper"
+    }
+  }
+}
+```
+
+The wrapper reads `/run/secrets/example-mcp` at MCP child startup. Secret content is absent from Pi's environment and generated JSON.
 
 ### Runtime API key file
 

@@ -1,0 +1,310 @@
+{
+  "$schema": "./contract.schema.json",
+  "schemaVersion": 1,
+  "verticalProduct": "<vertical-product>",
+  "botMarker": "🤖 Pi Drain: ",
+  "repository": {
+    "gitCommonDir": "<absolute-git-common-dir>",
+    "remote": "<origin-url>",
+    "scm": {
+      "provider": "github",
+      "authRef": "<existing-authenticated-tool>",
+      "projectId": "<scm-project-id>"
+    },
+    "checks": [
+      {
+        "name": "test",
+        "argv": [
+          "<executable>",
+          "<arg>"
+        ]
+      }
+    ],
+    "codingStandards": "CODING_STANDARDS.md",
+    "reportRoot": ".pi/drain/reports",
+    "uiEvidenceRoots": [],
+    "databasePaths": [],
+    "lowTolerancePaths": []
+  },
+  "ticketPool": {
+    "provider": "<github-gitlab-huly-jira-or-other>",
+    "authRef": "<existing-authenticated-tool-or-mcp-server>",
+    "projects": {
+      "<project-id>": {
+        "displayName": "<project-name>",
+        "assigneeId": null,
+        "ticketUrlTemplate": "<ticket-url-containing-{ticket}>",
+        "roles": {
+          "ready": {
+            "selector": {
+              "issueState": null,
+              "status": {
+                "id": "<existing-ready-status-id-or-null>",
+                "name": "<existing-ready-status-name-or-null>"
+              },
+              "labelsAll": [],
+              "labelsNone": []
+            },
+            "transition": null
+          },
+          "inProgress": {
+            "selector": {
+              "issueState": null,
+              "status": {
+                "id": "<existing-in-progress-status-id-or-null>",
+                "name": "<existing-in-progress-status-name-or-null>"
+              },
+              "labelsAll": [
+                "<existing-or-created-drain-running-marker>"
+              ],
+              "labelsNone": []
+            },
+            "transition": {
+              "issueState": null,
+              "status": {
+                "id": "<existing-in-progress-status-id-or-null>",
+                "name": "<existing-in-progress-status-name-or-null>"
+              },
+              "addLabels": [
+                "<existing-or-created-drain-running-marker>"
+              ],
+              "removeLabels": []
+            }
+          },
+          "review": {
+            "selector": {
+              "issueState": null,
+              "status": {
+                "id": "<existing-review-status-id-or-null>",
+                "name": "<existing-review-status-name-or-null>"
+              },
+              "labelsAll": [],
+              "labelsNone": []
+            },
+            "transition": {
+              "issueState": null,
+              "status": {
+                "id": "<existing-review-status-id-or-null>",
+                "name": "<existing-review-status-name-or-null>"
+              },
+              "addLabels": [],
+              "removeLabels": [
+                "<drain-running-marker>"
+              ]
+            }
+          },
+          "needsHumanReview": {
+            "selector": {
+              "issueState": null,
+              "status": {
+                "id": "<existing-human-review-status-id-or-null>",
+                "name": "<existing-human-review-status-name-or-null>"
+              },
+              "labelsAll": [],
+              "labelsNone": []
+            },
+            "transition": {
+              "issueState": null,
+              "status": {
+                "id": "<existing-human-review-status-id-or-null>",
+                "name": "<existing-human-review-status-name-or-null>"
+              },
+              "addLabels": [],
+              "removeLabels": [
+                "<drain-running-marker>"
+              ]
+            }
+          },
+          "done": {
+            "selector": {
+              "issueState": null,
+              "status": {
+                "id": "<existing-done-status-id-or-null>",
+                "name": "<existing-done-status-name-or-null>"
+              },
+              "labelsAll": [],
+              "labelsNone": []
+            },
+            "transition": {
+              "issueState": null,
+              "status": {
+                "id": "<existing-done-status-id-or-null>",
+                "name": "<existing-done-status-name-or-null>"
+              },
+              "addLabels": [],
+              "removeLabels": [
+                "<drain-running-marker>"
+              ]
+            }
+          }
+        },
+        "workContract": {
+          "kind": "latest-marked-comment",
+          "marker": "## Agent Brief",
+          "fieldId": null,
+          "fallback": null,
+          "includeHumanCommentsAsContext": true,
+          "excludeDrainStateEventsFromTaskInstructions": true
+        }
+      }
+    },
+    "stateStore": {
+      "kind": "append-only-comments",
+      "marker": "pi-drain-state:v1",
+      "eventSchemaVersion": 1
+    }
+  },
+  "runtime": {
+    "ticker": "external",
+    "selfSchedule": false,
+    "singleton": "git-common-dir-per-machine"
+  },
+  "triage": {
+    "order": [
+      "inProgress",
+      "hotfixPolicies",
+      "policies"
+    ],
+    "withinTier": [
+      "createdAt:asc"
+    ],
+    "policyResolution": "first-match",
+    "blockedBy": {
+      "relation": "<provider-native-blocking-relation>",
+      "satisfiedRole": "done"
+    },
+    "resume": {
+      "requiresValidStateEvent": true,
+      "requiresSameOwner": true,
+      "requiresBranchRef": true
+    }
+  },
+  "hotfixPolicies": [
+    {
+      "name": "production-hotfix",
+      "projects": [
+        "<project-id>"
+      ],
+      "matcher": {
+        "labelsAll": [],
+        "labelsAny": [
+          "hotfix"
+        ],
+        "labelsNone": [],
+        "labelContainsAll": [],
+        "commentContainsAll": [],
+        "commentContainsNone": []
+      },
+      "sourceBranch": "<production-branch>",
+      "deliveryBranchPattern": "hotfix/{ticket}",
+      "validationLanding": {
+        "mode": "cherry-pick",
+        "branch": "<development-or-staging-branch>"
+      },
+      "deployment": {
+        "environment": {
+          "id": "<non-production-environment-id>",
+          "name": "<development-or-staging>",
+          "class": "development"
+        },
+        "autoDeploy": false,
+        "trigger": {
+          "kind": "none"
+        },
+        "pipeline": {
+          "successStates": [
+            "success"
+          ],
+          "failureStates": [
+            "failed",
+            "cancelled",
+            "timed_out"
+          ],
+          "pollSeconds": 30,
+          "watchWindowSeconds": 3600
+        }
+      },
+      "upstreamMergeRequest": {
+        "openGate": "deployment-green",
+        "targetBranch": "<production-branch>",
+        "oneActivePerTicket": true,
+        "autoMerge": false
+      },
+      "completionGate": "merge",
+      "deployFixBudget": 2
+    }
+  ],
+  "policies": [
+    {
+      "name": "standard",
+      "projects": [
+        "<project-id>"
+      ],
+      "matcher": {
+        "labelsAll": [],
+        "labelsAny": [],
+        "labelsNone": [
+          "hotfix"
+        ],
+        "labelContainsAll": [],
+        "commentContainsAll": [],
+        "commentContainsNone": []
+      },
+      "sourceBranch": "<base-branch>",
+      "deliveryBranchPattern": "drain/{ticket}",
+      "mergeRequest": {
+        "targetBranch": "<target-branch>",
+        "oneActivePerTicket": true,
+        "autoMerge": false,
+        "deployFixMrPattern": "drain/{ticket}/deploy-fix-{attempt}"
+      },
+      "deployment": null,
+      "completionGate": "merge",
+      "deployFixBudget": 2
+    }
+  ],
+  "review": {
+    "quickBudget": 5,
+    "deepBudget": 3,
+    "largeOrAmbiguousOutcome": "needsHumanReview",
+    "deploymentFailureClassifier": "deep-reviewer",
+    "deploymentFailureOutcomes": {
+      "infrastructure": "needsHumanReview",
+      "ambiguous": "needsHumanReview",
+      "code": "fresh-build-lead"
+    },
+    "restartAllGatesAfterFix": true
+  },
+  "routing": {
+    "uiPaths": [],
+    "databasePaths": [],
+    "lowTolerancePaths": [],
+    "uiEvidenceRequiredWhenUiTouched": true
+  },
+  "ownership": {
+    "marker": "pi-drain:<machine>:<clone-hash>",
+    "claimBeforeSpawn": true,
+    "claimConflict": "needsHumanReview"
+  },
+  "housekeeping": {
+    "enabled": true,
+    "oldestFirst": true,
+    "maxTicketsPerRun": 100,
+    "autoDeployAllowedEnvironmentClasses": [
+      "development",
+      "staging"
+    ],
+    "autoDeployForbiddenEnvironmentClasses": [
+      "production",
+      "production-like",
+      "unknown"
+    ],
+    "autoMerge": false,
+    "failureOutcome": "needsHumanReview"
+  },
+  "telemetry": {
+    "auditPath": ".pi/drain/audit.jsonl",
+    "otlpEndpointEnv": "OTEL_EXPORTER_OTLP_ENDPOINT",
+    "redactionPolicy": "no-ticket-content"
+  }
+}

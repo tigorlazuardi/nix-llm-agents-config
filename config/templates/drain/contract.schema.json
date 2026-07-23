@@ -1,0 +1,571 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://quintinshaw.dev/schemas/pi-drain-contract-v1.json",
+  "title": "Pi drain contract",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "$schema",
+    "schemaVersion",
+    "verticalProduct",
+    "botMarker",
+    "repository",
+    "ticketPool",
+    "runtime",
+    "triage",
+    "hotfixPolicies",
+    "policies",
+    "review",
+    "routing",
+    "ownership",
+    "housekeeping",
+    "telemetry"
+  ],
+  "properties": {
+    "$schema": { "const": "./contract.schema.json" },
+    "schemaVersion": { "const": 1 },
+    "verticalProduct": { "$ref": "#/$defs/nonEmpty" },
+    "botMarker": { "$ref": "#/$defs/nonEmpty" },
+    "repository": { "$ref": "#/$defs/repository" },
+    "ticketPool": { "$ref": "#/$defs/ticketPool" },
+    "runtime": { "$ref": "#/$defs/runtime" },
+    "triage": { "$ref": "#/$defs/triage" },
+    "hotfixPolicies": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/hotfixPolicy" }
+    },
+    "policies": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/policy" }
+    },
+    "review": { "$ref": "#/$defs/review" },
+    "routing": { "$ref": "#/$defs/routing" },
+    "ownership": { "$ref": "#/$defs/ownership" },
+    "housekeeping": { "$ref": "#/$defs/housekeeping" },
+    "telemetry": { "$ref": "#/$defs/telemetry" }
+  },
+  "$defs": {
+    "nonEmpty": {
+      "type": "string",
+      "minLength": 1
+    },
+    "nullableString": {
+      "type": ["string", "null"]
+    },
+    "strings": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/nonEmpty" }
+    },
+    "repository": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "gitCommonDir",
+        "remote",
+        "scm",
+        "checks",
+        "codingStandards",
+        "reportRoot",
+        "uiEvidenceRoots",
+        "databasePaths",
+        "lowTolerancePaths"
+      ],
+      "properties": {
+        "gitCommonDir": { "$ref": "#/$defs/nonEmpty" },
+        "remote": { "$ref": "#/$defs/nonEmpty" },
+        "scm": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["provider", "authRef", "projectId"],
+          "properties": {
+            "provider": { "enum": ["github", "gitlab"] },
+            "authRef": { "$ref": "#/$defs/nonEmpty" },
+            "projectId": { "$ref": "#/$defs/nonEmpty" }
+          }
+        },
+        "checks": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "argv"],
+            "properties": {
+              "name": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" },
+              "argv": {
+                "type": "array",
+                "minItems": 1,
+                "items": { "$ref": "#/$defs/nonEmpty" }
+              }
+            }
+          }
+        },
+        "codingStandards": { "$ref": "#/$defs/nonEmpty" },
+        "reportRoot": { "$ref": "#/$defs/nonEmpty" },
+        "uiEvidenceRoots": { "$ref": "#/$defs/strings" },
+        "databasePaths": { "$ref": "#/$defs/strings" },
+        "lowTolerancePaths": { "$ref": "#/$defs/strings" }
+      }
+    },
+    "statusRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name"],
+      "properties": {
+        "id": { "$ref": "#/$defs/nullableString" },
+        "name": { "$ref": "#/$defs/nullableString" }
+      }
+    },
+    "selector": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["issueState", "status", "labelsAll", "labelsNone"],
+      "properties": {
+        "issueState": { "$ref": "#/$defs/nullableString" },
+        "status": { "$ref": "#/$defs/statusRef" },
+        "labelsAll": { "$ref": "#/$defs/strings" },
+        "labelsNone": { "$ref": "#/$defs/strings" }
+      },
+      "anyOf": [
+        { "properties": { "issueState": { "type": "string", "minLength": 1 } } },
+        { "properties": { "status": { "properties": { "id": { "type": "string", "minLength": 1 } } } } },
+        { "properties": { "labelsAll": { "minItems": 1 } } }
+      ]
+    },
+    "transition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["issueState", "status", "addLabels", "removeLabels"],
+      "properties": {
+        "issueState": { "$ref": "#/$defs/nullableString" },
+        "status": { "$ref": "#/$defs/statusRef" },
+        "addLabels": { "$ref": "#/$defs/strings" },
+        "removeLabels": { "$ref": "#/$defs/strings" }
+      },
+      "anyOf": [
+        { "properties": { "issueState": { "type": "string", "minLength": 1 } } },
+        { "properties": { "status": { "properties": { "id": { "type": "string", "minLength": 1 } } } } },
+        { "properties": { "addLabels": { "minItems": 1 } } },
+        { "properties": { "removeLabels": { "minItems": 1 } } }
+      ]
+    },
+    "role": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["selector", "transition"],
+      "properties": {
+        "selector": { "$ref": "#/$defs/selector" },
+        "transition": {
+          "oneOf": [
+            { "$ref": "#/$defs/transition" },
+            { "type": "null" }
+          ]
+        }
+      }
+    },
+    "roles": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ready", "inProgress", "review", "needsHumanReview", "done"],
+      "properties": {
+        "ready": { "$ref": "#/$defs/role" },
+        "inProgress": { "$ref": "#/$defs/role" },
+        "review": { "$ref": "#/$defs/role" },
+        "needsHumanReview": { "$ref": "#/$defs/role" },
+        "done": { "$ref": "#/$defs/role" }
+      }
+    },
+    "workContract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "marker",
+        "fieldId",
+        "fallback",
+        "includeHumanCommentsAsContext",
+        "excludeDrainStateEventsFromTaskInstructions"
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "agent-brief-comment",
+            "ticket-body",
+            "custom-field",
+            "linked-spec",
+            "latest-marked-comment"
+          ]
+        },
+        "marker": { "$ref": "#/$defs/nullableString" },
+        "fieldId": { "$ref": "#/$defs/nullableString" },
+        "fallback": { "$ref": "#/$defs/nullableString" },
+        "includeHumanCommentsAsContext": { "const": true },
+        "excludeDrainStateEventsFromTaskInstructions": { "const": true }
+      }
+    },
+    "project": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["displayName", "assigneeId", "ticketUrlTemplate", "roles", "workContract"],
+      "properties": {
+        "displayName": { "$ref": "#/$defs/nonEmpty" },
+        "assigneeId": { "$ref": "#/$defs/nullableString" },
+        "ticketUrlTemplate": { "type": "string", "pattern": "\\{ticket\\}" },
+        "roles": { "$ref": "#/$defs/roles" },
+        "workContract": { "$ref": "#/$defs/workContract" }
+      }
+    },
+    "ticketPool": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider", "authRef", "projects", "stateStore"],
+      "properties": {
+        "provider": { "$ref": "#/$defs/nonEmpty" },
+        "authRef": { "$ref": "#/$defs/nonEmpty" },
+        "projects": {
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": { "$ref": "#/$defs/project" }
+        },
+        "stateStore": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "marker", "eventSchemaVersion"],
+          "properties": {
+            "kind": { "const": "append-only-comments" },
+            "marker": { "const": "pi-drain-state:v1" },
+            "eventSchemaVersion": { "const": 1 }
+          }
+        }
+      }
+    },
+    "runtime": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ticker", "selfSchedule", "singleton"],
+      "properties": {
+        "ticker": { "const": "external" },
+        "selfSchedule": { "const": false },
+        "singleton": { "const": "git-common-dir-per-machine" }
+      }
+    },
+    "triage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["order", "withinTier", "policyResolution", "blockedBy", "resume"],
+      "properties": {
+        "order": { "const": ["inProgress", "hotfixPolicies", "policies"] },
+        "withinTier": { "const": ["createdAt:asc"] },
+        "policyResolution": { "const": "first-match" },
+        "blockedBy": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["relation", "satisfiedRole"],
+          "properties": {
+            "relation": { "$ref": "#/$defs/nonEmpty" },
+            "satisfiedRole": { "const": "done" }
+          }
+        },
+        "resume": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["requiresValidStateEvent", "requiresSameOwner", "requiresBranchRef"],
+          "properties": {
+            "requiresValidStateEvent": { "const": true },
+            "requiresSameOwner": { "const": true },
+            "requiresBranchRef": { "const": true }
+          }
+        }
+      }
+    },
+    "matcher": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "labelsAll",
+        "labelsAny",
+        "labelsNone",
+        "labelContainsAll",
+        "commentContainsAll",
+        "commentContainsNone"
+      ],
+      "properties": {
+        "labelsAll": { "$ref": "#/$defs/strings" },
+        "labelsAny": { "$ref": "#/$defs/strings" },
+        "labelsNone": { "$ref": "#/$defs/strings" },
+        "labelContainsAll": { "$ref": "#/$defs/strings" },
+        "commentContainsAll": { "$ref": "#/$defs/strings" },
+        "commentContainsNone": { "$ref": "#/$defs/strings" }
+      }
+    },
+    "environment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "class"],
+      "properties": {
+        "id": { "$ref": "#/$defs/nonEmpty" },
+        "name": { "$ref": "#/$defs/nonEmpty" },
+        "class": {
+          "enum": ["development", "staging", "production", "production-like", "unknown"]
+        }
+      }
+    },
+    "trigger": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind"],
+          "properties": { "kind": { "const": "none" } }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "workflowRef", "ref"],
+          "properties": {
+            "kind": { "const": "github-workflow" },
+            "workflowRef": { "$ref": "#/$defs/nonEmpty" },
+            "ref": { "$ref": "#/$defs/nonEmpty" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "ref"],
+          "properties": {
+            "kind": { "const": "gitlab-pipeline" },
+            "ref": { "$ref": "#/$defs/nonEmpty" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "ref", "tagPattern"],
+          "properties": {
+            "kind": { "const": "git-tag" },
+            "ref": { "$ref": "#/$defs/nonEmpty" },
+            "tagPattern": { "$ref": "#/$defs/nonEmpty" }
+          }
+        }
+      ]
+    },
+    "pipeline": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["successStates", "failureStates", "pollSeconds", "watchWindowSeconds"],
+      "properties": {
+        "successStates": { "$ref": "#/$defs/strings" },
+        "failureStates": { "$ref": "#/$defs/strings" },
+        "pollSeconds": { "type": "integer", "minimum": 30, "maximum": 600 },
+        "watchWindowSeconds": { "type": "integer", "minimum": 60, "maximum": 86400 }
+      }
+    },
+    "deployment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["environment", "autoDeploy", "trigger", "pipeline"],
+      "properties": {
+        "environment": { "$ref": "#/$defs/environment" },
+        "autoDeploy": { "type": "boolean" },
+        "trigger": { "$ref": "#/$defs/trigger" },
+        "pipeline": { "$ref": "#/$defs/pipeline" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "autoDeploy": { "const": true } } },
+          "then": {
+            "properties": {
+              "environment": {
+                "properties": { "class": { "enum": ["development", "staging"] } }
+              },
+              "trigger": {
+                "not": {
+                  "type": "object",
+                  "properties": { "kind": { "const": "none" } },
+                  "required": ["kind"]
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "hotfixPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "projects",
+        "matcher",
+        "sourceBranch",
+        "deliveryBranchPattern",
+        "validationLanding",
+        "deployment",
+        "upstreamMergeRequest",
+        "completionGate",
+        "deployFixBudget"
+      ],
+      "properties": {
+        "name": { "$ref": "#/$defs/nonEmpty" },
+        "projects": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "#/$defs/nonEmpty" } },
+        "matcher": { "$ref": "#/$defs/matcher" },
+        "sourceBranch": { "$ref": "#/$defs/nonEmpty" },
+        "deliveryBranchPattern": { "type": "string", "pattern": "\\{ticket\\}" },
+        "validationLanding": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["mode", "branch"],
+          "properties": {
+            "mode": { "const": "cherry-pick" },
+            "branch": { "$ref": "#/$defs/nonEmpty" }
+          }
+        },
+        "deployment": { "$ref": "#/$defs/deployment" },
+        "upstreamMergeRequest": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["openGate", "targetBranch", "oneActivePerTicket", "autoMerge"],
+          "properties": {
+            "openGate": { "const": "deployment-green" },
+            "targetBranch": { "$ref": "#/$defs/nonEmpty" },
+            "oneActivePerTicket": { "const": true },
+            "autoMerge": { "const": false }
+          }
+        },
+        "completionGate": { "const": "merge" },
+        "deployFixBudget": { "const": 2 }
+      }
+    },
+    "policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "projects",
+        "matcher",
+        "sourceBranch",
+        "deliveryBranchPattern",
+        "mergeRequest",
+        "deployment",
+        "completionGate",
+        "deployFixBudget"
+      ],
+      "properties": {
+        "name": { "$ref": "#/$defs/nonEmpty" },
+        "projects": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "#/$defs/nonEmpty" } },
+        "matcher": { "$ref": "#/$defs/matcher" },
+        "sourceBranch": { "$ref": "#/$defs/nonEmpty" },
+        "deliveryBranchPattern": { "type": "string", "pattern": "\\{ticket\\}" },
+        "mergeRequest": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["targetBranch", "oneActivePerTicket", "autoMerge", "deployFixMrPattern"],
+          "properties": {
+            "targetBranch": { "$ref": "#/$defs/nonEmpty" },
+            "oneActivePerTicket": { "const": true },
+            "autoMerge": { "const": false },
+            "deployFixMrPattern": { "type": "string", "pattern": "\\{ticket\\}.*\\{attempt\\}" }
+          }
+        },
+        "deployment": {
+          "oneOf": [
+            { "$ref": "#/$defs/deployment" },
+            { "type": "null" }
+          ]
+        },
+        "completionGate": { "enum": ["merge", "deployment"] },
+        "deployFixBudget": { "const": 2 }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "completionGate": { "const": "deployment" } } },
+          "then": { "properties": { "deployment": { "$ref": "#/$defs/deployment" } } }
+        }
+      ]
+    },
+    "review": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "quickBudget",
+        "deepBudget",
+        "largeOrAmbiguousOutcome",
+        "deploymentFailureClassifier",
+        "deploymentFailureOutcomes",
+        "restartAllGatesAfterFix"
+      ],
+      "properties": {
+        "quickBudget": { "const": 5 },
+        "deepBudget": { "const": 3 },
+        "largeOrAmbiguousOutcome": { "const": "needsHumanReview" },
+        "deploymentFailureClassifier": { "const": "deep-reviewer" },
+        "deploymentFailureOutcomes": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["infrastructure", "ambiguous", "code"],
+          "properties": {
+            "infrastructure": { "const": "needsHumanReview" },
+            "ambiguous": { "const": "needsHumanReview" },
+            "code": { "const": "fresh-build-lead" }
+          }
+        },
+        "restartAllGatesAfterFix": { "const": true }
+      }
+    },
+    "routing": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["uiPaths", "databasePaths", "lowTolerancePaths", "uiEvidenceRequiredWhenUiTouched"],
+      "properties": {
+        "uiPaths": { "$ref": "#/$defs/strings" },
+        "databasePaths": { "$ref": "#/$defs/strings" },
+        "lowTolerancePaths": { "$ref": "#/$defs/strings" },
+        "uiEvidenceRequiredWhenUiTouched": { "type": "boolean" }
+      }
+    },
+    "ownership": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["marker", "claimBeforeSpawn", "claimConflict"],
+      "properties": {
+        "marker": { "$ref": "#/$defs/nonEmpty" },
+        "claimBeforeSpawn": { "const": true },
+        "claimConflict": { "const": "needsHumanReview" }
+      }
+    },
+    "housekeeping": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "enabled",
+        "oldestFirst",
+        "maxTicketsPerRun",
+        "autoDeployAllowedEnvironmentClasses",
+        "autoDeployForbiddenEnvironmentClasses",
+        "autoMerge",
+        "failureOutcome"
+      ],
+      "properties": {
+        "enabled": { "const": true },
+        "oldestFirst": { "const": true },
+        "maxTicketsPerRun": { "type": "integer", "minimum": 1, "maximum": 1000 },
+        "autoDeployAllowedEnvironmentClasses": { "const": ["development", "staging"] },
+        "autoDeployForbiddenEnvironmentClasses": { "const": ["production", "production-like", "unknown"] },
+        "autoMerge": { "const": false },
+        "failureOutcome": { "const": "needsHumanReview" }
+      }
+    },
+    "telemetry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["auditPath", "otlpEndpointEnv", "redactionPolicy"],
+      "properties": {
+        "auditPath": { "$ref": "#/$defs/nonEmpty" },
+        "otlpEndpointEnv": { "const": "OTEL_EXPORTER_OTLP_ENDPOINT" },
+        "redactionPolicy": { "const": "no-ticket-content" }
+      }
+    }
+  }
+}

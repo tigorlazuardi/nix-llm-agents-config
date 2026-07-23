@@ -3,6 +3,10 @@
 
   inputs = {
     nixpkgs-unstable.url = "github:NixOS/nixpkgs/nixos-unstable";
+    mattpocock-skills = {
+      url = "github:mattpocock/skills";
+      flake = false;
+    };
 
     home-manager = {
       url = "github:nix-community/home-manager";
@@ -11,11 +15,18 @@
   };
 
   outputs =
-    { nixpkgs-unstable, home-manager, ... }:
+    {
+      nixpkgs-unstable,
+      home-manager,
+      mattpocock-skills,
+      ...
+    }:
     let
       system = "x86_64-linux";
       pkgs = nixpkgs-unstable.legacyPackages.${system};
-      piModule = import ./modules/pi-coding-agent.nix { inherit nixpkgs-unstable; };
+      piModule = import ./modules/pi-coding-agent.nix {
+        inherit mattpocock-skills nixpkgs-unstable;
+      };
     in
     {
       homeManagerModules.default = piModule;

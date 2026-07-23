@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://quintinshaw.dev/schemas/pi-drain-state-event-v1.json",
+  "title": "Pi drain append-only ticket event",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "eventId",
+    "previousEventId",
+    "sequence",
+    "generation",
+    "ticket",
+    "owner",
+    "contractHash",
+    "policyTier",
+    "policy",
+    "phase",
+    "branch",
+    "revision",
+    "buildAttempts",
+    "quickAttempts",
+    "deepAttempts",
+    "deployFixAttempts",
+    "mrRef",
+    "deploymentRef",
+    "reportRefs",
+    "outcome",
+    "createdAt"
+  ],
+  "properties": {
+    "version": { "const": 1 },
+    "eventId": { "type": "string", "minLength": 8 },
+    "previousEventId": { "type": ["string", "null"] },
+    "sequence": { "type": "integer", "minimum": 0 },
+    "generation": { "type": "integer", "minimum": 1 },
+    "ticket": { "type": "string", "minLength": 1 },
+    "owner": { "type": "string", "pattern": "^pi-drain:" },
+    "contractHash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "policyTier": { "enum": ["hotfixPolicies", "policies"] },
+    "policy": { "type": "string", "minLength": 1 },
+    "phase": {
+      "enum": [
+        "claimed",
+        "build",
+        "quick-review",
+        "deep-review",
+        "validation-landing",
+        "deploying",
+        "review",
+        "needs-human-review",
+        "done"
+      ]
+    },
+    "branch": { "type": ["string", "null"] },
+    "revision": { "type": ["string", "null"] },
+    "buildAttempts": { "type": "integer", "minimum": 0 },
+    "quickAttempts": { "type": "integer", "minimum": 0, "maximum": 5 },
+    "deepAttempts": { "type": "integer", "minimum": 0, "maximum": 3 },
+    "deployFixAttempts": { "type": "integer", "minimum": 0, "maximum": 2 },
+    "mrRef": { "type": ["string", "null"] },
+    "deploymentRef": { "type": ["string", "null"] },
+    "reportRefs": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "outcome": {
+      "enum": [null, "review", "needsHumanReview", "done"]
+    },
+    "createdAt": { "type": "string", "format": "date-time" }
+  }
+}
