@@ -32,6 +32,37 @@ let
     };
     programs.pi-coding-agent.keybindings."app.tools.expand" = "ctrl+e";
   };
+  optimizerConfigured = evaluate {
+    programs.pi-coding-agent.plugins.pix-optimizer.settings = {
+      caveman = "micro";
+      rtk = true;
+      toon = false;
+      ponytail = "ultra";
+    };
+  };
+  expectedOptimizerStateFile = (pkgs.formats.json { }).generate "pix-optimizer.json" {
+    caveman = "micro";
+    rtk = "on";
+    toon = "off";
+    ponytail = "ultra";
+  };
+  optimizerActivation = optimizerConfigured.config.home.activation.piCodingAgentPixOptimizer.data;
+  vccConfigured = evaluate {
+    programs.pi-coding-agent.plugins.pi-vcc.settings = {
+      overrideDefaultCompaction = false;
+      smartKeepTail = false;
+      continueAfterThresholdCompact = false;
+      debug = true;
+    };
+  };
+  expectedVccConfigFile = (pkgs.formats.json { }).generate "pi-vcc-config.json" {
+    overrideDefaultCompaction = false;
+    smartKeepTail = false;
+    continueAfterThresholdCompact = false;
+    debug = true;
+  };
+  vccConfigSource =
+    vccConfigured.config.home.file."${vccConfigured.config.programs.pi-coding-agent.configDir}/pi-vcc-config.json".source;
   secretWrappedMcp = evaluate {
     programs.mcp.servers.secret = {
       command = "/bin/secret-mcp";
@@ -91,6 +122,10 @@ let
     ${builtins.readFile ./config/agents/orchestrator.md}'';
 
   expectedPackage = nixpkgs-unstable.legacyPackages.x86_64-linux.pi-coding-agent;
+  expectedDietLsp =
+    nixpkgs-unstable.legacyPackages.x86_64-linux.callPackage ./packages/pi-diet-lsp.nix
+      { };
+  expectedDietLspPath = "${expectedDietLsp}";
   expectedMcpAdapter =
     nixpkgs-unstable.legacyPackages.x86_64-linux.callPackage ./packages/pi-mcp-adapter.nix
       { };
@@ -99,10 +134,24 @@ let
     nixpkgs-unstable.legacyPackages.x86_64-linux.callPackage ./packages/pi-playwright.nix
       { };
   expectedPlaywrightPath = "${expectedPlaywright}/lib/node_modules/pi-playwright";
+  expectedPixOptimizer =
+    nixpkgs-unstable.legacyPackages.x86_64-linux.callPackage ./packages/pix-optimizer.nix
+      { };
+  expectedPixOptimizerPath = "${expectedPixOptimizer}/lib/node_modules/@xynogen/pix-optimizer";
+  expectedPiVcc = nixpkgs-unstable.legacyPackages.x86_64-linux.callPackage ./packages/pi-vcc.nix { };
+  expectedPiVccPath = "${expectedPiVcc}";
   expectedPromptTemplateModel =
     nixpkgs-unstable.legacyPackages.x86_64-linux.callPackage ./packages/pi-prompt-template-model.nix
       { };
   expectedPromptTemplateModelPath = "${expectedPromptTemplateModel}/lib/node_modules/pi-prompt-template-model";
+  expectedRpivTodo =
+    nixpkgs-unstable.legacyPackages.x86_64-linux.callPackage ./packages/rpiv-todo.nix
+      { };
+  expectedRpivTodoPath = "${expectedRpivTodo}/lib/node_modules/@juicesharp/rpiv-todo";
+  expectedRules =
+    nixpkgs-unstable.legacyPackages.x86_64-linux.callPackage ./packages/pi-rules.nix
+      { };
+  expectedRulesPath = "${expectedRules}/lib/node_modules/@tigorhutasuhut/pi-rules";
   expectedSearxng =
     nixpkgs-unstable.legacyPackages.x86_64-linux.callPackage ./packages/pi-searxng.nix
       { };
@@ -111,16 +160,26 @@ let
     nixpkgs-unstable.legacyPackages.x86_64-linux.callPackage ./packages/pi-subagents.nix
       { };
   expectedSubagentsPath = "${expectedSubagents}/lib/node_modules/pi-subagents";
+  expectedSupiContext =
+    nixpkgs-unstable.legacyPackages.x86_64-linux.callPackage ./packages/supi-context.nix
+      { };
+  expectedSupiContextPath = "${expectedSupiContext}/lib/node_modules/@mrclrchtr/supi-context";
   expectedWritingGreatSkills = default.config.programs.pi-coding-agent.skills.writing-great-skills;
   secretWrappedMcpConfig =
     secretWrappedMcp.config.home.file."${secretWrappedMcp.config.programs.pi-coding-agent.configDir}/mcp.json".source;
 in
 {
+  diet-lsp = expectedDietLsp;
   mcp-adapter = expectedMcpAdapter;
   playwright = expectedPlaywright;
+  pix-optimizer = expectedPixOptimizer;
+  pi-vcc = expectedPiVcc;
   prompt-template-model = expectedPromptTemplateModel;
+  rpiv-todo = expectedRpivTodo;
+  rules = expectedRules;
   searxng = expectedSearxng;
   subagents = expectedSubagents;
+  supi-context = expectedSupiContext;
 
   module-evaluation =
     assert default.config.programs.pi-coding-agent.enable;
@@ -134,11 +193,17 @@ in
         hideThinkingBlock = false;
         showCacheMissNotices = false;
         packages = [
+          expectedDietLspPath
           expectedMcpAdapterPath
           expectedPlaywrightPath
+          expectedPixOptimizerPath
+          expectedPiVccPath
           expectedPromptTemplateModelPath
+          expectedRpivTodoPath
+          expectedRulesPath
           expectedSearxngPath
           expectedSubagentsPath
+          expectedSupiContextPath
         ];
       };
     assert
@@ -149,6 +214,42 @@ in
     assert default.config.programs.pi-coding-agent.models == { };
     assert default.config.programs.pi-coding-agent.context == ./config/AGENTS.md;
     assert default.config.programs.pi-coding-agent.plugins.pi-mcp-adapter.enableMcpIntegration;
+    assert
+      default.config.programs.pi-coding-agent.plugins.pix-optimizer.settings == {
+        caveman = "ultra";
+        rtk = false;
+        toon = true;
+        ponytail = "full";
+      };
+    assert
+      optimizerConfigured.config.programs.pi-coding-agent.plugins.pix-optimizer.settings == {
+        caveman = "micro";
+        rtk = true;
+        toon = false;
+        ponytail = "ultra";
+      };
+    assert pkgs.lib.hasInfix (builtins.unsafeDiscardStringContext "${expectedOptimizerStateFile}") (
+      builtins.unsafeDiscardStringContext optimizerActivation
+    );
+    assert pkgs.lib.hasInfix "/home/test/.pi/agent/optimizer.json" optimizerActivation;
+    assert
+      default.config.programs.pi-coding-agent.plugins.pi-vcc.settings == {
+        overrideDefaultCompaction = true;
+        smartKeepTail = true;
+        continueAfterThresholdCompact = true;
+        debug = false;
+      };
+    assert
+      vccConfigured.config.programs.pi-coding-agent.plugins.pi-vcc.settings == {
+        overrideDefaultCompaction = false;
+        smartKeepTail = false;
+        continueAfterThresholdCompact = false;
+        debug = true;
+      };
+    assert vccConfigSource == expectedVccConfigFile;
+    assert
+      vccConfigured.config.home.sessionVariables.PI_VCC_CONFIG_PATH
+      == "/home/test/.pi/agent/pi-vcc-config.json";
     assert default.config.programs.mcp.enable;
     assert default.config.programs.mcp.servers.open-design.command == "od";
     assert
@@ -222,7 +323,14 @@ in
       !(disabled.config.home.file ? "${disabled.config.programs.pi-coding-agent.configDir}/AGENTS.md");
     assert
       !(disabled.config.home.file ? "${disabled.config.programs.pi-coding-agent.configDir}/mcp.json");
+    assert
+      !(
+        disabled.config.home.file
+        ? "${disabled.config.programs.pi-coding-agent.configDir}/pi-vcc-config.json"
+      );
     assert !(disabled.config.xdg.configFile ? "mcp/mcp.json");
+    assert !(disabled.config.home.activation ? piCodingAgentPixOptimizer);
+    assert !(disabled.config.home.sessionVariables ? PI_VCC_CONFIG_PATH);
     assert
       !(
         disabled.config.home.file
@@ -244,11 +352,17 @@ in
     assert settingsOverridden.config.programs.pi-coding-agent.settings.retry.maxRetries == 3;
     assert
       settingsOverridden.config.programs.pi-coding-agent.settings.packages == [
+        expectedDietLspPath
         expectedMcpAdapterPath
         expectedPlaywrightPath
+        expectedPixOptimizerPath
+        expectedPiVccPath
         expectedPromptTemplateModelPath
+        expectedRpivTodoPath
+        expectedRulesPath
         expectedSearxngPath
         expectedSubagentsPath
+        expectedSupiContextPath
       ];
     assert
       settingsOverridden.config.programs.pi-coding-agent.keybindings == {
@@ -260,7 +374,23 @@ in
   formatting =
     pkgs.runCommandLocal "pi-home-manager-formatting" { nativeBuildInputs = [ pkgs.nixfmt ]; }
       ''
-        nixfmt --check ${./flake.nix} ${./checks.nix} ${./modules/pi-coding-agent.nix} ${./modules/pi-coding-agent/agents.nix} ${./modules/pi-coding-agent/default-agents.nix} ${./modules/pi-coding-agent/pi-subagents.nix} ${./packages/pi-mcp-adapter.nix} ${./packages/pi-playwright.nix} ${./packages/pi-prompt-template-model.nix} ${./packages/pi-searxng.nix} ${./packages/pi-subagents.nix}
+        nixfmt --check ${./flake.nix} ${./checks.nix} ${./modules/pi-coding-agent.nix} ${./modules/pi-coding-agent/agents.nix} ${./modules/pi-coding-agent/default-agents.nix} ${./modules/pi-coding-agent/pi-subagents.nix} ${./packages/pi-diet-lsp.nix} ${./packages/pi-mcp-adapter.nix} ${./packages/pi-playwright.nix} ${./packages/pix-optimizer.nix} ${./packages/pi-vcc.nix} ${./packages/pi-prompt-template-model.nix} ${./packages/rpiv-todo.nix} ${./packages/pi-rules.nix} ${./packages/pi-searxng.nix} ${./packages/pi-subagents.nix} ${./packages/supi-context.nix}
+        touch $out
+      '';
+
+  diet-lsp-load =
+    pkgs.runCommandLocal "pi-diet-lsp-load" { nativeBuildInputs = [ expectedPackage ]; }
+      ''
+        export HOME="$TMPDIR/home"
+        export PI_CODING_AGENT_DIR="$HOME/.pi/agent"
+        export PI_TELEMETRY=0
+        mkdir -p "$PI_CODING_AGENT_DIR"
+        test -f ${expectedDietLsp}/index.ts
+        test ! -e ${expectedDietLsp}/node_modules
+        pi --offline --no-extensions --no-skills --no-prompt-templates --no-context-files \
+          -e ${expectedDietLsp} \
+          --list-models > pi.log 2>&1
+        ! grep -E 'Extension issues|Failed to load extension|Cannot find module|Error:' pi.log
         touch $out
       '';
 
@@ -326,6 +456,77 @@ in
         touch $out
       '';
 
+  pix-optimizer-load =
+    pkgs.runCommandLocal "pix-optimizer-load" { nativeBuildInputs = [ expectedPackage ]; }
+      ''
+        export HOME="$TMPDIR/home"
+        export PI_CODING_AGENT_DIR="$HOME/.pi/agent"
+        export PI_TELEMETRY=0
+        mkdir -p "$PI_CODING_AGENT_DIR"
+        test -f ${expectedPixOptimizerPath}/src/index.ts
+        test -f ${expectedPixOptimizerPath}/node_modules/@xynogen/pix-pretty/src/modal-frame.ts
+        test ! -e ${expectedPixOptimizerPath}/node_modules/@xynogen/pix-pretty/node_modules
+        cat > "$PI_CODING_AGENT_DIR/settings.json" <<EOF
+        {"packages":["${expectedPixOptimizerPath}"]}
+        EOF
+        pi --offline --no-prompt-templates --no-context-files \
+          --list-models > pi.log 2>&1
+        ! grep -E 'Extension issues|Failed to load extension|Cannot find module|Error:' pi.log
+        test ! -e "$PI_CODING_AGENT_DIR/optimizer.json"
+        touch $out
+      '';
+
+  pi-vcc-load = pkgs.runCommandLocal "pi-vcc-load" { nativeBuildInputs = [ expectedPackage ]; } ''
+    export HOME="$TMPDIR/home"
+    export PI_CODING_AGENT_DIR="$HOME/.pi/agent"
+    export PI_VCC_CONFIG_PATH="$TMPDIR/pi-vcc-config.json"
+    export PI_TELEMETRY=0
+    mkdir -p "$PI_CODING_AGENT_DIR"
+    test -f ${expectedPiVcc}/index.ts
+    test ! -e ${expectedPiVcc}/demo.gif
+    pi --offline --no-extensions --no-skills --no-prompt-templates --no-context-files \
+      -e ${expectedPiVcc} \
+      --list-models > pi.log 2>&1
+    ! grep -E 'Extension issues|Failed to load extension|Cannot find module|Error:' pi.log
+    grep -F '"overrideDefaultCompaction": false' "$PI_VCC_CONFIG_PATH"
+    grep -F '"smartKeepTail": true' "$PI_VCC_CONFIG_PATH"
+    grep -F '"continueAfterThresholdCompact": true' "$PI_VCC_CONFIG_PATH"
+    grep -F '"debug": false' "$PI_VCC_CONFIG_PATH"
+    touch $out
+  '';
+
+  rpiv-todo-load =
+    pkgs.runCommandLocal "rpiv-todo-load" { nativeBuildInputs = [ expectedPackage ]; }
+      ''
+        export HOME="$TMPDIR/home"
+        export XDG_CONFIG_HOME="$TMPDIR/config"
+        export PI_CODING_AGENT_DIR="$HOME/.pi/agent"
+        export PI_TELEMETRY=0
+        mkdir -p "$PI_CODING_AGENT_DIR"
+        test -d ${expectedRpivTodoPath}/node_modules/@juicesharp/rpiv-config
+        test -d ${expectedRpivTodoPath}/node_modules/typebox
+        pi --offline --no-extensions --no-skills --no-prompt-templates --no-context-files \
+          -e ${expectedRpivTodoPath} \
+          --list-models > pi.log 2>&1
+        ! grep -E 'Extension issues|Failed to load extension|Cannot find module|Error:' pi.log
+        test ! -e "$XDG_CONFIG_HOME/rpiv-todo/config.json"
+        touch $out
+      '';
+
+  rules-load = pkgs.runCommandLocal "pi-rules-load" { nativeBuildInputs = [ expectedPackage ]; } ''
+    export HOME="$TMPDIR/home"
+    export PI_CODING_AGENT_DIR="$HOME/.pi/agent"
+    export PI_TELEMETRY=0
+    mkdir -p "$PI_CODING_AGENT_DIR"
+    test -d ${expectedRulesPath}/node_modules/picomatch
+    test -d ${expectedRulesPath}/node_modules/yaml
+    pi --offline --no-extensions --no-skills --no-prompt-templates --no-context-files \
+      -e ${expectedRulesPath} \
+      --list-models > pi.log 2>&1
+    ! grep -E 'Extension issues|Failed to load extension|Cannot find module|Error:' pi.log
+    touch $out
+  '';
+
   searxng-load =
     pkgs.runCommandLocal "pi-searxng-load" { nativeBuildInputs = [ expectedPackage ]; }
       ''
@@ -353,6 +554,23 @@ in
           -e ${expectedSubagentsPath} \
           --list-models > pi.log 2>&1
         ! grep -E 'Extension issues|Failed to load extension|Cannot find module|Error:' pi.log
+        touch $out
+      '';
+
+  supi-context-load =
+    pkgs.runCommandLocal "supi-context-load" { nativeBuildInputs = [ expectedPackage ]; }
+      ''
+        export HOME="$TMPDIR/home"
+        export PI_CODING_AGENT_DIR="$HOME/.pi/agent"
+        export PI_TELEMETRY=0
+        mkdir -p "$PI_CODING_AGENT_DIR"
+        test -d ${expectedSupiContextPath}/node_modules/@mrclrchtr/supi-core
+        test -d ${expectedSupiContextPath}/node_modules/typebox
+        pi --offline --no-extensions --no-skills --no-prompt-templates --no-context-files \
+          -e ${expectedSupiContextPath} \
+          --list-models > pi.log 2>&1
+        ! grep -E 'Extension issues|Failed to load extension|Cannot find module|Error:' pi.log
+        test ! -e "$PI_CODING_AGENT_DIR/supi/config.json"
         touch $out
       '';
 
