@@ -457,7 +457,7 @@ This inventory mirrors the active `settings.packages` allowlist as of 2026-07-21
 | `npm:@koltmcbride/pi-loop` | `0.2.0` | Excluded: advisory-only read-only mode and plaintext prompt state under project `.pi/loops/` |
 | `npm:pi-searxng` | `1.0.4` | Pinned to exact upstream commit; Pi peer metadata stripped for isolated packaging; unrestricted URL fetch and clone resource risks explicitly accepted |
 | `npm:pi-playwright` | `0.1.1` | Packaged from exact npm tarball with locked CLI closure and Nix Chromium; browser, auth-state file, arbitrary page-code, and localhost probe risks explicitly accepted |
-| `npm:pi-subagents` | `0.35.1` | Active; audit pending |
+| `npm:pi-subagents` | `0.35.1` | Packaged from exact npm tarball with locked runtime dependencies; subprocess, worktree, artifact-write, scheduling, and delegated model/tool risks explicitly accepted |
 | `npm:pi-diet-lsp` | `0.1.6` | Active; audit pending |
 | `npm:@juicesharp/rpiv-todo` | `1.20.0` | Active; audit pending |
 | `npm:@mrclrchtr/supi-context` | `2.5.0` | Active; audit pending |
@@ -476,6 +476,12 @@ Removed from the active allowlist: `@juicesharp/rpiv-ask-user-question`, `@kmmun
 <Decision title="Use Nix Chromium for pi-playwright" status="accepted">
 
 `pi-playwright` keeps its npm-declared CLI range in an adjacent lock file. Its wrapper receives Nixpkgs Chromium through `PLAYWRIGHT_MCP_EXECUTABLE_PATH`, avoiding mutable `npx playwright install` downloads while preserving an environment override for calibration or a future Playwright-pinned browser closure.
+
+</Decision>
+
+<Decision title="Resolve pi-subagents peers from host Pi" status="accepted">
+
+`pi-subagents` bundles only `jiti` and `yaml`, removes test-only Pi copies, and keeps its optional Pi peer declarations. Offline loading against the managed Pi package verifies compatibility without duplicating the host runtime closure.
 
 </Decision>
 

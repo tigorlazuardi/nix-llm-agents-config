@@ -107,6 +107,10 @@ let
     nixpkgs-unstable.legacyPackages.x86_64-linux.callPackage ./packages/pi-searxng.nix
       { };
   expectedSearxngPath = "${expectedSearxng}/lib/node_modules/pi-searxng";
+  expectedSubagents =
+    nixpkgs-unstable.legacyPackages.x86_64-linux.callPackage ./packages/pi-subagents.nix
+      { };
+  expectedSubagentsPath = "${expectedSubagents}/lib/node_modules/pi-subagents";
   expectedWritingGreatSkills = default.config.programs.pi-coding-agent.skills.writing-great-skills;
   secretWrappedMcpConfig =
     secretWrappedMcp.config.home.file."${secretWrappedMcp.config.programs.pi-coding-agent.configDir}/mcp.json".source;
@@ -116,6 +120,7 @@ in
   playwright = expectedPlaywright;
   prompt-template-model = expectedPromptTemplateModel;
   searxng = expectedSearxng;
+  subagents = expectedSubagents;
 
   module-evaluation =
     assert default.config.programs.pi-coding-agent.enable;
@@ -133,6 +138,7 @@ in
           expectedPlaywrightPath
           expectedPromptTemplateModelPath
           expectedSearxngPath
+          expectedSubagentsPath
         ];
       };
     assert
@@ -242,6 +248,7 @@ in
         expectedPlaywrightPath
         expectedPromptTemplateModelPath
         expectedSearxngPath
+        expectedSubagentsPath
       ];
     assert
       settingsOverridden.config.programs.pi-coding-agent.keybindings == {
@@ -253,7 +260,7 @@ in
   formatting =
     pkgs.runCommandLocal "pi-home-manager-formatting" { nativeBuildInputs = [ pkgs.nixfmt ]; }
       ''
-        nixfmt --check ${./flake.nix} ${./checks.nix} ${./modules/pi-coding-agent.nix} ${./modules/pi-coding-agent/agents.nix} ${./modules/pi-coding-agent/default-agents.nix} ${./modules/pi-coding-agent/pi-subagents.nix} ${./packages/pi-mcp-adapter.nix} ${./packages/pi-playwright.nix} ${./packages/pi-prompt-template-model.nix} ${./packages/pi-searxng.nix}
+        nixfmt --check ${./flake.nix} ${./checks.nix} ${./modules/pi-coding-agent.nix} ${./modules/pi-coding-agent/agents.nix} ${./modules/pi-coding-agent/default-agents.nix} ${./modules/pi-coding-agent/pi-subagents.nix} ${./packages/pi-mcp-adapter.nix} ${./packages/pi-playwright.nix} ${./packages/pi-prompt-template-model.nix} ${./packages/pi-searxng.nix} ${./packages/pi-subagents.nix}
         touch $out
       '';
 
@@ -328,6 +335,22 @@ in
         mkdir -p "$PI_CODING_AGENT_DIR"
         pi --offline --no-extensions --no-skills --no-prompt-templates --no-context-files \
           -e ${expectedSearxngPath} \
+          --list-models > pi.log 2>&1
+        ! grep -E 'Extension issues|Failed to load extension|Cannot find module|Error:' pi.log
+        touch $out
+      '';
+
+  subagents-load =
+    pkgs.runCommandLocal "pi-subagents-load" { nativeBuildInputs = [ expectedPackage ]; }
+      ''
+        export HOME="$TMPDIR/home"
+        export PI_CODING_AGENT_DIR="$HOME/.pi/agent"
+        export PI_TELEMETRY=0
+        mkdir -p "$PI_CODING_AGENT_DIR"
+        test -d ${expectedSubagentsPath}/node_modules/jiti
+        test -d ${expectedSubagentsPath}/node_modules/yaml
+        pi --offline --no-extensions --no-skills --no-prompt-templates --no-context-files \
+          -e ${expectedSubagentsPath} \
           --list-models > pi.log 2>&1
         ! grep -E 'Extension issues|Failed to load extension|Cannot find module|Error:' pi.log
         touch $out

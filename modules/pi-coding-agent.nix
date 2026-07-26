@@ -17,6 +17,7 @@ let
   playwright = pinnedPkgs.callPackage ../packages/pi-playwright.nix { };
   promptTemplateModel = pinnedPkgs.callPackage ../packages/pi-prompt-template-model.nix { };
   searxng = pinnedPkgs.callPackage ../packages/pi-searxng.nix { };
+  subagents = pinnedPkgs.callPackage ../packages/pi-subagents.nix { };
   defaultSettings = {
     defaultThinkingLevel = "medium";
     quietStartup = true;
@@ -106,6 +107,7 @@ in
             "${playwright}/lib/node_modules/pi-playwright"
             "${promptTemplateModel}/lib/node_modules/pi-prompt-template-model"
             "${searxng}/lib/node_modules/pi-searxng"
+            "${subagents}/lib/node_modules/pi-subagents"
           ];
         }
       ];
