@@ -95,6 +95,10 @@ let
     nixpkgs-unstable.legacyPackages.x86_64-linux.callPackage ./packages/pi-mcp-adapter.nix
       { };
   expectedMcpAdapterPath = "${expectedMcpAdapter}/lib/node_modules/pi-mcp-adapter";
+  expectedPlaywright =
+    nixpkgs-unstable.legacyPackages.x86_64-linux.callPackage ./packages/pi-playwright.nix
+      { };
+  expectedPlaywrightPath = "${expectedPlaywright}/lib/node_modules/pi-playwright";
   expectedPromptTemplateModel =
     nixpkgs-unstable.legacyPackages.x86_64-linux.callPackage ./packages/pi-prompt-template-model.nix
       { };
@@ -109,6 +113,7 @@ let
 in
 {
   mcp-adapter = expectedMcpAdapter;
+  playwright = expectedPlaywright;
   prompt-template-model = expectedPromptTemplateModel;
   searxng = expectedSearxng;
 
@@ -125,6 +130,7 @@ in
         showCacheMissNotices = false;
         packages = [
           expectedMcpAdapterPath
+          expectedPlaywrightPath
           expectedPromptTemplateModelPath
           expectedSearxngPath
         ];
@@ -233,6 +239,7 @@ in
     assert
       settingsOverridden.config.programs.pi-coding-agent.settings.packages == [
         expectedMcpAdapterPath
+        expectedPlaywrightPath
         expectedPromptTemplateModelPath
         expectedSearxngPath
       ];
@@ -246,7 +253,7 @@ in
   formatting =
     pkgs.runCommandLocal "pi-home-manager-formatting" { nativeBuildInputs = [ pkgs.nixfmt ]; }
       ''
-        nixfmt --check ${./flake.nix} ${./checks.nix} ${./modules/pi-coding-agent.nix} ${./modules/pi-coding-agent/agents.nix} ${./modules/pi-coding-agent/default-agents.nix} ${./modules/pi-coding-agent/pi-subagents.nix} ${./packages/pi-mcp-adapter.nix} ${./packages/pi-prompt-template-model.nix} ${./packages/pi-searxng.nix}
+        nixfmt --check ${./flake.nix} ${./checks.nix} ${./modules/pi-coding-agent.nix} ${./modules/pi-coding-agent/agents.nix} ${./modules/pi-coding-agent/default-agents.nix} ${./modules/pi-coding-agent/pi-subagents.nix} ${./packages/pi-mcp-adapter.nix} ${./packages/pi-playwright.nix} ${./packages/pi-prompt-template-model.nix} ${./packages/pi-searxng.nix}
         touch $out
       '';
 
@@ -278,6 +285,35 @@ in
         cp "$mcp_config" "$PI_CODING_AGENT_DIR/mcp.json"
         pi --offline --no-extensions --no-skills --no-prompt-templates --no-context-files \
           -e ${expectedMcpAdapterPath} \
+          --list-models > pi.log 2>&1
+        ! grep -E 'Extension issues|Failed to load extension|Cannot find module|Error:' pi.log
+        touch $out
+      '';
+
+  playwright-load =
+    pkgs.runCommandLocal "pi-playwright-load"
+      {
+        nativeBuildInputs = [
+          expectedPackage
+          pkgs.nodejs
+        ];
+      }
+      ''
+        export HOME="$TMPDIR/home"
+        export PI_CODING_AGENT_DIR="$HOME/.pi/agent"
+        export PI_PLAYWRIGHT_ARTIFACTS="$TMPDIR/artifacts"
+        export PI_TELEMETRY=0
+        export PLAYWRIGHT_CLI_SESSION=nix-check
+        export PLAYWRIGHT_MCP_HEADLESS=true
+        mkdir -p "$PI_CODING_AGENT_DIR"
+
+        skill=${expectedPlaywrightPath}/skills/playwright-browser
+        test "$(node "$skill/scripts/artifact-dir.js")" = "$PI_PLAYWRIGHT_ARTIFACTS"
+        node "$skill/scripts/pw.js" open about:blank
+        node "$skill/scripts/pw.js" close
+
+        pi --offline --no-extensions --no-skills --no-prompt-templates --no-context-files \
+          --skill "$skill" \
           --list-models > pi.log 2>&1
         ! grep -E 'Extension issues|Failed to load extension|Cannot find module|Error:' pi.log
         touch $out

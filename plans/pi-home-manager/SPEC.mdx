@@ -456,7 +456,7 @@ This inventory mirrors the active `settings.packages` allowlist as of 2026-07-21
 | `npm:pi-prompt-template-model` | `0.10.0` | Packaged from exact upstream commit and loaded by immutable local path; drain authoring prompts inject `writing-great-skills` |
 | `npm:@koltmcbride/pi-loop` | `0.2.0` | Excluded: advisory-only read-only mode and plaintext prompt state under project `.pi/loops/` |
 | `npm:pi-searxng` | `1.0.4` | Pinned to exact upstream commit; Pi peer metadata stripped for isolated packaging; unrestricted URL fetch and clone resource risks explicitly accepted |
-| `npm:pi-playwright` | `0.1.1` | Active; audit pending |
+| `npm:pi-playwright` | `0.1.1` | Packaged from exact npm tarball with locked CLI closure and Nix Chromium; browser, auth-state file, arbitrary page-code, and localhost probe risks explicitly accepted |
 | `npm:pi-subagents` | `0.35.1` | Active; audit pending |
 | `npm:pi-diet-lsp` | `0.1.6` | Active; audit pending |
 | `npm:@juicesharp/rpiv-todo` | `1.20.0` | Active; audit pending |
@@ -472,6 +472,12 @@ This inventory mirrors the active `settings.packages` allowlist as of 2026-07-21
 | `npm:pi-c2c` | `0.4.14` | Active; requires separately packaged native `c2c` |
 
 Removed from the active allowlist: `@juicesharp/rpiv-ask-user-question`, `@kmmuntasir/pi-nested-subagents`, `@misunders2d/pi-goal`, `@quintinshaw/pi-dynamic-workflows`, `@vanillagreen/pi-background-tasks`, `@yandy0725/pi-memory`, `pi-ask-user`, `pi-observational-memory`, and `remote-pi`. They remain excluded unless a later audit establishes a concrete need.
+
+<Decision title="Use Nix Chromium for pi-playwright" status="accepted">
+
+`pi-playwright` keeps its npm-declared CLI range in an adjacent lock file. Its wrapper receives Nixpkgs Chromium through `PLAYWRIGHT_MCP_EXECUTABLE_PATH`, avoiding mutable `npx playwright install` downloads while preserving an environment override for calibration or a future Playwright-pinned browser closure.
+
+</Decision>
 
 ### `pi-c2c` native runtime boundary
 

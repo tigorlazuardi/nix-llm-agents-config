@@ -14,6 +14,7 @@ let
   jsonFormat = pkgs.formats.json { };
   pinnedPkgs = nixpkgs-unstable.legacyPackages.${pkgs.stdenv.hostPlatform.system};
   mcpAdapter = pinnedPkgs.callPackage ../packages/pi-mcp-adapter.nix { };
+  playwright = pinnedPkgs.callPackage ../packages/pi-playwright.nix { };
   promptTemplateModel = pinnedPkgs.callPackage ../packages/pi-prompt-template-model.nix { };
   searxng = pinnedPkgs.callPackage ../packages/pi-searxng.nix { };
   defaultSettings = {
@@ -102,6 +103,7 @@ in
         {
           packages = lib.mkForce [
             "${mcpAdapter}/lib/node_modules/pi-mcp-adapter"
+            "${playwright}/lib/node_modules/pi-playwright"
             "${promptTemplateModel}/lib/node_modules/pi-prompt-template-model"
             "${searxng}/lib/node_modules/pi-searxng"
           ];
