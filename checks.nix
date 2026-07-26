@@ -99,6 +99,10 @@ let
     nixpkgs-unstable.legacyPackages.x86_64-linux.callPackage ./packages/pi-prompt-template-model.nix
       { };
   expectedPromptTemplateModelPath = "${expectedPromptTemplateModel}/lib/node_modules/pi-prompt-template-model";
+  expectedSearxng =
+    nixpkgs-unstable.legacyPackages.x86_64-linux.callPackage ./packages/pi-searxng.nix
+      { };
+  expectedSearxngPath = "${expectedSearxng}/lib/node_modules/pi-searxng";
   expectedWritingGreatSkills = default.config.programs.pi-coding-agent.skills.writing-great-skills;
   secretWrappedMcpConfig =
     secretWrappedMcp.config.home.file."${secretWrappedMcp.config.programs.pi-coding-agent.configDir}/mcp.json".source;
@@ -106,6 +110,7 @@ in
 {
   mcp-adapter = expectedMcpAdapter;
   prompt-template-model = expectedPromptTemplateModel;
+  searxng = expectedSearxng;
 
   module-evaluation =
     assert default.config.programs.pi-coding-agent.enable;
@@ -121,6 +126,7 @@ in
         packages = [
           expectedMcpAdapterPath
           expectedPromptTemplateModelPath
+          expectedSearxngPath
         ];
       };
     assert
@@ -228,6 +234,7 @@ in
       settingsOverridden.config.programs.pi-coding-agent.settings.packages == [
         expectedMcpAdapterPath
         expectedPromptTemplateModelPath
+        expectedSearxngPath
       ];
     assert
       settingsOverridden.config.programs.pi-coding-agent.keybindings == {
@@ -239,7 +246,7 @@ in
   formatting =
     pkgs.runCommandLocal "pi-home-manager-formatting" { nativeBuildInputs = [ pkgs.nixfmt ]; }
       ''
-        nixfmt --check ${./flake.nix} ${./checks.nix} ${./modules/pi-coding-agent.nix} ${./modules/pi-coding-agent/agents.nix} ${./modules/pi-coding-agent/default-agents.nix} ${./modules/pi-coding-agent/pi-subagents.nix} ${./packages/pi-mcp-adapter.nix} ${./packages/pi-prompt-template-model.nix}
+        nixfmt --check ${./flake.nix} ${./checks.nix} ${./modules/pi-coding-agent.nix} ${./modules/pi-coding-agent/agents.nix} ${./modules/pi-coding-agent/default-agents.nix} ${./modules/pi-coding-agent/pi-subagents.nix} ${./packages/pi-mcp-adapter.nix} ${./packages/pi-prompt-template-model.nix} ${./packages/pi-searxng.nix}
         touch $out
       '';
 
@@ -271,6 +278,20 @@ in
         cp "$mcp_config" "$PI_CODING_AGENT_DIR/mcp.json"
         pi --offline --no-extensions --no-skills --no-prompt-templates --no-context-files \
           -e ${expectedMcpAdapterPath} \
+          --list-models > pi.log 2>&1
+        ! grep -E 'Extension issues|Failed to load extension|Cannot find module|Error:' pi.log
+        touch $out
+      '';
+
+  searxng-load =
+    pkgs.runCommandLocal "pi-searxng-load" { nativeBuildInputs = [ expectedPackage ]; }
+      ''
+        export HOME="$TMPDIR/home"
+        export PI_CODING_AGENT_DIR="$HOME/.pi/agent"
+        export PI_TELEMETRY=0
+        mkdir -p "$PI_CODING_AGENT_DIR"
+        pi --offline --no-extensions --no-skills --no-prompt-templates --no-context-files \
+          -e ${expectedSearxngPath} \
           --list-models > pi.log 2>&1
         ! grep -E 'Extension issues|Failed to load extension|Cannot find module|Error:' pi.log
         touch $out

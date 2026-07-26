@@ -15,6 +15,7 @@ let
   pinnedPkgs = nixpkgs-unstable.legacyPackages.${pkgs.stdenv.hostPlatform.system};
   mcpAdapter = pinnedPkgs.callPackage ../packages/pi-mcp-adapter.nix { };
   promptTemplateModel = pinnedPkgs.callPackage ../packages/pi-prompt-template-model.nix { };
+  searxng = pinnedPkgs.callPackage ../packages/pi-searxng.nix { };
   defaultSettings = {
     defaultThinkingLevel = "medium";
     quietStartup = true;
@@ -102,6 +103,7 @@ in
           packages = lib.mkForce [
             "${mcpAdapter}/lib/node_modules/pi-mcp-adapter"
             "${promptTemplateModel}/lib/node_modules/pi-prompt-template-model"
+            "${searxng}/lib/node_modules/pi-searxng"
           ];
         }
       ];
