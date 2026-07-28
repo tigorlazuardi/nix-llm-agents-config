@@ -6,11 +6,11 @@
 }:
 buildNpmPackage {
   pname = "pi-rules";
-  version = "0.4.1";
+  version = "0.5.3";
 
   src = fetchurl {
-    url = "https://registry.npmjs.org/@tigorhutasuhut/pi-rules/-/pi-rules-0.4.1.tgz";
-    hash = "sha256-VhpzroS8aiYGs+hEnwGrBslA9XqCbecQfsHvC6J6mbI=";
+    url = "https://registry.npmjs.org/@tigorhutasuhut/pi-rules/-/pi-rules-0.5.3.tgz";
+    hash = "sha256-cagn9JeU+eP2ZElECZaDswLC8lYfR5h7Bbn2NK3YYQU=";
   };
 
   # ponytail: omit build-only and host Pi packages; offline load check proves peer resolution.
@@ -19,7 +19,7 @@ buildNpmPackage {
     ${nodejs}/bin/node -e 'const fs = require("fs"); const p = require("./package.json"); delete p.devDependencies; delete p.peerDependencies; fs.writeFileSync("package.json", JSON.stringify(p, null, 2) + "\n")'
   '';
 
-  npmDepsHash = "sha256-zWyYcMMeBM77FHLI22pv5pBalapWNcBGTOtcDl0MTc8=";
+  npmDepsHash = "sha256-QmucGc0MsjjhFZG/WRY/hOmZoBbASGJoD8BEkbv/N7s=";
   npmInstallFlags = [
     "--omit=dev"
     "--omit=peer"

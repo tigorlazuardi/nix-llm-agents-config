@@ -16,6 +16,7 @@ let
     "ls"
   ];
 
+  pluginEnabled = cfg.enable && cfg.plugins.pi-subagents.enable;
   pluginAgents = cfg.plugins.pi-subagents.agents;
   pluginAgentNames = builtins.attrNames pluginAgents;
   unknownPluginAgents = builtins.filter (name: !(builtins.hasAttr name cfg.agents)) pluginAgentNames;
@@ -147,7 +148,7 @@ in
     description = "pi-subagents fields augmenting existing portable agents by name.";
   };
 
-  config = {
+  config = lib.mkIf pluginEnabled {
     assertions = [
       {
         assertion = unknownPluginAgents == [ ];
@@ -193,7 +194,7 @@ in
       })
     );
 
-    home.file = lib.mkIf cfg.enable (
+    home.file = (
       lib.mapAttrs' (
         name: _: lib.nameValuePair "${cfg.configDir}/agents/${name}.md" { text = renderAgent name; }
       ) renderablePluginAgents

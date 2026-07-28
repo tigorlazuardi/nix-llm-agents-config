@@ -63,6 +63,20 @@ let
   };
   vccConfigSource =
     vccConfigured.config.home.file."${vccConfigured.config.programs.pi-coding-agent.configDir}/pi-vcc-config.json".source;
+  pluginsDisabled = evaluate {
+    programs.pi-coding-agent.plugins = {
+      pi-mcp-adapter.enable = false;
+      pix-optimizer.enable = false;
+      pi-vcc.enable = false;
+      pi-intercom.enable = false;
+      pi-subagents = {
+        enable = false;
+        agents.missing = { };
+      };
+      rpiv-todo.enable = false;
+    };
+  };
+  rulesEnabled = evaluate { programs.pi-coding-agent.plugins.pi-rules.enable = true; };
   secretWrappedMcp = evaluate {
     programs.mcp.servers.secret = {
       command = "/bin/secret-mcp";
@@ -286,7 +300,14 @@ in
       };
     assert default.config.programs.pi-coding-agent.models == { };
     assert default.config.programs.pi-coding-agent.context == ./config/AGENTS.md;
+    assert default.config.programs.pi-coding-agent.plugins.pi-mcp-adapter.enable;
     assert default.config.programs.pi-coding-agent.plugins.pi-mcp-adapter.enableMcpIntegration;
+    assert default.config.programs.pi-coding-agent.plugins.pi-vcc.enable;
+    assert default.config.programs.pi-coding-agent.plugins.pix-optimizer.enable;
+    assert default.config.programs.pi-coding-agent.plugins.pi-rules.enable;
+    assert builtins.elem expectedRulesPath default.config.programs.pi-coding-agent.settings.packages;
+    assert builtins.elem expectedRulesPath
+      rulesEnabled.config.programs.pi-coding-agent.settings.packages;
     assert
       default.config.programs.pi-coding-agent.plugins.pix-optimizer.settings == {
         caveman = "ultra";
@@ -425,6 +446,40 @@ in
     assert
       !(
         disabled.config.home.file ? "${disabled.config.programs.pi-coding-agent.configDir}/templates/drain"
+      );
+    assert
+      !(builtins.elem expectedMcpAdapterPath pluginsDisabled.config.programs.pi-coding-agent.settings.packages);
+    assert
+      !(builtins.elem expectedPixOptimizerPath pluginsDisabled.config.programs.pi-coding-agent.settings.packages);
+    assert
+      !(builtins.elem expectedPiVccPath pluginsDisabled.config.programs.pi-coding-agent.settings.packages);
+    assert
+      !(builtins.elem expectedIntercomPath pluginsDisabled.config.programs.pi-coding-agent.settings.packages);
+    assert
+      !(builtins.elem expectedSubagentsPath pluginsDisabled.config.programs.pi-coding-agent.settings.packages);
+    assert
+      !(builtins.elem expectedRpivTodoPath pluginsDisabled.config.programs.pi-coding-agent.settings.packages);
+    assert
+      !(
+        pluginsDisabled.config.home.file
+        ? "${pluginsDisabled.config.programs.pi-coding-agent.configDir}/mcp.json"
+      );
+    assert !(pluginsDisabled.config.home.activation ? piCodingAgentPixOptimizer);
+    assert !(pluginsDisabled.config.home.sessionVariables ? PI_VCC_CONFIG_PATH);
+    assert
+      !(
+        pluginsDisabled.config.home.file
+        ? "${pluginsDisabled.config.programs.pi-coding-agent.configDir}/pi-vcc-config.json"
+      );
+    assert
+      !(
+        pluginsDisabled.config.home.file
+        ? "${pluginsDisabled.config.programs.pi-coding-agent.configDir}/intercom/config.json"
+      );
+    assert
+      !(
+        pluginsDisabled.config.home.file
+        ? "${pluginsDisabled.config.programs.pi-coding-agent.configDir}/agents/orchestrator.md"
       );
     assert overridden.config.programs.pi-coding-agent.package == overridePackage;
     assert builtins.elem overridePackage overridden.config.home.packages;
