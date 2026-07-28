@@ -13,12 +13,17 @@ buildNpmPackage {
   };
 
   postPatch = ''
-    # ponytail: Nix package closure uses Pi-managed peers; restore upstream metadata when standalone peer bundling is needed.
-    node -e 'const fs = require("fs"); const pkg = JSON.parse(fs.readFileSync("package.json")); delete pkg.peerDependencies; fs.writeFileSync("package.json", JSON.stringify(pkg, null, 2) + "\\n");'
-    cp ${./pi-intercom-package-lock.json} package-lock.json
+        # ponytail: Nix package closure uses Pi-managed peers; restore upstream metadata when standalone peer bundling is needed.
+        substituteInPlace package.json \
+          --replace-fail '  "peerDependencies": {
+        "@mariozechner/pi-coding-agent": "*",
+        "@mariozechner/pi-tui": "*"
+      },
+    ' ""
+        cp ${./pi-intercom-package-lock.json} package-lock.json
   '';
 
-  npmDepsHash = lib.fakeHash;
+  npmDepsHash = "sha256-zhw4TSMs+JnSoaBU/ZBXba7+fdmnQe9YM6+QLOzSKZk=";
   npmInstallFlags = [
     "--omit=dev"
     "--omit=peer"
