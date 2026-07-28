@@ -1000,6 +1000,7 @@ in
     export PI_TELEMETRY=0
     mkdir -p "$PI_CODING_AGENT_DIR"
     test -d ${expectedRulesPath}/node_modules/picomatch
+    test -d ${expectedRulesPath}/node_modules/typebox
     test -d ${expectedRulesPath}/node_modules/yaml
     pi --offline --no-extensions --no-skills --no-prompt-templates --no-context-files \
       -e ${expectedRulesPath} \
