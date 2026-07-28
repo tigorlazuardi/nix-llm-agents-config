@@ -16,6 +16,7 @@ let
   jsonFormat = pkgs.formats.json { };
   pinnedPkgs = nixpkgs-unstable.legacyPackages.${pkgs.stdenv.hostPlatform.system};
   dietLsp = pinnedPkgs.callPackage ../packages/pi-diet-lsp.nix { };
+  effort = pinnedPkgs.callPackage ../packages/pi-effort.nix { };
   piHerdr = pinnedPkgs.callPackage ../packages/pi-herdr.nix { };
   herdrSudoTask = pinnedPkgs.callPackage ../packages/pi-herdr-sudo-task.nix { };
   askHerdr = pinnedPkgs.callPackage ../packages/pi-ask-herdr.nix { };
@@ -200,6 +201,7 @@ in
         {
           packages = lib.mkForce [
             "${dietLsp}"
+            "${effort}/lib/node_modules/@nehlis/pi-effort"
             "${piHerdr}/lib/node_modules/@ogulcancelik/pi-herdr"
             "${herdrSudoTask}/lib/node_modules/pi-herdr-sudo-task"
             "${askHerdr}/lib/node_modules/pi-ask-herdr"

@@ -126,6 +126,10 @@ let
     nixpkgs-unstable.legacyPackages.x86_64-linux.callPackage ./packages/pi-diet-lsp.nix
       { };
   expectedDietLspPath = "${expectedDietLsp}";
+  expectedEffort =
+    nixpkgs-unstable.legacyPackages.x86_64-linux.callPackage ./packages/pi-effort.nix
+      { };
+  expectedEffortPath = "${expectedEffort}/lib/node_modules/@nehlis/pi-effort";
   expectedPiHerdr =
     nixpkgs-unstable.legacyPackages.x86_64-linux.callPackage ./packages/pi-herdr.nix
       { };
@@ -206,6 +210,7 @@ let
 in
 {
   diet-lsp = expectedDietLsp;
+  pi-effort = expectedEffort;
   pi-herdr = expectedPiHerdr;
   pi-herdr-sudo-task = expectedHerdrSudoTask;
   pi-ask-herdr = expectedAskHerdr;
@@ -240,6 +245,7 @@ in
         showCacheMissNotices = false;
         packages = [
           expectedDietLspPath
+          expectedEffortPath
           expectedPiHerdrPath
           expectedHerdrSudoTaskPath
           expectedAskHerdrPath
@@ -413,6 +419,7 @@ in
     assert
       settingsOverridden.config.programs.pi-coding-agent.settings.packages == [
         expectedDietLspPath
+        expectedEffortPath
         expectedPiHerdrPath
         expectedHerdrSudoTaskPath
         expectedAskHerdrPath
@@ -443,7 +450,7 @@ in
   formatting =
     pkgs.runCommandLocal "pi-home-manager-formatting" { nativeBuildInputs = [ pkgs.nixfmt ]; }
       ''
-        nixfmt --check ${./flake.nix} ${./checks.nix} ${./modules/pi-coding-agent.nix} ${./modules/pi-coding-agent/agents.nix} ${./modules/pi-coding-agent/default-agents.nix} ${./modules/pi-coding-agent/pi-subagents.nix} ${./packages/pi-diet-lsp.nix} ${./packages/pi-herdr.nix} ${./packages/pi-herdr-sudo-task.nix} ${./packages/pi-ask-herdr.nix} ${./packages/pi-herdr-rename.nix} ${./packages/pi-patty-bg-tasks.nix} ${./packages/c2c.nix} ${./packages/pi-c2c.nix} ${./packages/pi-vimmode.nix} ${./packages/pi-usage.nix} ${./packages/pi-mcp-adapter.nix} ${./packages/pi-playwright.nix} ${./packages/pix-optimizer.nix} ${./packages/pi-vcc.nix} ${./packages/pi-prompt-template-model.nix} ${./packages/rpiv-todo.nix} ${./packages/pi-rules.nix} ${./packages/pi-searxng.nix} ${./packages/pi-subagents.nix} ${./packages/supi-context.nix} ${./packages/supi-extras.nix}
+        nixfmt --check ${./flake.nix} ${./checks.nix} ${./modules/pi-coding-agent.nix} ${./modules/pi-coding-agent/agents.nix} ${./modules/pi-coding-agent/default-agents.nix} ${./modules/pi-coding-agent/pi-subagents.nix} ${./packages/pi-diet-lsp.nix} ${./packages/pi-effort.nix} ${./packages/pi-herdr.nix} ${./packages/pi-herdr-sudo-task.nix} ${./packages/pi-ask-herdr.nix} ${./packages/pi-herdr-rename.nix} ${./packages/pi-patty-bg-tasks.nix} ${./packages/c2c.nix} ${./packages/pi-c2c.nix} ${./packages/pi-vimmode.nix} ${./packages/pi-usage.nix} ${./packages/pi-mcp-adapter.nix} ${./packages/pi-playwright.nix} ${./packages/pix-optimizer.nix} ${./packages/pi-vcc.nix} ${./packages/pi-prompt-template-model.nix} ${./packages/rpiv-todo.nix} ${./packages/pi-rules.nix} ${./packages/pi-searxng.nix} ${./packages/pi-subagents.nix} ${./packages/supi-context.nix} ${./packages/supi-extras.nix}
         touch $out
       '';
 
@@ -458,6 +465,28 @@ in
         test ! -e ${expectedDietLsp}/node_modules
         pi --offline --no-extensions --no-skills --no-prompt-templates --no-context-files \
           -e ${expectedDietLsp} \
+          --list-models > pi.log 2>&1
+        ! grep -E 'Extension issues|Failed to load extension|Cannot find module|Error:' pi.log
+        touch $out
+      '';
+
+  pi-effort-load =
+    pkgs.runCommandLocal "pi-effort-load" { nativeBuildInputs = [ expectedPackage ]; }
+      ''
+        export HOME="$TMPDIR/home"
+        export PI_CODING_AGENT_DIR="$HOME/.pi/agent"
+        export PI_TELEMETRY=0
+        mkdir -p "$PI_CODING_AGENT_DIR"
+        effort=${expectedEffortPath}
+        test -f "$effort/package.json"
+        test -f "$effort/extensions/effort.ts"
+        test ! -e "$effort/node_modules"
+        grep -F '"name": "@nehlis/pi-effort"' "$effort/package.json"
+        grep -F '"./extensions/effort.ts"' "$effort/package.json"
+        grep -F 'pi.registerCommand("effort"' "$effort/extensions/effort.ts"
+        grep -F 'pi.setThinkingLevel(requested)' "$effort/extensions/effort.ts"
+        pi --offline --no-extensions --no-skills --no-prompt-templates --no-context-files \
+          -e "$effort" \
           --list-models > pi.log 2>&1
         ! grep -E 'Extension issues|Failed to load extension|Cannot find module|Error:' pi.log
         touch $out
