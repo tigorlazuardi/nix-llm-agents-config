@@ -16,6 +16,15 @@ let
   jsonFormat = pkgs.formats.json { };
   pinnedPkgs = nixpkgs-unstable.legacyPackages.${pkgs.stdenv.hostPlatform.system};
   dietLsp = pinnedPkgs.callPackage ../packages/pi-diet-lsp.nix { };
+  piHerdr = pinnedPkgs.callPackage ../packages/pi-herdr.nix { };
+  herdrSudoTask = pinnedPkgs.callPackage ../packages/pi-herdr-sudo-task.nix { };
+  askHerdr = pinnedPkgs.callPackage ../packages/pi-ask-herdr.nix { };
+  herdrRename = pinnedPkgs.callPackage ../packages/pi-herdr-rename.nix { };
+  pattyBgTasks = pinnedPkgs.callPackage ../packages/pi-patty-bg-tasks.nix { };
+  c2c = pinnedPkgs.callPackage ../packages/c2c.nix { };
+  piC2c = pinnedPkgs.callPackage ../packages/pi-c2c.nix { };
+  vimMode = pinnedPkgs.callPackage ../packages/pi-vimmode.nix { };
+  usage = pinnedPkgs.callPackage ../packages/pi-usage.nix { };
   mcpAdapter = pinnedPkgs.callPackage ../packages/pi-mcp-adapter.nix { };
   playwright = pinnedPkgs.callPackage ../packages/pi-playwright.nix { };
   pixOptimizer = pinnedPkgs.callPackage ../packages/pix-optimizer.nix { };
@@ -26,6 +35,7 @@ let
   searxng = pinnedPkgs.callPackage ../packages/pi-searxng.nix { };
   subagents = pinnedPkgs.callPackage ../packages/pi-subagents.nix { };
   supiContext = pinnedPkgs.callPackage ../packages/supi-context.nix { };
+  supiExtras = pinnedPkgs.callPackage ../packages/supi-extras.nix { };
   defaultSettings = {
     defaultThinkingLevel = "medium";
     quietStartup = true;
@@ -170,12 +180,14 @@ in
     };
 
     home = {
+      packages = lib.mkIf cfg.enable [ pinnedPkgs.oscclip ];
       activation.piCodingAgentPixOptimizer = lib.mkIf cfg.enable (
         lib.hm.dag.entryAfter [ "writeBoundary" ] ''
           run install -D -m 0600 ${optimizerStateFile} ${lib.escapeShellArg "${cfg.configDir}/optimizer.json"}
         ''
       );
       sessionVariables = lib.mkIf cfg.enable {
+        C2C_BIN = lib.mkDefault "${c2c}/bin/c2c";
         PI_VCC_CONFIG_PATH = lib.mkDefault "${cfg.configDir}/pi-vcc-config.json";
       };
     };
@@ -188,6 +200,14 @@ in
         {
           packages = lib.mkForce [
             "${dietLsp}"
+            "${piHerdr}/lib/node_modules/@ogulcancelik/pi-herdr"
+            "${herdrSudoTask}/lib/node_modules/pi-herdr-sudo-task"
+            "${askHerdr}/lib/node_modules/pi-ask-herdr"
+            "${herdrRename}/lib/node_modules/pi-herdr-rename"
+            "${pattyBgTasks}/lib/node_modules/pi-patty-bg-tasks"
+            "${piC2c}/lib/node_modules/pi-c2c"
+            "${vimMode}/lib/node_modules/pi-vimmode"
+            "${usage}/lib/node_modules/@narumitw/pi-usage"
             "${mcpAdapter}/lib/node_modules/pi-mcp-adapter"
             "${playwright}/lib/node_modules/pi-playwright"
             "${pixOptimizer}/lib/node_modules/@xynogen/pix-optimizer"
@@ -198,6 +218,7 @@ in
             "${searxng}/lib/node_modules/pi-searxng"
             "${subagents}/lib/node_modules/pi-subagents"
             "${supiContext}/lib/node_modules/@mrclrchtr/supi-context"
+            "${supiExtras}/lib/node_modules/@mrclrchtr/supi-extras"
           ];
         }
       ];

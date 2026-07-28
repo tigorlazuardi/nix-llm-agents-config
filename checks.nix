@@ -126,6 +126,37 @@ let
     nixpkgs-unstable.legacyPackages.x86_64-linux.callPackage ./packages/pi-diet-lsp.nix
       { };
   expectedDietLspPath = "${expectedDietLsp}";
+  expectedPiHerdr =
+    nixpkgs-unstable.legacyPackages.x86_64-linux.callPackage ./packages/pi-herdr.nix
+      { };
+  expectedPiHerdrPath = "${expectedPiHerdr}/lib/node_modules/@ogulcancelik/pi-herdr";
+  expectedHerdrSudoTask =
+    nixpkgs-unstable.legacyPackages.x86_64-linux.callPackage ./packages/pi-herdr-sudo-task.nix
+      { };
+  expectedHerdrSudoTaskPath = "${expectedHerdrSudoTask}/lib/node_modules/pi-herdr-sudo-task";
+  expectedAskHerdr =
+    nixpkgs-unstable.legacyPackages.x86_64-linux.callPackage ./packages/pi-ask-herdr.nix
+      { };
+  expectedAskHerdrPath = "${expectedAskHerdr}/lib/node_modules/pi-ask-herdr";
+  expectedHerdrRename =
+    nixpkgs-unstable.legacyPackages.x86_64-linux.callPackage ./packages/pi-herdr-rename.nix
+      { };
+  expectedHerdrRenamePath = "${expectedHerdrRename}/lib/node_modules/pi-herdr-rename";
+  expectedPattyBgTasks =
+    nixpkgs-unstable.legacyPackages.x86_64-linux.callPackage ./packages/pi-patty-bg-tasks.nix
+      { };
+  expectedPattyBgTasksPath = "${expectedPattyBgTasks}/lib/node_modules/pi-patty-bg-tasks";
+  expectedC2c = nixpkgs-unstable.legacyPackages.x86_64-linux.callPackage ./packages/c2c.nix { };
+  expectedPiC2c = nixpkgs-unstable.legacyPackages.x86_64-linux.callPackage ./packages/pi-c2c.nix { };
+  expectedPiC2cPath = "${expectedPiC2c}/lib/node_modules/pi-c2c";
+  expectedVimMode =
+    nixpkgs-unstable.legacyPackages.x86_64-linux.callPackage ./packages/pi-vimmode.nix
+      { };
+  expectedVimModePath = "${expectedVimMode}/lib/node_modules/pi-vimmode";
+  expectedUsage =
+    nixpkgs-unstable.legacyPackages.x86_64-linux.callPackage ./packages/pi-usage.nix
+      { };
+  expectedUsagePath = "${expectedUsage}/lib/node_modules/@narumitw/pi-usage";
   expectedMcpAdapter =
     nixpkgs-unstable.legacyPackages.x86_64-linux.callPackage ./packages/pi-mcp-adapter.nix
       { };
@@ -164,12 +195,26 @@ let
     nixpkgs-unstable.legacyPackages.x86_64-linux.callPackage ./packages/supi-context.nix
       { };
   expectedSupiContextPath = "${expectedSupiContext}/lib/node_modules/@mrclrchtr/supi-context";
+  expectedSupiExtras =
+    nixpkgs-unstable.legacyPackages.x86_64-linux.callPackage ./packages/supi-extras.nix
+      { };
+  expectedSupiExtrasPath = "${expectedSupiExtras}/lib/node_modules/@mrclrchtr/supi-extras";
+  expectedOscclip = nixpkgs-unstable.legacyPackages.x86_64-linux.oscclip;
   expectedWritingGreatSkills = default.config.programs.pi-coding-agent.skills.writing-great-skills;
   secretWrappedMcpConfig =
     secretWrappedMcp.config.home.file."${secretWrappedMcp.config.programs.pi-coding-agent.configDir}/mcp.json".source;
 in
 {
   diet-lsp = expectedDietLsp;
+  pi-herdr = expectedPiHerdr;
+  pi-herdr-sudo-task = expectedHerdrSudoTask;
+  pi-ask-herdr = expectedAskHerdr;
+  pi-herdr-rename = expectedHerdrRename;
+  pi-patty-bg-tasks = expectedPattyBgTasks;
+  c2c = expectedC2c;
+  pi-c2c = expectedPiC2c;
+  pi-vimmode = expectedVimMode;
+  pi-usage = expectedUsage;
   mcp-adapter = expectedMcpAdapter;
   playwright = expectedPlaywright;
   pix-optimizer = expectedPixOptimizer;
@@ -180,6 +225,7 @@ in
   searxng = expectedSearxng;
   subagents = expectedSubagents;
   supi-context = expectedSupiContext;
+  supi-extras = expectedSupiExtras;
 
   module-evaluation =
     assert default.config.programs.pi-coding-agent.enable;
@@ -194,6 +240,14 @@ in
         showCacheMissNotices = false;
         packages = [
           expectedDietLspPath
+          expectedPiHerdrPath
+          expectedHerdrSudoTaskPath
+          expectedAskHerdrPath
+          expectedHerdrRenamePath
+          expectedPattyBgTasksPath
+          expectedPiC2cPath
+          expectedVimModePath
+          expectedUsagePath
           expectedMcpAdapterPath
           expectedPlaywrightPath
           expectedPixOptimizerPath
@@ -204,8 +258,12 @@ in
           expectedSearxngPath
           expectedSubagentsPath
           expectedSupiContextPath
+          expectedSupiExtrasPath
         ];
       };
+    assert builtins.elem expectedOscclip default.config.home.packages;
+    assert default.config.home.sessionVariables.C2C_BIN == "${expectedC2c}/bin/c2c";
+    assert !(default.config.home.sessionVariables ? C2C_PI_ALIAS);
     assert
       default.config.programs.pi-coding-agent.keybindings == {
         "app.tools.expand" = "ctrl+o";
@@ -309,6 +367,7 @@ in
     assert builtins.elem expectedPackage default.config.home.packages;
     assert
       !(builtins.elem disabled.config.programs.pi-coding-agent.package disabled.config.home.packages);
+    assert !(builtins.elem expectedOscclip disabled.config.home.packages);
     assert
       !(
         disabled.config.home.file ? "${disabled.config.programs.pi-coding-agent.configDir}/settings.json"
@@ -330,6 +389,7 @@ in
       );
     assert !(disabled.config.xdg.configFile ? "mcp/mcp.json");
     assert !(disabled.config.home.activation ? piCodingAgentPixOptimizer);
+    assert !(disabled.config.home.sessionVariables ? C2C_BIN);
     assert !(disabled.config.home.sessionVariables ? PI_VCC_CONFIG_PATH);
     assert
       !(
@@ -353,6 +413,14 @@ in
     assert
       settingsOverridden.config.programs.pi-coding-agent.settings.packages == [
         expectedDietLspPath
+        expectedPiHerdrPath
+        expectedHerdrSudoTaskPath
+        expectedAskHerdrPath
+        expectedHerdrRenamePath
+        expectedPattyBgTasksPath
+        expectedPiC2cPath
+        expectedVimModePath
+        expectedUsagePath
         expectedMcpAdapterPath
         expectedPlaywrightPath
         expectedPixOptimizerPath
@@ -363,6 +431,7 @@ in
         expectedSearxngPath
         expectedSubagentsPath
         expectedSupiContextPath
+        expectedSupiExtrasPath
       ];
     assert
       settingsOverridden.config.programs.pi-coding-agent.keybindings == {
@@ -374,7 +443,7 @@ in
   formatting =
     pkgs.runCommandLocal "pi-home-manager-formatting" { nativeBuildInputs = [ pkgs.nixfmt ]; }
       ''
-        nixfmt --check ${./flake.nix} ${./checks.nix} ${./modules/pi-coding-agent.nix} ${./modules/pi-coding-agent/agents.nix} ${./modules/pi-coding-agent/default-agents.nix} ${./modules/pi-coding-agent/pi-subagents.nix} ${./packages/pi-diet-lsp.nix} ${./packages/pi-mcp-adapter.nix} ${./packages/pi-playwright.nix} ${./packages/pix-optimizer.nix} ${./packages/pi-vcc.nix} ${./packages/pi-prompt-template-model.nix} ${./packages/rpiv-todo.nix} ${./packages/pi-rules.nix} ${./packages/pi-searxng.nix} ${./packages/pi-subagents.nix} ${./packages/supi-context.nix}
+        nixfmt --check ${./flake.nix} ${./checks.nix} ${./modules/pi-coding-agent.nix} ${./modules/pi-coding-agent/agents.nix} ${./modules/pi-coding-agent/default-agents.nix} ${./modules/pi-coding-agent/pi-subagents.nix} ${./packages/pi-diet-lsp.nix} ${./packages/pi-herdr.nix} ${./packages/pi-herdr-sudo-task.nix} ${./packages/pi-ask-herdr.nix} ${./packages/pi-herdr-rename.nix} ${./packages/pi-patty-bg-tasks.nix} ${./packages/c2c.nix} ${./packages/pi-c2c.nix} ${./packages/pi-vimmode.nix} ${./packages/pi-usage.nix} ${./packages/pi-mcp-adapter.nix} ${./packages/pi-playwright.nix} ${./packages/pix-optimizer.nix} ${./packages/pi-vcc.nix} ${./packages/pi-prompt-template-model.nix} ${./packages/rpiv-todo.nix} ${./packages/pi-rules.nix} ${./packages/pi-searxng.nix} ${./packages/pi-subagents.nix} ${./packages/supi-context.nix} ${./packages/supi-extras.nix}
         touch $out
       '';
 
@@ -389,6 +458,343 @@ in
         test ! -e ${expectedDietLsp}/node_modules
         pi --offline --no-extensions --no-skills --no-prompt-templates --no-context-files \
           -e ${expectedDietLsp} \
+          --list-models > pi.log 2>&1
+        ! grep -E 'Extension issues|Failed to load extension|Cannot find module|Error:' pi.log
+        touch $out
+      '';
+
+  pi-herdr-load = pkgs.runCommandLocal "pi-herdr-load" { nativeBuildInputs = [ expectedPackage ]; } ''
+    export HOME="$TMPDIR/home"
+    export PI_CODING_AGENT_DIR="$HOME/.pi/agent"
+    export PI_TELEMETRY=0
+    export HERDR_ENV=1
+    export HERDR_PANE_ID=test-pane
+    mkdir -p "$PI_CODING_AGENT_DIR"
+    test -f ${expectedPiHerdrPath}/index.ts
+    test ! -e ${expectedPiHerdrPath}/node_modules
+    pi --offline --no-extensions --no-skills --no-prompt-templates --no-context-files \
+      -e ${expectedPiHerdrPath} \
+      --list-models > pi.log 2>&1
+    ! grep -E 'Extension issues|Failed to load extension|Cannot find module|Error:' pi.log
+    touch $out
+  '';
+
+  pi-patty-bg-tasks-load =
+    pkgs.runCommandLocal "pi-patty-bg-tasks-load"
+      {
+        nativeBuildInputs = [
+          expectedPackage
+          pkgs.nodejs_22
+        ];
+      }
+      ''
+        export HOME="$TMPDIR/home"
+        export PI_CODING_AGENT_DIR="$HOME/.pi/agent"
+        export PI_TELEMETRY=0
+        mkdir -p "$PI_CODING_AGENT_DIR"
+        test -f ${expectedPattyBgTasksPath}/index.ts
+        test ! -e ${expectedPattyBgTasksPath}/node_modules
+        grep -F 'name: "agent_bg"' ${expectedPattyBgTasksPath}/src/tools/agent-bg.ts
+        grep -F 'constants.O_NOFOLLOW' ${expectedPattyBgTasksPath}/src/spawn.ts
+        grep -F 'mode: 0o600' ${expectedPattyBgTasksPath}/src/tools/agent-bg.ts
+        cp ${expectedPattyBgTasksPath}/src/spawn.ts "$TMPDIR/spawn.ts"
+        node --experimental-strip-types --input-type=module <<EOF
+        import assert from "node:assert/strict";
+        import { mkdirSync, readFileSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+        import { spawnWithFileOutput } from "$TMPDIR/spawn.ts";
+        const dir = "$TMPDIR/runtime";
+        const log = dir + "/probe.log";
+        const child = spawnWithFileOutput({ command: "printf private", cwd: "$TMPDIR", logPath: log });
+        const keeper = setInterval(() => {}, 1000);
+        assert.equal(await child.exit, 0);
+        clearInterval(keeper);
+        assert.equal(statSync(dir).mode & 0o777, 0o700);
+        assert.equal(statSync(log).mode & 0o777, 0o600);
+        assert.equal(readFileSync(log, "utf8"), "private");
+        const target = "$TMPDIR/target";
+        writeFileSync(target, "keep");
+        symlinkSync(target, dir + "/linked.log");
+        assert.throws(() => spawnWithFileOutput({ command: "printf overwrite", cwd: "$TMPDIR", logPath: dir + "/linked.log" }));
+        assert.equal(readFileSync(target, "utf8"), "keep");
+        EOF
+        pi --offline --no-extensions --no-skills --no-prompt-templates --no-context-files \
+          -e ${expectedPattyBgTasksPath} \
+          --list-models > pi.log 2>&1
+        ! grep -E 'Extension issues|Failed to load extension|Cannot find module|Error:' pi.log
+        touch $out
+      '';
+
+  pi-c2c-load =
+    pkgs.runCommandLocal "pi-c2c-load"
+      {
+        nativeBuildInputs = [
+          expectedPackage
+          pkgs.nodejs_22
+        ];
+      }
+      ''
+        export HOME="$TMPDIR/home"
+        export PI_CODING_AGENT_DIR="$HOME/.pi/agent"
+        export PI_TELEMETRY=0
+        export C2C_BIN=${expectedC2c}/bin/c2c
+        export C2C_PI_ENABLED=0
+        mkdir -p "$PI_CODING_AGENT_DIR"
+        test "$($C2C_BIN --version | cut -d' ' -f1)" = 0.14.4
+        test -n "$($C2C_BIN host-id)"
+        test -f ${expectedPiC2cPath}/src/index.ts
+        test -f ${expectedPiC2cPath}/node_modules/@clanker-code/c2c/index.js
+        test ! -e ${expectedPiC2cPath}/node_modules/@clanker-code/c2c-linux-x64
+        grep -F '"version": "0.4.18"' ${expectedPiC2cPath}/package.json
+        grep -F 'name: "c2c_pi_send"' ${expectedPiC2cPath}/src/tools.ts
+        grep -F 'flag: "wx"' ${expectedPiC2cPath}/src/spool.ts
+        cp ${expectedPiC2cPath}/src/spool.ts "$TMPDIR/spool.ts"
+        node --experimental-strip-types --input-type=module <<EOF
+        import assert from "node:assert/strict";
+        import { lstatSync, mkdirSync, readFileSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+        import { spoolPath, writeSpool } from "$TMPDIR/spool.ts";
+        const dir = "$TMPDIR/spool";
+        mkdirSync(dir, { mode: 0o755 });
+        writeSpool(dir, "session", [{ from_alias: "peer", to_alias: "self", content: "private", ts: 0 }]);
+        const spool = spoolPath(dir, "session");
+        assert.equal(statSync(dir).mode & 0o777, 0o700);
+        assert.equal(statSync(spool).mode & 0o777, 0o600);
+        assert.match(readFileSync(spool, "utf8"), /private/);
+        const target = "$TMPDIR/target";
+        writeFileSync(target, "keep");
+        const temp = spool + "." + process.pid + ".tmp";
+        symlinkSync(target, temp);
+        writeSpool(dir, "session", [{ from_alias: "peer", to_alias: "self", content: "overwrite", ts: 0 }]);
+        assert.equal(readFileSync(target, "utf8"), "keep");
+        assert(lstatSync(temp).isSymbolicLink());
+        assert.match(readFileSync(spool, "utf8"), /private/);
+        EOF
+        pi --offline --no-extensions --no-skills --no-prompt-templates --no-context-files \
+          -e ${expectedPiC2cPath} \
+          --list-models > pi.log 2>&1
+        ! grep -E 'Extension issues|Failed to load extension|Cannot find module|Error:' pi.log
+        touch $out
+      '';
+
+  pi-vimmode-load =
+    pkgs.runCommandLocal "pi-vimmode-load" { nativeBuildInputs = [ expectedPackage ]; }
+      ''
+        export HOME="$TMPDIR/home"
+        export PI_CODING_AGENT_DIR="$HOME/.pi/agent"
+        export PI_TELEMETRY=0
+        mkdir -p "$PI_CODING_AGENT_DIR"
+        test -f ${expectedVimModePath}/index.js
+        test -f ${expectedVimModePath}/config.d.ts
+        test ! -e ${expectedVimModePath}/node_modules
+        grep -F '"version": "0.9.0"' ${expectedVimModePath}/package.json
+        grep -aF 'registerCommand(`vimmode`' ${expectedVimModePath}/index.js
+        pi --offline --no-extensions --no-skills --no-prompt-templates --no-context-files \
+          -e ${expectedVimModePath} \
+          --list-models > pi.log 2>&1
+        ! grep -E 'Extension issues|Failed to load extension|Cannot find module|Error:' pi.log
+        touch $out
+      '';
+
+  pi-usage-load =
+    pkgs.runCommandLocal "pi-usage-load"
+      {
+        nativeBuildInputs = [
+          expectedPackage
+          pkgs.nodejs_22
+        ];
+      }
+      ''
+        export HOME="$TMPDIR/home"
+        export PI_CODING_AGENT_DIR="$HOME/.pi/agent"
+        export PI_TELEMETRY=0
+        mkdir -p "$PI_CODING_AGENT_DIR"
+        usage=${expectedUsagePath}
+        test -f "$usage/package.json"
+        test -f "$usage/src/index.ts"
+        test ! -e "$usage/node_modules"
+        grep -F '"name": "@narumitw/pi-usage"' "$usage/package.json"
+        grep -F '"version": "0.34.0"' "$usage/package.json"
+        grep -F '"./src/index.ts"' "$usage/package.json"
+        grep -F 'pi.registerCommand("usage"' "$usage/src/usage.ts"
+
+        # ponytail: .js aliases let dependency-free Node strip-types run exact packaged .ts files.
+        cp -R "$usage/src" "$TMPDIR/usage-src"
+        chmod -R u+w "$TMPDIR/usage-src"
+        find "$TMPDIR/usage-src" -type f -name '*.ts' -print0 | while IFS= read -r -d ''' source; do
+          ln -s "$(basename "$source")" "''${source%.ts}.js"
+        done
+        cd "$TMPDIR"
+        node --experimental-strip-types --input-type=module <<'EOF'
+        import assert from "node:assert/strict";
+        import { redactUsageError } from "./usage-src/core.ts";
+        import {
+          queryProviderUsage,
+          resolveUsageAuth,
+          SUPPORTED_ADAPTERS,
+        } from "./usage-src/query.ts";
+
+        const originalFetch = globalThis.fetch;
+        const originalSetTimeout = globalThis.setTimeout;
+        const originalClearTimeout = globalThis.clearTimeout;
+        const model = (provider, baseUrl) => ({ id: "test", name: "Test", provider, baseUrl });
+        const context = (current, auth) => ({
+          model: current,
+          modelRegistry: {
+            getApiKeyAndHeaders: async () => ({ ok: true, apiKey: auth }),
+            getProviderAuth: async () => ({ auth: { apiKey: auth, baseUrl: current.baseUrl } }),
+            getAvailable: () => [current],
+            getAll: () => [current],
+          },
+        });
+
+        try {
+          let calls = [];
+          globalThis.fetch = async (url, options) => {
+            calls.push({ url: String(url), headers: options.headers, signal: options.signal });
+            if (String(url) === "https://chatgpt.com/backend-api/wham/usage") {
+              return Response.json({ credits: { has_credits: false } });
+            }
+            if (String(url) === "https://openrouter.ai/api/v1/key") {
+              return Response.json({ data: { usage: 1 } });
+            }
+            throw new Error("unexpected endpoint: " + url);
+          };
+
+          for (const [provider, origin, endpoint] of [
+            ["openai-codex", "https://chatgpt.com/backend-api", "https://chatgpt.com/backend-api/wham/usage"],
+            ["openrouter", "https://openrouter.ai/api/v1", "https://openrouter.ai/api/v1/key"],
+          ]) {
+            const adapter = SUPPORTED_ADAPTERS.find((candidate) => candidate.id === provider);
+            assert.ok(adapter);
+            const auth = await resolveUsageAuth(context(model(provider, origin), "official-secret"), adapter);
+            assert.ok(auth);
+            await queryProviderUsage(adapter, auth, new AbortController().signal, 1_000);
+            const call = calls.at(-1);
+            assert.equal(call.url, endpoint);
+            assert.deepEqual(call.headers, { Authorization: "Bearer official-secret", "User-Agent": "pi-usage" });
+          }
+
+          const callCount = calls.length;
+          for (const [provider, origin] of [
+            ["openai-codex", "https://chatgpt.example.test/backend-api"],
+            ["openrouter", "https://openrouter.example.test/api/v1"],
+          ]) {
+            const adapter = SUPPORTED_ADAPTERS.find((candidate) => candidate.id === provider);
+            await assert.rejects(
+              () => resolveUsageAuth(context(model(provider, origin), "custom-secret"), adapter),
+              /custom.*base URL|official/iu,
+            );
+          }
+          assert.equal(calls.length, callCount, "custom origins must not receive Authorization");
+
+          const openrouter = SUPPORTED_ADAPTERS.find((candidate) => candidate.id === "openrouter");
+          const auth = await resolveUsageAuth(
+            context(model("openrouter", "https://openrouter.ai/api/v1"), "cap-secret"),
+            openrouter,
+          );
+          globalThis.fetch = async () => new Response("x".repeat(70_000), { status: 200 });
+          await assert.rejects(
+            () => queryProviderUsage(openrouter, auth, new AbortController().signal, 1_000),
+            /exceeded 65536 bytes/,
+          );
+          globalThis.fetch = async () => new Response("x".repeat(70_000), { status: 500 });
+          await assert.rejects(
+            () => queryProviderUsage(openrouter, auth, new AbortController().signal, 1_000),
+            (error) => error instanceof Error && error.message.length < 5_000 && /returned 500/.test(error.message),
+          );
+
+          let timeoutDelay;
+          globalThis.setTimeout = (callback, delay) => {
+            timeoutDelay = delay;
+            queueMicrotask(callback);
+            return 1;
+          };
+          globalThis.clearTimeout = () => {};
+          globalThis.fetch = (_url, options) => new Promise((_resolve, reject) => {
+            options.signal.addEventListener("abort", () => reject(Object.assign(new Error("aborted"), { name: "AbortError" })), { once: true });
+          });
+          await assert.rejects(
+            () => queryProviderUsage(openrouter, auth, new AbortController().signal, 15_000),
+            /Timed out after 15s/,
+          );
+          assert.equal(timeoutDelay, 15_000);
+
+          const redacted = redactUsageError(
+            'Bearer bearer-token {"access_token":"access-token","refresh_token":"refresh-token","api_key":"api-token"} exact-secret header-secret',
+            ["exact-secret", "header-secret"],
+          );
+          for (const secret of ["bearer-token", "access-token", "refresh-token", "api-token", "exact-secret", "header-secret"]) {
+            assert.ok(!redacted.includes(secret));
+          }
+          assert.match(redacted, /<redacted>/);
+        } finally {
+          globalThis.fetch = originalFetch;
+          globalThis.setTimeout = originalSetTimeout;
+          globalThis.clearTimeout = originalClearTimeout;
+        }
+        EOF
+
+        pi --offline --no-extensions --no-skills --no-prompt-templates --no-context-files \
+          -e "$usage" \
+          --list-models > pi.log 2>&1
+        ! grep -E 'Extension issues|Failed to load extension|Cannot find module|Error:' pi.log
+        touch $out
+      '';
+
+  pi-herdr-rename-load =
+    pkgs.runCommandLocal "pi-herdr-rename-load" { nativeBuildInputs = [ expectedPackage ]; }
+      ''
+        export HOME="$TMPDIR/home"
+        export PI_CODING_AGENT_DIR="$HOME/.pi/agent"
+        export PI_TELEMETRY=0
+        mkdir -p "$PI_CODING_AGENT_DIR"
+        test -f ${expectedHerdrRenamePath}/src/index.ts
+        test ! -e ${expectedHerdrRenamePath}/node_modules
+        grep -F 'name: "rename_herdr_tab"' ${expectedHerdrRenamePath}/src/index.ts
+        grep -F 'pi.exec("herdr", ["tab", "rename", tabId, name]' ${expectedHerdrRenamePath}/src/index.ts
+        grep -F 'if (!hasHerdrEnvironment()) return;' ${expectedHerdrRenamePath}/src/index.ts
+        pi --offline --no-extensions --no-skills --no-prompt-templates --no-context-files \
+          -e ${expectedHerdrRenamePath} \
+          --list-models > pi.log 2>&1
+        ! grep -E 'Extension issues|Failed to load extension|Cannot find module|Error:' pi.log
+        touch $out
+      '';
+
+  pi-ask-herdr-load =
+    pkgs.runCommandLocal "pi-ask-herdr-load" { nativeBuildInputs = [ expectedPackage ]; }
+      ''
+        export HOME="$TMPDIR/home"
+        export PI_CODING_AGENT_DIR="$HOME/.pi/agent"
+        export PI_TELEMETRY=0
+        mkdir -p "$PI_CODING_AGENT_DIR"
+        test -f ${expectedAskHerdrPath}/index.ts
+        test ! -e ${expectedAskHerdrPath}/node_modules
+        grep -F 'name: "ask_user"' ${expectedAskHerdrPath}/src/tool.ts
+        grep -F 'if (ctx.mode !== "tui")' ${expectedAskHerdrPath}/src/tool.ts
+        grep -F 'pane.report_metadata' ${expectedAskHerdrPath}/src/herdr.ts
+        pi --offline --no-extensions --no-skills --no-prompt-templates --no-context-files \
+          -e ${expectedAskHerdrPath} \
+          --list-models > pi.log 2>&1
+        ! grep -E 'Extension issues|Failed to load extension|Cannot find module|Error:' pi.log
+        touch $out
+      '';
+
+  pi-herdr-sudo-task-load =
+    pkgs.runCommandLocal "pi-herdr-sudo-task-load" { nativeBuildInputs = [ expectedPackage ]; }
+      ''
+        export HOME="$TMPDIR/home"
+        export PI_CODING_AGENT_DIR="$HOME/.pi/agent"
+        export PI_TELEMETRY=0
+        export HERDR_ENV=1
+        export HERDR_SOCKET_PATH="$TMPDIR/herdr.sock"
+        export HERDR_PANE_ID=test-pane
+        mkdir -p "$PI_CODING_AGENT_DIR"
+        test -f ${expectedHerdrSudoTaskPath}/dist/index.js
+        test ! -e ${expectedHerdrSudoTaskPath}/node_modules
+        grep -F 'spawn("sudo",argv,{stdio:["inherit","pipe","pipe"]})' ${expectedHerdrSudoTaskPath}/dist/index.js
+        grep -F 'if (!ctx.hasUI)' ${expectedHerdrSudoTaskPath}/dist/index.js
+        grep -F 'Proceed with these exact commands? [y/n]:' ${expectedHerdrSudoTaskPath}/dist/index.js
+        pi --offline --no-extensions --no-skills --no-prompt-templates --no-context-files \
+          -e ${expectedHerdrSudoTaskPath} \
           --list-models > pi.log 2>&1
         ! grep -E 'Extension issues|Failed to load extension|Cannot find module|Error:' pi.log
         touch $out
@@ -571,6 +977,31 @@ in
           --list-models > pi.log 2>&1
         ! grep -E 'Extension issues|Failed to load extension|Cannot find module|Error:' pi.log
         test ! -e "$PI_CODING_AGENT_DIR/supi/config.json"
+        touch $out
+      '';
+
+  supi-extras-load =
+    pkgs.runCommandLocal "supi-extras-load"
+      {
+        nativeBuildInputs = [
+          expectedPackage
+          expectedOscclip
+        ];
+      }
+      ''
+        export HOME="$TMPDIR/home"
+        export PI_CODING_AGENT_DIR="$HOME/.pi/agent"
+        export PI_TELEMETRY=0
+        mkdir -p "$PI_CODING_AGENT_DIR"
+        test -d ${expectedSupiExtrasPath}/node_modules/@mrclrchtr/supi-core
+        test ! -e ${expectedSupiExtrasPath}/node_modules/clipboardy
+        grep -F 'spawn("osc-copy"' ${expectedSupiExtrasPath}/src/clipboard.ts
+        command -v osc-copy
+        pi --offline --no-extensions --no-skills --no-prompt-templates --no-context-files \
+          -e ${expectedSupiExtrasPath} \
+          --list-models > pi.log 2>&1
+        ! grep -E 'Extension issues|Failed to load extension|Cannot find module|Error:' pi.log
+        test ! -e "$HOME/.pi/agent/supi/prompt-stash.json"
         touch $out
       '';
 

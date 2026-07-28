@@ -1,0 +1,27 @@
+diff -ruN a/src/spool.ts b/src/spool.ts
+--- a/src/spool.ts	2026-07-27 22:20:09.099117911 +0700
++++ b/src/spool.ts	2026-07-27 22:20:09.120777218 +0700
+@@ -45,13 +45,20 @@
+ 
+ /** Overwrite the spool with `msgs` (atomic via temp-file rename). Best-effort. */
+ export function writeSpool(dir: string, sessionId: string, msgs: C2cMessage[]): void {
++  let tmp: string | undefined;
++  let created = false;
+   try {
+-    fs.mkdirSync(dir, { recursive: true });
++    fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
++    fs.chmodSync(dir, 0o700);
+     const target = spoolPath(dir, sessionId);
+-    const tmp = `${target}.${process.pid}.tmp`;
+-    fs.writeFileSync(tmp, JSON.stringify(msgs), "utf-8");
++    tmp = `${target}.${process.pid}.tmp`;
++    fs.writeFileSync(tmp, JSON.stringify(msgs), { encoding: "utf-8", flag: "wx", mode: 0o600 });
++    created = true;
+     fs.renameSync(tmp, target);
+   } catch {
++    if (created && tmp) {
++      try { fs.unlinkSync(tmp); } catch { /* already absent */ }
++    }
+     // Best-effort: a spool write failure must never crash delivery.
+   }
+ }

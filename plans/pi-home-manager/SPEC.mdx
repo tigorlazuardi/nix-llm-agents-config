@@ -454,7 +454,7 @@ This inventory mirrors the active `settings.packages` allowlist as of 2026-07-26
 | `npm:pi-mcp-adapter` | `2.11.0` | Packaged from npm-published git commit, loaded by immutable local path, and integrated with user-level `programs.mcp` |
 | `npm:@tigorhutasuhut/pi-rules` | `0.4.1` | Replaces `pi-rules@0.1.1`; packaged from exact npm tarball with locked runtime dependencies; multi-source rule/skill prompt injection, first-match tool blocking, and opt-in commit-nudge risks explicitly accepted |
 | `npm:pi-prompt-template-model` | `0.10.0` | Packaged from exact upstream commit and loaded by immutable local path; drain authoring prompts inject `writing-great-skills` |
-| `npm:@koltmcbride/pi-loop` | `0.2.0` | Excluded: advisory-only read-only mode and plaintext prompt state under project `.pi/loops/` |
+| `npm:@koltmcbride/pi-loop` | `0.2.0` | Excluded from managed active allowlist: `readOnly` is advisory prompt-only; project-local prompt persistence is symlink/permissions/atomicity unsafe; an accepted negative cron step can hang Pi; the `loop:fire` event source recurses; first-session state leaks across in-process session switches. Exact npm tarball matches `gitHead` `ce82dfda599d0bca98464cf3150c5723920806f1` (`sha256-3uD9Zu2uQGHWLwBLMJSG8tVeRBzpHZakERuwpFfd+vE=`). Re-evaluate only after an upstream release resolves these blockers with tests, or after separately approved hardening scope. |
 | `npm:pi-searxng` | `1.0.4` | Pinned to exact upstream commit; Pi peer metadata stripped for isolated packaging; unrestricted URL fetch and clone resource risks explicitly accepted |
 | `npm:pi-playwright` | `0.1.1` | Packaged from exact npm tarball with locked CLI closure and Nix Chromium; browser, auth-state file, arbitrary page-code, and localhost probe risks explicitly accepted |
 | `npm:pi-subagents` | `0.35.1` | Packaged from exact npm tarball with locked runtime dependencies; subprocess, worktree, artifact-write, scheduling, and delegated model/tool risks explicitly accepted |
@@ -463,15 +463,17 @@ This inventory mirrors the active `settings.packages` allowlist as of 2026-07-26
 | `npm:@mrclrchtr/supi-context` | `2.6.1` | Upgraded from `2.5.0`; packaged with exact `supi-core` and `typebox` runtime deps; agent-callable tool remains disabled by default |
 | `npm:@xynogen/pix-optimizer` | `1.1.19` | Upgraded from `1.1.17`; packaged with only used `pix-pretty@1.7.24` source; `rtk`, `jq`, and `toon` remain ambient `PATH` dependencies |
 | `npm:@sting8k/pi-vcc` | `0.4.0` | Packaged from runtime-identical `v0.4.0` tag source without the npm tarball's 16 MiB demo; host Pi supplies peers |
-| `npm:@mrclrchtr/supi-extras` | `2.5.0` | Active; audit pending |
-| `npm:@tifan/pi-rename` | `0.4.2` | Active; audit pending |
-| `npm:@ogulcancelik/pi-herdr` | `0.3.0` | Active; audit pending |
-| `git:github.com/tigorlazuardi/pi-herdr-sudo-task` | `c2c17cf0b1233a1f4837e7e4aff7e65bc98b8705` | Active; audit pending |
-| `npm:pi-ask-herdr` | `0.2.1` | Active; audit pending |
-| `npm:pi-patty-bg-tasks` | `1.1.6` | Active; audit pending |
-| `npm:pi-c2c` | `0.4.14` | Active; requires separately packaged native `c2c` |
+| `npm:@mrclrchtr/supi-extras` | `2.7.0` | Upgraded from `2.5.0`; bundled `supi-core` retained; `clipboardy` closure replaced by pinned `oscclip@0.4.1` OSC 52 backend |
+| `npm:pi-herdr-rename` | `0.1.0` | Replaces `@tifan/pi-rename@0.4.2`; exact npm tarball, zero npm closure, Herdr-gated tab rename tool, no persistent configuration |
+| `npm:@ogulcancelik/pi-herdr` | `0.4.0` | Upgraded from `0.3.0`; packaged from exact npm tarball with no npm closure; Herdr CLI remains an ambient runtime dependency |
+| `npm:pi-herdr-sudo-task` | `0.1.1` | Replaces git revision `c2c17cf`; exact npm artifact matches tagged source build and has no npm closure |
+| `npm:pi-ask-herdr` | `0.2.2` | Replaces `0.2.1`; exact npm tarball, no npm closure, no persistent plugin configuration |
+| `npm:pi-patty-bg-tasks` | `1.1.6` | Exact npm tarball, zero npm closure, no persistent plugin configuration; locally hardened private runtime artifacts |
+| `npm:pi-c2c` | `0.4.18` | Upgraded from `0.4.14`; exact npm extension and resolver closure, separately patched native `c2c@0.14.4`, no global alias |
+| `npm:pi-vimmode` | `0.9.0` | Exact npm bundle; managed Pi peers; no current JSON or trusted-JS config to migrate |
+| `npm:@narumitw/pi-usage` | `0.34.0` | Exact provenance-attested npm tarball, zero npm closure; automatic official-provider usage calls and runtime credential boundary accepted; no configuration or persistence |
 
-Removed from the active allowlist: `@juicesharp/rpiv-ask-user-question`, `@kmmuntasir/pi-nested-subagents`, `@misunders2d/pi-goal`, `@quintinshaw/pi-dynamic-workflows`, `@vanillagreen/pi-background-tasks`, `@yandy0725/pi-memory`, `pi-ask-user`, `pi-observational-memory`, and `remote-pi`. They remain excluded unless a later audit establishes a concrete need.
+Removed from the active allowlist: `@tifan/pi-rename`, `@juicesharp/rpiv-ask-user-question`, `@kmmuntasir/pi-nested-subagents`, `@misunders2d/pi-goal`, `@quintinshaw/pi-dynamic-workflows`, `@vanillagreen/pi-background-tasks`, `@yandy0725/pi-memory`, `pi-ask-user`, `pi-observational-memory`, and `remote-pi`. They remain excluded unless a later audit establishes a concrete need.
 
 <Decision title="Replace legacy pi-rules with scoped pi-rules" status="accepted">
 
@@ -494,6 +496,58 @@ Removed from the active allowlist: `@juicesharp/rpiv-ask-user-question`, `@kmmun
 <Decision title="Keep supi-context agent access opt-in" status="accepted">
 
 `@mrclrchtr/supi-context` is upgraded from `2.5.0` to `2.6.1`; the intervening releases only add unrelated `supi-review` work and Pi `0.82.0` compatibility maintenance. Its isolated closure locks `@mrclrchtr/supi-core` and `typebox`, while managed Pi supplies optional peers. `/supi-context` remains user-invoked. The `supi_context` agent tool remains disabled unless global or project SuPi configuration explicitly enables it; enabling exposes context-accounting metadata already present in the model context. Configuration reads are automatic, while writes occur only through an explicit SuPi settings interaction.
+
+</Decision>
+
+<Decision title="Preserve supi-extras clipboard and prompt-stash behavior" status="accepted">
+
+`@mrclrchtr/supi-extras` is upgraded from `2.5.0` to latest `2.7.0`; runtime TypeScript is unchanged across those releases, with only package and bundled `supi-core` version metadata advancing. The published tarball's bundled `@mrclrchtr/supi-core` is retained, while its `clipboardy` dependency and 52-package transitive closure are removed. Managed Pi supplies peer packages and pins nixpkgs `oscclip@0.4.1`; a narrow source patch sends clipboard text to its `osc-copy` OSC 52 command through stdin. This works on SSH and headless devices without Wayland/X11 packages, while failures still degrade without breaking Pi.
+
+No extension settings exist to migrate. Prompt drafts remain mutable plaintext runtime state in upstream's fixed `~/.pi/agent/supi/prompt-stash.json`; current state is empty. `Alt+S` writes drafts, while `Alt+C` and stash copy actions emit prompt text through terminal OSC 52. Passive startup behavior replaces the footer, updates terminal tab titles, and sets `GIT_EDITOR=true` plus `GIT_SEQUENCE_EDITOR=true` to prevent headless git hangs. The extension makes no network calls; `osc-copy` is the only clipboard subprocess and runs only after explicit copy actions. Upstream's fixed stash path does not follow a custom `PI_CODING_AGENT_DIR`; patch only if this deployment leaves the default config directory.
+
+</Decision>
+
+<Decision title="Keep pi-herdr gated by its host pane" status="accepted">
+
+`@ogulcancelik/pi-herdr` is upgraded from `0.3.0` to latest `0.4.0`, matching the active unversioned npm installation. The release replaces the monolithic stateful `herdr` tool with separate `herdr_layout`, `herdr_pane`, and `herdr_agent` tools backed by Herdr's native live-agent API. The exact npm tarball has no runtime dependency closure; managed Pi supplies peer packages.
+
+The extension registers no tools unless `HERDR_ENV=1` and `HERDR_PANE_ID` exists. Once active, it executes only the ambient `herdr` CLI: topology and agent operations use fixed argument arrays, while explicit `herdr_pane run` intentionally passes a user-requested shell command. It refuses to close Pi's own pane and adds no direct file or network access. Upstream requires Herdr `0.7.5` or newer; current host `0.7.4` satisfies basic pane commands but must be upgraded outside this module before relying on the new live-agent lifecycle operations.
+
+</Decision>
+
+<Decision title="Replace pi-rename with Herdr-native scope naming" status="accepted">
+
+`npm:pi-herdr-rename@0.1.0` replaces `@tifan/pi-rename@0.4.2`. The exact npm tarball declares source revision `3b64079992f8b89ba75d2aef3163c5866db17cb9`; its published runtime and README match that revision. It has no npm dependency closure, while managed Pi supplies `typebox` and Pi peers. Upstream's seven tests pass.
+
+The extension registers only when `HERDR_ENV=1`, `HERDR_SOCKET_PATH`, and `HERDR_PANE_ID` are present. It resolves the pane's live tab on every call, validates scope names as non-empty printable single lines capped at 60 characters, and passes the tab ID and name through fixed argv-based `herdr` calls rather than a shell. Numeric default tab labels add a hidden reminder until rename succeeds; custom labels stay untouched. Startup inspection failures suppress the reminder, while explicit rename failures remain visible. One coding agent per tab is the intentional collision boundary.
+
+No persistent settings exist. Herdr environment values and the ambient `herdr` CLI remain launcher-owned runtime inputs; no Home Manager options are invented.
+
+</Decision>
+
+<Decision title="Control sudo-task releases through npm" status="accepted">
+
+`npm:pi-herdr-sudo-task@0.1.1` replaces direct git revision `c2c17cf0b1233a1f4837e7e4aff7e65bc98b8705`, giving explicit maintainer-controlled release pacing. The exact npm tarball is provenance-attested, matches the compiled output from tagged commit `a8b491e41c1cbb6a94d2568210b32b50046575c2`, and has no runtime dependency closure; managed Pi supplies peers, while `herdr` and `sudo` remain host commands. The release adds geometry-aware pane splitting and snapshots validated Herdr environment values across asynchronous work without weakening the privilege boundary. Upstream's full self-check passes against the published artifact.
+
+This remains security-critical code, not a sandbox. It validates absolute working directories, step counts, control characters, file ownership/modes, and live Herdr state; refuses headless Pi; requires separate Pi approval and terminal `y` consent before `sudo -v`; then runs only reviewed commands sequentially through `sudo sh -c`. Password input bypasses captured output, while command output is intentionally retained in private `/tmp/pi-herdr-sudo-task-<uid>/` transcripts that may contain sensitive data. Unknown outcomes are never retried automatically. No settings exist to migrate.
+
+</Decision>
+
+<Decision title="Package ask-herdr without invented module options" status="accepted">
+
+`npm:pi-ask-herdr@0.2.2` replaces active `0.2.1` and adds responsive Herdr metadata for the first question plus remaining count. The exact npm tarball matches tagged source files, has no runtime dependency closure, and relies only on peers already supplied by managed Pi. Upstream's 18 runnable tests pass. The tool refuses non-TUI execution, validates every question before opening its wizard, restores Herdr blocked state in `finally`, and treats socket metadata failures as non-fatal.
+
+The plugin has no persistent configuration to migrate. `timeout`, `default`, and `allow_custom` are per-call tool inputs, not settings. Herdr sidebar rows may optionally include `$ask` and `$ask_count`; without them only question metadata visibility is lost, while prompting and blocked-state reporting still work. That external Herdr UI configuration remains outside this Pi Home Manager module. In Herdr sessions, question text is sent to the local Herdr socket as pane metadata, so callers should avoid placing secrets in question labels.
+
+</Decision>
+
+<Decision title="Harden pi-patty runtime artifacts during packaging" status="accepted">
+
+`npm:pi-patty-bg-tasks@1.1.6` is pinned from its exact npm tarball and has no runtime dependency closure beyond Pi peers. It overrides Pi's `bash` tool and adds immediate/background command execution, job control, monitors, and detached `pi -p` agents. Commands intentionally execute through `bash -c`; WebSocket monitors may connect to caller-selected endpoints; `agent_bg` passes bounded current-session context to another Pi process. Job limits, output bounds, process-group termination, command/cwd validation, monitor firehose protection, and stale cleanup remain upstream-owned. Upstream typecheck and 180-test run pass.
+
+The plugin has no persistent configuration to expose. Timeouts, notification choice, monitor persistence, working directories, and model selection are per-call or current-session values. Fixed constants remain fixed because no upstream settings contract exists.
+
+Audit found upstream creates `/tmp/pi-bg` as `0755`, logs as `0644`, and agent prompt files with default process modes. Those files may contain command output or session excerpts. Packaging therefore applies a narrow hardening patch: UID-scoped runtime directory `0700`, logs/prompts `0600`, owner/type verification, random prompt suffixes, and `O_NOFOLLOW` log opens. Runtime checks verify permissions and symlink refusal. Remove the patch only after an equivalent upstream release is pinned.
 
 </Decision>
 
@@ -529,16 +583,52 @@ Typed Home Manager options under `programs.pi-coding-agent.plugins.pi-vcc.settin
 
 <Decision title="Package pi-c2c extension and c2c binary separately" status="accepted">
 
-`pi-c2c` `0.4.14` is a Pi TypeScript extension loaded through native package discovery; it does not provide a `pi-c2c` executable. Its runtime dependency is native `c2c` `0.13.0`, sourced from the official Linux x64 release and patched for NixOS with SQLite and GMP. The module must provide the immutable binary and set `C2C_BIN` to its absolute path rather than relying on npm's platform binary or ambient `PATH`.
+`pi-c2c` is upgraded from active `0.4.14` to active/latest `0.4.18`; its exact npm tarball declares source commit `49c000d1f20af8fb85ca5c16bd9e1c592888612b` and matches that revision's published runtime. The extension closure includes the exact `@clanker-code/c2c@0.14.4` JavaScript resolver. Its duplicate optional platform packages are omitted because the module supplies native `c2c@0.14.4` separately and exports its immutable path through `C2C_BIN`. Managed Pi supplies runtime peers.
+
+Native `c2c` comes from the official `v0.14.4` Linux x64 release archive, whose release manifest binds it to commit `19c4eb7963d1b654750d75e3dd286e5cee9dc1e3`; `autoPatchelfHook` resolves its SQLite and GMP libraries for NixOS. Only the `c2c` executable enters the output because pi-c2c does not call the separate `c2c-deliver-inbox` binary.
 
 </Decision>
 
-- Extension source: `npm:pi-c2c@0.4.14`; upstream repository `clankercode/pi-c2c`, observed `master` revision `3107d3eb5ba7be2565e4d5bd3d268dc917443a2b`.
-- Extension dependency: `@clanker-code/c2c@0.13.0`; peer dependencies `@earendil-works/pi-coding-agent` and `@earendil-works/pi-tui` must be present in its bundled plugin closure.
-- Native binary source: official `clankercode/c2c` `0.13.0` Linux x64 archive, hash `sha256-d4i4eBIOh55RTPBRdgrpAWhp/DvWrQLhPe6JeflPRVg=`.
-- Runtime configuration: `C2C_BIN` points to `$out/bin/c2c`; managed launchers may set `C2C_PI_ALIAS` to a stable session slug. Poll interval, broker root, and pre-established session variables remain optional runtime configuration.
-- Validation: run `$C2C_BIN --version`, `$C2C_BIN host-id`, `$C2C_BIN status`, then load Pi offline/headless and confirm `c2c_pi_local_info` is registered without an extension issue.
-- Known ceiling: local broker messaging works; relay identity and connector are not configured, so cross-machine routing is out of scope for this migration.
+- Extension source: `npm:pi-c2c@0.4.18`, hash `sha256-tk+zZ6fddyTqYbWRI1XvbSLAd9lef8TFIp2mi9MDTdE=`.
+- Resolver source: `npm:@clanker-code/c2c@0.14.4`, hash `sha256-VMpvXYXaeqiLUZNT550mFktBoxqsEB07iVW0/Gfs+e0=`.
+- Native source: official `c2c-0.14.4-linux-x64.tar.gz`, hash `sha256-JrgVPt9L9nA9wAqsxV4wo6mzP2YrCYPQZjYLsqNjxyI=`.
+- Runtime configuration: Home Manager sets only `C2C_BIN`. It intentionally does not set global `C2C_PI_ALIAS`: parallel Pi sessions would collide. Launchers may set a scope-local alias; otherwise pi-c2c derives a session-specific `pi-<hash>` alias. Poll intervals, broker roots, enablement, and pre-established session IDs remain optional launcher environment.
+- Mutable state: brokers, locks, relay identity/config, statefiles, and inboxes remain runtime-owned under c2c's state roots. pi-c2c's message spool remains under fixed `~/.pi/c2c`; packaging hardens its directory to `0700`, files to `0600`, and refuses pre-existing temporary paths. Home Manager neither reads nor replaces existing state.
+- Relay boundary: pi-c2c defaults relay support on, but cannot connect without a runtime relay identity. Existing relay identity/config may cause startup registration with `C2C_PI_RELAY_URL` or upstream's `https://relay.c2c.im` default. This module creates no identity/token/config and makes no relay policy choice; local-only launchers can set `C2C_PI_RELAY=0`.
+- Validation: native `--version` and `host-id`, patched ELF dependencies, 490 upstream tests with patched `C2C_BIN`, hardened spool self-check, isolated offline Pi load, and module evaluation.
+- Known ceiling: package supports `x86_64-linux` only; add an architecture-selected official archive before using this module on another host platform.
+
+### `pi-vimmode` editor boundary
+
+<Decision title="Package published Vim editor without invented defaults" status="accepted">
+
+`pi-vimmode@0.9.0` is active/latest. Its npm-signed bundle declares source commit `52bd6ac5e905157ac46ec15c120b7d0cc61a62df`, has no dependency closure, and imports only Node standard-library modules plus Pi coding-agent/TUI peers supplied by managed Pi. Upstream typecheck, package verification, and all 917 tests pass; the exact published bundle loads offline against managed Pi.
+
+The extension replaces Pi's single custom-editor factory, so another editor extension loaded later can replace it. No competing editor extension exists in the managed registry. Current global/project settings contain no `piVimMode` object, and the unsandboxed `~/.pi/agent/pi-vimmode.config.js` does not exist, so Home Manager adds no synthetic Vim defaults or trusted JavaScript. Future declarative JSON customization can use `programs.pi-coding-agent.settings.piVimMode`; trusted JavaScript remains explicit runtime-owned code.
+
+</Decision>
+
+- Source: `npm:pi-vimmode@0.9.0`, hash `sha256-plzzkhCcFVHxZ3wpUE4MiUn3YkhMfDxK//HMawF3I6U=`.
+- Runtime effects: installs a modal prompt editor, writes terminal cursor-shape hints, and registers `/vimmode`; it performs no network calls or persistent writes.
+- Clipboard boundary: explicit clipboard register operations may invoke platform clipboard readers such as `wl-paste`, `xclip`, or `xsel`; failures remain visible and do not mutate external state.
+- Trusted config boundary: if later created, `~/.pi/agent/pi-vimmode.config.js` executes unsandboxed with full Pi-process privileges. The module does not create, import, or evaluate one during activation.
+- Telemetry: no OTel signals are added to the keystroke hot path because this migration adds no service, network, or async process boundary. Existing bounded `vim` status, retained config warnings, `:vimdoctor`, and runtime help provide local diagnostics without recording prompt text.
+- Validation: package manifest/content checks, upstream validation, isolated offline Pi load, module evaluation, and full flake checks.
+
+### `pi-usage` provider credential boundary
+
+<Decision title="Accept bounded automatic usage refreshes to official providers" status="accepted">
+
+`@narumitw/pi-usage@0.34.0` is active/latest. Its exact signed, provenance-attested npm tarball declares source commit `8a7bf3f86a8d9a318ac70838bc3cf598a966355c`, matches `extensions/pi-usage` at that commit, and has no dependency closure; managed Pi supplies its `>=0.81.0` peer. No plugin settings exist, current Pi settings contain only the package entry, and Home Manager adds no options or configuration.
+
+The extension automatically refreshes usage on `session_start`, `session_tree`, `model_select`, `turn_start`, and every five minutes. It resolves credentials from Pi runtime state, validates exact origin, then sends `Authorization` only to `https://chatgpt.com/backend-api/wham/usage` or `https://openrouter.ai/api/v1/key`. Requests time out after 15 seconds; responses are bounded; cache and failure backoff stay in memory. Credential identity uses a process-salted HMAC fingerprint. Errors are redacted. It reads no auth files, starts no subprocesses, and performs no persistent writes.
+
+Local status and bounded errors are sufficient operational visibility. Extension emits no OTel signals; migration does not claim or add telemetry. Credentials, authorization headers, fingerprints, and provider response content must never be logged or recorded.
+
+</Decision>
+
+- Source: `npm:@narumitw/pi-usage@0.34.0`, hash `sha256-WclnloM/u3ka1q2oD+Xp2jXrEIoiaLSGYUhDNxc43a4=`.
+- Validation: manifest, entrypoint, zero-closure, command-registration, and isolated offline Pi load checks; upstream check/typecheck when practical; module evaluation and full flake checks.
 
 ## I/O examples
 
