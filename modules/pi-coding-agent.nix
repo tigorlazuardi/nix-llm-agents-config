@@ -22,8 +22,7 @@ let
   askHerdr = pinnedPkgs.callPackage ../packages/pi-ask-herdr.nix { };
   herdrRename = pinnedPkgs.callPackage ../packages/pi-herdr-rename.nix { };
   pattyBgTasks = pinnedPkgs.callPackage ../packages/pi-patty-bg-tasks.nix { };
-  c2c = pinnedPkgs.callPackage ../packages/c2c.nix { };
-  piC2c = pinnedPkgs.callPackage ../packages/pi-c2c.nix { };
+  intercom = pinnedPkgs.callPackage ../packages/pi-intercom.nix { };
   vimMode = pinnedPkgs.callPackage ../packages/pi-vimmode.nix { };
   usage = pinnedPkgs.callPackage ../packages/pi-usage.nix { };
   mcpAdapter = pinnedPkgs.callPackage ../packages/pi-mcp-adapter.nix { };
@@ -188,7 +187,6 @@ in
         ''
       );
       sessionVariables = lib.mkIf cfg.enable {
-        C2C_BIN = lib.mkDefault "${c2c}/bin/c2c";
         PI_VCC_CONFIG_PATH = lib.mkDefault "${cfg.configDir}/pi-vcc-config.json";
       };
     };
@@ -207,7 +205,7 @@ in
             "${askHerdr}/lib/node_modules/pi-ask-herdr"
             "${herdrRename}/lib/node_modules/pi-herdr-rename"
             "${pattyBgTasks}/lib/node_modules/pi-patty-bg-tasks"
-            "${piC2c}/lib/node_modules/pi-c2c"
+            "${intercom}/lib/node_modules/pi-intercom"
             "${vimMode}/lib/node_modules/pi-vimmode"
             "${usage}/lib/node_modules/@narumitw/pi-usage"
             "${mcpAdapter}/lib/node_modules/pi-mcp-adapter"
@@ -249,6 +247,13 @@ in
         source = jsonFormat.generate "pi-mcp-adapter.json" renderedMcpConfig;
       };
       "${cfg.configDir}/pi-vcc-config.json".source = vccConfigFile;
+      "${cfg.configDir}/intercom/config.json".source = jsonFormat.generate "pi-intercom-config.json" {
+        brokerCommand = "${intercom}/lib/node_modules/pi-intercom/node_modules/.bin/tsx";
+        brokerArgs = [ ];
+        confirmSend = false;
+        enabled = true;
+        replyHint = true;
+      };
     };
   };
 }

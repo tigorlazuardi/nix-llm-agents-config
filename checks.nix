@@ -150,9 +150,17 @@ let
     nixpkgs-unstable.legacyPackages.x86_64-linux.callPackage ./packages/pi-patty-bg-tasks.nix
       { };
   expectedPattyBgTasksPath = "${expectedPattyBgTasks}/lib/node_modules/pi-patty-bg-tasks";
-  expectedC2c = nixpkgs-unstable.legacyPackages.x86_64-linux.callPackage ./packages/c2c.nix { };
-  expectedPiC2c = nixpkgs-unstable.legacyPackages.x86_64-linux.callPackage ./packages/pi-c2c.nix { };
-  expectedPiC2cPath = "${expectedPiC2c}/lib/node_modules/pi-c2c";
+  expectedIntercom =
+    nixpkgs-unstable.legacyPackages.x86_64-linux.callPackage ./packages/pi-intercom.nix
+      { };
+  expectedIntercomPath = "${expectedIntercom}/lib/node_modules/pi-intercom";
+  expectedIntercomConfig = (pkgs.formats.json { }).generate "pi-intercom-config.json" {
+    brokerCommand = "${expectedIntercomPath}/node_modules/.bin/tsx";
+    brokerArgs = [ ];
+    confirmSend = false;
+    enabled = true;
+    replyHint = true;
+  };
   expectedVimMode =
     nixpkgs-unstable.legacyPackages.x86_64-linux.callPackage ./packages/pi-vimmode.nix
       { };
@@ -216,8 +224,7 @@ in
   pi-ask-herdr = expectedAskHerdr;
   pi-herdr-rename = expectedHerdrRename;
   pi-patty-bg-tasks = expectedPattyBgTasks;
-  c2c = expectedC2c;
-  pi-c2c = expectedPiC2c;
+  pi-intercom = expectedIntercom;
   pi-vimmode = expectedVimMode;
   pi-usage = expectedUsage;
   mcp-adapter = expectedMcpAdapter;
@@ -251,7 +258,7 @@ in
           expectedAskHerdrPath
           expectedHerdrRenamePath
           expectedPattyBgTasksPath
-          expectedPiC2cPath
+          expectedIntercomPath
           expectedVimModePath
           expectedUsagePath
           expectedMcpAdapterPath
@@ -268,8 +275,10 @@ in
         ];
       };
     assert builtins.elem expectedOscclip default.config.home.packages;
-    assert default.config.home.sessionVariables.C2C_BIN == "${expectedC2c}/bin/c2c";
-    assert !(default.config.home.sessionVariables ? C2C_PI_ALIAS);
+    assert
+      default.config.home.file."${default.config.programs.pi-coding-agent.configDir}/intercom/config.json".source
+      == expectedIntercomConfig;
+    assert !(default.config.home.sessionVariables ? C2C_BIN);
     assert
       default.config.programs.pi-coding-agent.keybindings == {
         "app.tools.expand" = "ctrl+o";
@@ -396,6 +405,11 @@ in
     assert !(disabled.config.xdg.configFile ? "mcp/mcp.json");
     assert !(disabled.config.home.activation ? piCodingAgentPixOptimizer);
     assert !(disabled.config.home.sessionVariables ? C2C_BIN);
+    assert
+      !(
+        disabled.config.home.file
+        ? "${disabled.config.programs.pi-coding-agent.configDir}/intercom/config.json"
+      );
     assert !(disabled.config.home.sessionVariables ? PI_VCC_CONFIG_PATH);
     assert
       !(
@@ -425,7 +439,7 @@ in
         expectedAskHerdrPath
         expectedHerdrRenamePath
         expectedPattyBgTasksPath
-        expectedPiC2cPath
+        expectedIntercomPath
         expectedVimModePath
         expectedUsagePath
         expectedMcpAdapterPath
@@ -450,7 +464,7 @@ in
   formatting =
     pkgs.runCommandLocal "pi-home-manager-formatting" { nativeBuildInputs = [ pkgs.nixfmt ]; }
       ''
-        nixfmt --check ${./flake.nix} ${./checks.nix} ${./modules/pi-coding-agent.nix} ${./modules/pi-coding-agent/agents.nix} ${./modules/pi-coding-agent/default-agents.nix} ${./modules/pi-coding-agent/pi-subagents.nix} ${./packages/pi-diet-lsp.nix} ${./packages/pi-effort.nix} ${./packages/pi-herdr.nix} ${./packages/pi-herdr-sudo-task.nix} ${./packages/pi-ask-herdr.nix} ${./packages/pi-herdr-rename.nix} ${./packages/pi-patty-bg-tasks.nix} ${./packages/c2c.nix} ${./packages/pi-c2c.nix} ${./packages/pi-vimmode.nix} ${./packages/pi-usage.nix} ${./packages/pi-mcp-adapter.nix} ${./packages/pi-playwright.nix} ${./packages/pix-optimizer.nix} ${./packages/pi-vcc.nix} ${./packages/pi-prompt-template-model.nix} ${./packages/rpiv-todo.nix} ${./packages/pi-rules.nix} ${./packages/pi-searxng.nix} ${./packages/pi-subagents.nix} ${./packages/supi-context.nix} ${./packages/supi-extras.nix}
+        nixfmt --check ${./flake.nix} ${./checks.nix} ${./modules/pi-coding-agent.nix} ${./modules/pi-coding-agent/agents.nix} ${./modules/pi-coding-agent/default-agents.nix} ${./modules/pi-coding-agent/pi-subagents.nix} ${./packages/pi-diet-lsp.nix} ${./packages/pi-effort.nix} ${./packages/pi-herdr.nix} ${./packages/pi-herdr-sudo-task.nix} ${./packages/pi-ask-herdr.nix} ${./packages/pi-herdr-rename.nix} ${./packages/pi-patty-bg-tasks.nix} ${./packages/pi-intercom.nix} ${./packages/pi-vimmode.nix} ${./packages/pi-usage.nix} ${./packages/pi-mcp-adapter.nix} ${./packages/pi-playwright.nix} ${./packages/pix-optimizer.nix} ${./packages/pi-vcc.nix} ${./packages/pi-prompt-template-model.nix} ${./packages/rpiv-todo.nix} ${./packages/pi-rules.nix} ${./packages/pi-searxng.nix} ${./packages/pi-subagents.nix} ${./packages/supi-context.nix} ${./packages/supi-extras.nix}
         touch $out
       '';
 
@@ -553,52 +567,29 @@ in
         touch $out
       '';
 
-  pi-c2c-load =
-    pkgs.runCommandLocal "pi-c2c-load"
+  pi-intercom-load =
+    pkgs.runCommandLocal "pi-intercom-load"
       {
         nativeBuildInputs = [
           expectedPackage
-          pkgs.nodejs_22
+          pkgs.jq
         ];
       }
       ''
         export HOME="$TMPDIR/home"
         export PI_CODING_AGENT_DIR="$HOME/.pi/agent"
         export PI_TELEMETRY=0
-        export C2C_BIN=${expectedC2c}/bin/c2c
-        export C2C_PI_ENABLED=0
-        mkdir -p "$PI_CODING_AGENT_DIR"
-        test "$($C2C_BIN --version | cut -d' ' -f1)" = 0.14.4
-        test -n "$($C2C_BIN host-id)"
-        test -f ${expectedPiC2cPath}/src/index.ts
-        test -f ${expectedPiC2cPath}/node_modules/@clanker-code/c2c/index.js
-        test ! -e ${expectedPiC2cPath}/node_modules/@clanker-code/c2c-linux-x64
-        grep -F '"version": "0.4.18"' ${expectedPiC2cPath}/package.json
-        grep -F 'name: "c2c_pi_send"' ${expectedPiC2cPath}/src/tools.ts
-        grep -F 'flag: "wx"' ${expectedPiC2cPath}/src/spool.ts
-        cp ${expectedPiC2cPath}/src/spool.ts "$TMPDIR/spool.ts"
-        node --experimental-strip-types --input-type=module <<EOF
-        import assert from "node:assert/strict";
-        import { lstatSync, mkdirSync, readFileSync, statSync, symlinkSync, writeFileSync } from "node:fs";
-        import { spoolPath, writeSpool } from "$TMPDIR/spool.ts";
-        const dir = "$TMPDIR/spool";
-        mkdirSync(dir, { mode: 0o755 });
-        writeSpool(dir, "session", [{ from_alias: "peer", to_alias: "self", content: "private", ts: 0 }]);
-        const spool = spoolPath(dir, "session");
-        assert.equal(statSync(dir).mode & 0o777, 0o700);
-        assert.equal(statSync(spool).mode & 0o777, 0o600);
-        assert.match(readFileSync(spool, "utf8"), /private/);
-        const target = "$TMPDIR/target";
-        writeFileSync(target, "keep");
-        const temp = spool + "." + process.pid + ".tmp";
-        symlinkSync(target, temp);
-        writeSpool(dir, "session", [{ from_alias: "peer", to_alias: "self", content: "overwrite", ts: 0 }]);
-        assert.equal(readFileSync(target, "utf8"), "keep");
-        assert(lstatSync(temp).isSymbolicLink());
-        assert.match(readFileSync(spool, "utf8"), /private/);
-        EOF
+        mkdir -p "$PI_CODING_AGENT_DIR/intercom"
+        test -f ${expectedIntercomPath}/index.ts
+        test -f ${expectedIntercomPath}/broker/broker.ts
+        test -x ${expectedIntercomPath}/node_modules/.bin/tsx
+        test -d ${expectedIntercomPath}/node_modules/typebox
+        test ! -e ${expectedIntercomPath}/node_modules/@mariozechner
+        jq -e '.enabled == true and .replyHint == true and .confirmSend == false and .brokerArgs == [] and has("status") | not' ${expectedIntercomConfig}
+        jq -e '.brokerCommand == "${expectedIntercomPath}/node_modules/.bin/tsx"' ${expectedIntercomConfig}
+        cp ${expectedIntercomConfig} "$PI_CODING_AGENT_DIR/intercom/config.json"
         pi --offline --no-extensions --no-skills --no-prompt-templates --no-context-files \
-          -e ${expectedPiC2cPath} \
+          -e ${expectedIntercomPath} \
           --list-models > pi.log 2>&1
         ! grep -E 'Extension issues|Failed to load extension|Cannot find module|Error:' pi.log
         touch $out

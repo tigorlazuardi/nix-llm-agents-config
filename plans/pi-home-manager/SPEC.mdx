@@ -469,7 +469,7 @@ This inventory mirrors the active `settings.packages` allowlist as of 2026-07-26
 | `npm:pi-herdr-sudo-task` | `0.1.1` | Replaces git revision `c2c17cf`; exact npm artifact matches tagged source build and has no npm closure |
 | `npm:pi-ask-herdr` | `0.2.2` | Replaces `0.2.1`; exact npm tarball, no npm closure, no persistent plugin configuration |
 | `npm:pi-patty-bg-tasks` | `1.1.6` | Exact npm tarball, zero npm closure, no persistent plugin configuration; locally hardened private runtime artifacts |
-| `npm:pi-c2c` | `0.4.18` | Upgraded from `0.4.14`; exact npm extension and resolver closure, separately patched native `c2c@0.14.4`, no global alias |
+| `npm:pi-intercom` | `0.6.0` | Exact npm extension closure with `tsx` and `typebox`; package-local TSX launcher and granular same-machine broker configuration |
 | `npm:pi-vimmode` | `0.9.0` | Exact npm bundle; managed Pi peers; no current JSON or trusted-JS config to migrate |
 | `npm:@narumitw/pi-usage` | `0.34.0` | Exact provenance-attested npm tarball, zero npm closure; automatic official-provider usage calls and runtime credential boundary accepted; no configuration or persistence |
 | `npm:@nehlis/pi-effort` | `0.1.0` | Exact npm tarball matching `gitHead` `0be4dd0614ca2959ead7e0f435748221ed5e06d2`, zero npm closure, sole Pi peer; registers only `/effort` and calls native `getThinkingLevel`/`setThinkingLevel`, with no network, subprocess, config, or persistence; no module options. ponytail: release predates Pi `max`, so `/effort max` aliases `xhigh`; native `max` remains unavailable through this command until upstream adds support. |
@@ -580,24 +580,18 @@ Typed Home Manager options under `programs.pi-coding-agent.plugins.pi-vcc.settin
 
 </Decision>
 
-### `pi-c2c` native runtime boundary
+### `pi-intercom` same-machine boundary
 
-<Decision title="Package pi-c2c extension and c2c binary separately" status="accepted">
+<Decision title="Use pi-intercom for same-machine Pi session communication" status="accepted">
 
-`pi-c2c` is upgraded from active `0.4.14` to active/latest `0.4.18`; its exact npm tarball declares source commit `49c000d1f20af8fb85ca5c16bd9e1c592888612b` and matches that revision's published runtime. The extension closure includes the exact `@clanker-code/c2c@0.14.4` JavaScript resolver. Its duplicate optional platform packages are omitted because the module supplies native `c2c@0.14.4` separately and exports its immutable path through `C2C_BIN`. Managed Pi supplies runtime peers.
-
-Native `c2c` comes from the official `v0.14.4` Linux x64 release archive, whose release manifest binds it to commit `19c4eb7963d1b654750d75e3dd286e5cee9dc1e3`; `autoPatchelfHook` resolves its SQLite and GMP libraries for NixOS. Only the `c2c` executable enters the output because pi-c2c does not call the separate `c2c-deliver-inbox` binary.
+`pi-intercom@0.6.0` replaces `pi-c2c` and native `c2c`. Its immutable npm closure contains declared `tsx` and `typebox`; Pi peers remain supplied by managed Pi. Home Manager links only `${configDir}/intercom/config.json` with `enabled: true`, `replyHint: true`, `confirmSend: false`, empty `brokerArgs`, no `status`, and an absolute package-local TSX broker launcher. This prevents ambient `npx`, Bun, global TSX, or user npm state from entering broker startup.
 
 </Decision>
 
-- Extension source: `npm:pi-c2c@0.4.18`, hash `sha256-tk+zZ6fddyTqYbWRI1XvbSLAd9lef8TFIp2mi9MDTdE=`.
-- Resolver source: `npm:@clanker-code/c2c@0.14.4`, hash `sha256-VMpvXYXaeqiLUZNT550mFktBoxqsEB07iVW0/Gfs+e0=`.
-- Native source: official `c2c-0.14.4-linux-x64.tar.gz`, hash `sha256-JrgVPt9L9nA9wAqsxV4wo6mzP2YrCYPQZjYLsqNjxyI=`.
-- Runtime configuration: Home Manager sets only `C2C_BIN`. It intentionally does not set global `C2C_PI_ALIAS`: parallel Pi sessions would collide. Launchers may set a scope-local alias; otherwise pi-c2c derives a session-specific `pi-<hash>` alias. Poll intervals, broker roots, enablement, and pre-established session IDs remain optional launcher environment.
-- Mutable state: brokers, locks, relay identity/config, statefiles, and inboxes remain runtime-owned under c2c's state roots. pi-c2c's message spool remains under fixed `~/.pi/c2c`; packaging hardens its directory to `0700`, files to `0600`, and refuses pre-existing temporary paths. Home Manager neither reads nor replaces existing state.
-- Relay boundary: pi-c2c defaults relay support on, but cannot connect without a runtime relay identity. Existing relay identity/config may cause startup registration with `C2C_PI_RELAY_URL` or upstream's `https://relay.c2c.im` default. This module creates no identity/token/config and makes no relay policy choice; local-only launchers can set `C2C_PI_RELAY=0`.
-- Validation: native `--version` and `host-id`, patched ELF dependencies, 490 upstream tests with patched `C2C_BIN`, hardened spool self-check, isolated offline Pi load, and module evaluation.
-- Known ceiling: package supports `x86_64-linux` only; add an architecture-selected official archive before using this module on another host platform.
+The extension uses local IPC for same-machine direct session communication. Broker socket, PID, lock, and Pi session history remain runtime-owned. This module creates no daemon, network relay, history migration, C2C environment variables, or configuration options. It does not read, move, delete, or declaratively own historical C2C runtime data.
+
+- Source: `npm:pi-intercom@0.6.0`, hash `sha256-dsDVKEZhqsQ3JIu2x6Moef6GMpa9FctTN1GyfK/ESBg=`.
+- Validation: package contents and declared closure, granular managed JSON, enabled/disabled module output, no C2C environment wiring, and isolated offline/headless Pi loading without extension loader errors.
 
 ### `pi-vimmode` editor boundary
 
