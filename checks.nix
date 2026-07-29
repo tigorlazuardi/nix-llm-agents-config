@@ -349,6 +349,13 @@ in
     assert default.config.programs.mcp.enable;
     assert !(default.config.programs.mcp.servers ? open-design);
     assert
+      default.config.programs.pi-coding-agent.extensions.dev-journal == ./config/extensions/dev-journal;
+    assert
+      default.config.home.file."${default.config.programs.pi-coding-agent.configDir}/extensions/dev-journal".source
+      == ./config/extensions/dev-journal;
+    assert
+      default.config.home.file."${default.config.programs.pi-coding-agent.configDir}/extensions/dev-journal".force;
+    assert
       default.config.home.file."${default.config.programs.pi-coding-agent.configDir}/AGENTS.md".source
       == ./config/AGENTS.md;
     assert builtins.pathExists (
@@ -443,6 +450,11 @@ in
     assert
       !(disabled.config.home.file ? "${disabled.config.programs.pi-coding-agent.configDir}/skills");
     assert
+      !(
+        disabled.config.home.file
+        ? "${disabled.config.programs.pi-coding-agent.configDir}/extensions/dev-journal"
+      );
+    assert
       !(disabled.config.home.file ? "${disabled.config.programs.pi-coding-agent.configDir}/prompts");
     assert
       !(
@@ -524,6 +536,35 @@ in
         "tui.editor.cursorLeft" = "left";
       };
     pkgs.runCommandLocal "pi-home-manager-module-evaluation" { } "touch $out";
+
+  dev-journal =
+    pkgs.runCommandLocal "pi-dev-journal"
+      {
+        nativeBuildInputs = [
+          expectedPackage
+          pkgs.nodejs_22
+        ];
+      }
+      ''
+        cp -R ${./config/extensions/dev-journal} dev-journal
+        chmod -R u+w dev-journal
+        mkdir -p dev-journal/node_modules/@earendil-works
+        piRuntime=${expectedPackage}/lib/node_modules/pi-monorepo
+        ln -s "$piRuntime" dev-journal/node_modules/@earendil-works/pi-coding-agent
+        ln -s "$piRuntime/node_modules/@earendil-works/pi-ai" dev-journal/node_modules/@earendil-works/pi-ai
+        ln -s "$piRuntime/node_modules/typebox" dev-journal/node_modules/typebox
+        node --experimental-strip-types dev-journal/dev-journal.self-check.ts
+
+        export HOME="$TMPDIR/home"
+        export PI_CODING_AGENT_DIR="$HOME/.pi/agent"
+        export PI_TELEMETRY=0
+        mkdir -p "$PI_CODING_AGENT_DIR"
+        pi --offline --no-extensions --no-skills --no-prompt-templates --no-context-files \
+          -e ${./config/extensions/dev-journal}/index.ts \
+          --list-models > pi.log 2>&1
+        ! grep -E 'Extension issues|Failed to load extension|Cannot find module|Error:' pi.log
+        touch $out
+      '';
 
   formatting =
     pkgs.runCommandLocal "pi-home-manager-formatting" { nativeBuildInputs = [ pkgs.nixfmt ]; }

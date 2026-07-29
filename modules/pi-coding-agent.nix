@@ -356,10 +356,15 @@ in
       keybindings = lib.mapAttrsRecursive (_: lib.mkDefault) defaultKeybindings;
       models = lib.mapAttrsRecursive (_: lib.mkDefault) defaultModels;
       context = lib.mkDefault ../config/AGENTS.md;
+      extensions.dev-journal = lib.mkDefault ../config/extensions/dev-journal;
       skills = lib.mapAttrs (_: lib.mkDefault) (repoSkills // patchedMattSkills);
     };
 
     home.file = lib.mkIf cfg.enable {
+      "${cfg.configDir}/extensions/dev-journal" = {
+        source = cfg.extensions.dev-journal;
+        force = true;
+      };
       "${cfg.configDir}/prompts" = {
         source = ../config/prompts;
         force = true;

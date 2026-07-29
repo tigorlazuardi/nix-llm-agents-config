@@ -1,0 +1,133 @@
+import assert from "node:assert/strict";
+import { chmod, lstat, mkdtemp, readFile, realpath, rename, stat, symlink, unlink, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import journal from "./index.ts";
+import { MAX_DETAILS_BYTES, MAX_TOOL_BYTES, confined, details, entryFor, hasCommitEvidence, initialState, isRecordResult, isSuccessfulBashResult, normalizeRecordInput, nudgeState, parseState, recall, record, validate } from "./dev-journal-core.ts";
+
+type Fs = NonNullable<Parameters<typeof record>[2]>;
+const root = await mkdtemp(join(tmpdir(), "dev-journal-"));
+const input = { approved: true, project: "p", company: "personal", type: "fix", title: "Stable output", skills: ["node"], impact: "bounded output", cv_ready: true, body: "## Symptom\ntext", date: "2026-01-01" } as const;
+const native: Fs = { mkdir: async (...args) => (await import("node:fs/promises")).mkdir(...args), readFile, writeFile, rename, unlink, chmod, realpath, lstat };
+assert.equal(confined(root, "../x.md"), null);
+assert.equal(confined(root, "index.md"), null);
+assert.equal(confined(root, "p/2026-01-01-ok.md")?.startsWith(root), true);
+await record(root, input);
+const item = entryFor(input);
+assert.match(await readFile(join(root, "p/index.md"), "utf8"), /2026-01-01 fix stable-output/);
+assert.match(await readFile(join(root, "index.md"), "utf8"), /p — bounded output/);
+for (const ref of [item.ref, "p/index.md", "index.md", "skills-inventory.md"]) assert.equal((await stat(join(root, ref))).mode & 0o777, 0o600);
+assert.ok(Buffer.byteLength(await recall(root, "p")) <= MAX_TOOL_BYTES);
+assert.ok(!(await recall(root, "p")).includes("tags:"));
+assert.match(await details(root, item.ref), /type: fix/);
+await writeFile(join(root, "p/2026-01-02-large.md"), "x".repeat(MAX_DETAILS_BYTES + 1));
+assert.ok(Buffer.byteLength(await details(root, "p/2026-01-02-large.md")) <= MAX_DETAILS_BYTES);
+const outside = join(tmpdir(), `dev-journal-outside-${process.pid}.md`);
+await writeFile(outside, "outside");
+await symlink(outside, join(root, "p/2026-01-03-escape.md"));
+await assert.rejects(() => details(root, "p/2026-01-03-escape.md"), /Invalid journal entry reference/);
+await assert.rejects(() => record(root, { ...input, approved: false }));
+const successful = { exitCode: 0, cancelled: false };
+const successfulEvent = { isError: false };
+assert.equal(hasCommitEvidence("git commit --dry-run -m test", "[main abcdef0] test", successful), false);
+assert.equal(hasCommitEvidence("git commit -m test", "error: nothing to commit", successful), false);
+assert.equal(hasCommitEvidence("git commit -m 'quoted message'", "[main abcdef0] test", successfulEvent), true);
+assert.equal(hasCommitEvidence("git --git-dir=/tmp/repo commit --no-verify -m test", "[main abcdef0] test", successfulEvent), true);
+assert.equal(hasCommitEvidence("git commit -m x || printf '[main abcdef0] fake'", "[main abcdef0] fake", { exitCode: 1, cancelled: false }), false);
+for (const command of ["git commit -m x; true", "git commit -m x | cat", "git commit -m $(printf x)", "git commit -m x >out"]) assert.equal(hasCommitEvidence(command, "[main abcdef0] test", successful), false);
+assert.equal(isSuccessfulBashResult(undefined), false);
+assert.equal(isSuccessfulBashResult({ exitCode: 1, cancelled: false }), false);
+assert.equal(isSuccessfulBashResult({ exitCode: 0, cancelled: true }), false);
+assert.equal(isSuccessfulBashResult(successful), true);
+assert.equal(isSuccessfulBashResult(successfulEvent), true);
+const skillsRoot = await mkdtemp(join(tmpdir(), "dev-journal-skills-"));
+await writeFile(join(skillsRoot, "skills-inventory.md"), "- **nodeXjs** — untouched\n- **cXX** — untouched\n");
+const specialInput = { ...input, skills: ["node.js", "c++"] };
+await record(skillsRoot, specialInput);
+await record(skillsRoot, { ...specialInput, title: "Second record" });
+const inventory = await readFile(join(skillsRoot, "skills-inventory.md"), "utf8");
+assert.match(inventory, /nodeXjs\*\* — untouched/);
+assert.match(inventory, /cXX\*\* — untouched/);
+assert.equal((inventory.match(/^- \*\*node\.js\*\*/gm) ?? []).length, 1);
+assert.equal((inventory.match(/^- \*\*c\+\+\*\*/gm) ?? []).length, 1);
+const external = join(tmpdir(), `dev-journal-tamper-${process.pid}.md`);
+await writeFile(external, "unchanged");
+const canonical = await realpath(root);
+await writeFile(join(root, ".dev-journal-recovery.json"), JSON.stringify({ version: 1, root: canonical, project: "p", entry: "p/2026-01-01-stable-output.md", snapshots: [{ ref: external, content: "owned", mode: 0o600 }] }), { mode: 0o600 });
+await assert.rejects(() => recall(root, "p"), /manual repair/);
+assert.equal(await readFile(external, "utf8"), "unchanged");
+await unlink(join(root, ".dev-journal-recovery.json"));
+const symlinkRoot = await mkdtemp(join(tmpdir(), "dev-journal-symlink-")), symlinkOutside = await mkdtemp(join(tmpdir(), "dev-journal-symlink-outside-"));
+await symlink(symlinkOutside, join(symlinkRoot, "p"));
+await assert.rejects(() => record(symlinkRoot, input), /Invalid journal write target/);
+assert.deepEqual(await (await import("node:fs/promises")).readdir(symlinkOutside), []);
+assert.deepEqual(normalizeRecordInput({ ...input, project: "Pi Configuration", company: "Personal Work", skills: ["AI Agent Governance", "Node.js", "C++"] }), { ...input, project: "pi-configuration", company: "personal-work", skills: ["ai-agent-governance", "node.js", "c++"] });
+assert.match(validate({ ...input, title: "ok\nimpact: injected" }) ?? "", /field 'title'.*Retry dev_journal/);
+assert.match(validate({ ...input, impact: "ok\r\ntags: \[injected\]" }) ?? "", /field 'impact'.*Retry dev_journal/);
+assert.match(validate({ ...input, skills: ["node\u0000tag"] }) ?? "", /field 'skills'.*Retry dev_journal/);
+assert.match(validate({ ...input, related: "ok\n---" }) ?? "", /field 'related'.*Retry dev_journal/);
+assert.deepEqual(parseState({ commit: true, decided: false, nudged: true }), { commit: true, decided: false, nudged: true });
+assert.deepEqual(parseState({ commit: "true", decided: false, nudged: false }), initialState());
+assert.deepEqual(parseState(null), initialState());
+assert.equal(isRecordResult({ toolName: "dev_journal", input: { action: "recall" } }), false);
+assert.equal(isRecordResult({ toolName: "dev_journal", input: { action: "record" } }), true);
+assert.deepEqual(nudgeState({ ...initialState(), commit: true }), { commit: true, decided: false, nudged: true });
+assert.equal(nudgeState({ commit: true, decided: true, nudged: false }), null);
+const handlers = new Map<string, () => unknown>();
+let appendCalls = 0, sendCalls = 0;
+journal({
+  on: (name: string, handler: () => unknown) => { handlers.set(name, handler); },
+  registerTool: () => {}, registerCommand: () => {},
+  appendEntry: () => { appendCalls++; throw new Error("append failed"); },
+  sendMessage: () => { sendCalls++; throw new Error("send failed"); },
+} as unknown as Parameters<typeof journal>[0]);
+const toolResult = handlers.get("tool_result");
+assert.ok(toolResult);
+await toolResult({ toolName: "bash", input: { command: "git commit -m test" }, content: [{ type: "text", text: "[main abcdef0] test" }], isError: false });
+const settled = handlers.get("agent_settled");
+assert.ok(settled);
+await settled();
+await settled();
+const compacted = handlers.get("session_compact");
+assert.ok(compacted);
+await compacted();
+await settled();
+await toolResult({ toolName: "bash", input: { command: "git commit -m after-compaction" }, content: [{ type: "text", text: "[main 1234567] after-compaction" }], isError: false });
+await settled();
+await settled();
+assert.equal(appendCalls, 5);
+assert.equal(sendCalls, 2);
+const failOpenHandlers = new Map<string, (event: unknown, ctx: unknown) => unknown>();
+let failOpenSends = 0, journalHandler: () => unknown = () => { throw new Error("missing journal handler"); };
+journal({
+  on: (name: string, handler: (event: unknown, ctx: unknown) => unknown) => { failOpenHandlers.set(name, handler); },
+  registerTool: () => {},
+  registerCommand: (name: string, command: { handler: () => unknown }) => { if (name === "journal") journalHandler = command.handler; },
+  sendMessage: () => { failOpenSends++; },
+  sendUserMessage: () => { throw new Error("send user message failed"); },
+} as unknown as Parameters<typeof journal>[0]);
+const sessionStart = failOpenHandlers.get("session_start");
+assert.ok(sessionStart);
+await sessionStart({}, { sessionManager: { getEntries: () => { throw new Error("entries failed"); } } });
+const failOpenSettled = failOpenHandlers.get("agent_settled");
+assert.ok(failOpenSettled);
+await failOpenSettled({}, {});
+assert.equal(failOpenSends, 0);
+await journalHandler();
+let mutations = 0;
+const denied: Fs = { ...native, readFile: async (path, ...args) => { if (String(path).endsWith("p/index.md")) { const error = Object.assign(new Error("denied"), { code: "EACCES" }); throw error; } return native.readFile(path, ...args); }, mkdir: async (...args) => { mutations++; return native.mkdir(...args); }, writeFile: async (...args) => { mutations++; return native.writeFile(...args); }, rename: async (...args) => { mutations++; return native.rename(...args); } };
+await assert.rejects(() => record(root, { ...input, title: "Read denied" }, denied), /denied/);
+assert.equal(mutations, 0);
+const before = await Promise.all(["p/index.md", "index.md", "skills-inventory.md"].map((ref) => readFile(join(root, ref), "utf8")));
+let renameCalls = 0;
+const interrupted: Fs = { ...native, rename: async (...args) => { renameCalls++; if (renameCalls === 3) throw new Error("injected write failure"); return native.rename(...args); } };
+await assert.rejects(() => record(root, { ...input, title: "Interrupted record" }, interrupted), /injected write failure/);
+assert.deepEqual(await Promise.all(["p/index.md", "index.md", "skills-inventory.md"].map((ref) => readFile(join(root, ref), "utf8"))), before);
+await assert.rejects(() => readFile(join(root, "p/2026-01-01-interrupted-record.md"), "utf8"), { code: "ENOENT" });
+await assert.rejects(() => readFile(join(root, ".dev-journal-recovery.json"), "utf8"), { code: "ENOENT" });
+const retainedRoot = await mkdtemp(join(tmpdir(), "dev-journal-retained-"));
+let retainedRenames = 0;
+const retained: Fs = { ...native, rename: async (...args) => { retainedRenames++; if (retainedRenames === 3) throw new Error("retain marker"); return native.rename(...args); }, unlink: async (path) => { if (String(path).endsWith(".dev-journal-recovery.json")) throw new Error("retain marker"); return native.unlink(path); } };
+await assert.rejects(() => record(retainedRoot, input, retained), /repair marker/);
+assert.equal((await stat(join(retainedRoot, ".dev-journal-recovery.json"))).mode & 0o777, 0o600);
+console.log("dev-journal self-check ok");
