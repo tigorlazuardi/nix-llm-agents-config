@@ -1,18 +1,21 @@
 ---
 name: config-management-flake-update
-description: Notify config-management after a successful push from a repository consumed as a flake, when the intercom tool is available, so downstream pins stay current.
+description: Handoff flake-relevant pushes to config-management through intercom. Use after a successful push changes any path outside `.pi/`.
 ---
 
 # Config-management flake update
 
-After pushing a commit from a flake source repository:
+After pushing commits from this repository:
 
-1. Resolve the pushed repository, branch, and full commit SHA. Continue only after the remote contains that commit.
-2. When the `intercom` tool is available, send `config-management` one message containing:
-   - repository name and full commit SHA;
-   - concise behavior change;
-   - checks run and exact failures or skips;
-   - request to update the flake pin and switch when safe.
-3. Treat successful tool delivery as handoff completion. Deployment confirmation is separate; wait for it only when the user requested deployment or verification.
+1. Resolve pushed range and exhaustive changed-path list.
+2. Classify push:
+   - **local-only:** every changed path is under `.pi/`; handoff is complete.
+   - **flake-relevant:** at least one changed path is outside `.pi/`; continue.
+3. For a flake-relevant push, confirm remote contains full commit SHA. Send `config-management` one `intercom` message containing:
+   - repository and full commit SHA;
+   - concise content change;
+   - checks run, failures, and skips;
+   - request to update flake pin and switch when safe.
+4. Successful tool delivery completes handoff. Deployment confirmation remains separate unless user requested deployment verification.
 
-When `intercom` is unavailable, report the pending config-management handoff explicitly. Never claim notification was sent.
+When `intercom` is unavailable for a flake-relevant push, report pending handoff explicitly.
