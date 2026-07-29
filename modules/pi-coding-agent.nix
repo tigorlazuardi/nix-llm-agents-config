@@ -13,6 +13,42 @@ let
   repoSkills = lib.mapAttrs (name: _: ../config/skills + "/${name}") (
     lib.filterAttrs (_: type: type == "directory") (builtins.readDir ../config/skills)
   );
+  grillingStopInstruction = "Stop asking questions when we reach a shared understanding and big decision was already made, because relatively smaller decisions would automatically derive.";
+  appendMattSkillInstruction =
+    name: source: instruction:
+    pkgs.runCommand "mattpocock-skill-${name}" { } ''
+      cp -R ${source} "$out"
+      chmod -R u+w "$out"
+      printf '\n%s\n' ${lib.escapeShellArg instruction} >> "$out/SKILL.md"
+    '';
+  mattSkills = {
+    ask-matt = mattpocock-skills + "/skills/engineering/ask-matt";
+    code-review = mattpocock-skills + "/skills/engineering/code-review";
+    codebase-design = mattpocock-skills + "/skills/engineering/codebase-design";
+    diagnosing-bugs = mattpocock-skills + "/skills/engineering/diagnosing-bugs";
+    domain-modeling = mattpocock-skills + "/skills/engineering/domain-modeling";
+    grill-with-docs = mattpocock-skills + "/skills/engineering/grill-with-docs";
+    implement = mattpocock-skills + "/skills/engineering/implement";
+    improve-codebase-architecture =
+      mattpocock-skills + "/skills/engineering/improve-codebase-architecture";
+    prototype = mattpocock-skills + "/skills/engineering/prototype";
+    research = mattpocock-skills + "/skills/engineering/research";
+    resolving-merge-conflicts = mattpocock-skills + "/skills/engineering/resolving-merge-conflicts";
+    setup-matt-pocock-skills = mattpocock-skills + "/skills/engineering/setup-matt-pocock-skills";
+    tdd = mattpocock-skills + "/skills/engineering/tdd";
+    to-spec = mattpocock-skills + "/skills/engineering/to-spec";
+    to-tickets = mattpocock-skills + "/skills/engineering/to-tickets";
+    triage = mattpocock-skills + "/skills/engineering/triage";
+    wayfinder = mattpocock-skills + "/skills/engineering/wayfinder";
+    grill-me = mattpocock-skills + "/skills/productivity/grill-me";
+    grilling = mattpocock-skills + "/skills/productivity/grilling";
+    handoff = mattpocock-skills + "/skills/productivity/handoff";
+    teach = mattpocock-skills + "/skills/productivity/teach";
+    writing-great-skills = mattpocock-skills + "/skills/productivity/writing-great-skills";
+  };
+  patchedMattSkills = mattSkills // {
+    grilling = appendMattSkillInstruction "grilling" mattSkills.grilling grillingStopInstruction;
+  };
   defaultModels = builtins.fromJSON (builtins.readFile ../config/models.json);
   mcpPlugin = cfg.plugins.pi-mcp-adapter;
   optimizerPlugin = cfg.plugins.pix-optimizer;
@@ -331,12 +367,7 @@ in
       keybindings = lib.mapAttrsRecursive (_: lib.mkDefault) defaultKeybindings;
       models = lib.mapAttrsRecursive (_: lib.mkDefault) defaultModels;
       context = lib.mkDefault ../config/AGENTS.md;
-      skills = lib.mapAttrsRecursive (_: lib.mkDefault) (
-        repoSkills
-        // {
-          writing-great-skills = mattpocock-skills + "/skills/productivity/writing-great-skills";
-        }
-      );
+      skills = lib.mapAttrs (_: lib.mkDefault) (repoSkills // patchedMattSkills);
     };
 
     home.file = lib.mkIf cfg.enable {

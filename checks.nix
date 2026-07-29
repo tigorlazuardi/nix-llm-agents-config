@@ -360,7 +360,10 @@ in
     assert builtins.pathExists (
       default.config.programs.pi-coding-agent.skills.writing-great-skills + "/SKILL.md"
     );
-    assert builtins.length (builtins.attrNames default.config.programs.pi-coding-agent.skills) == 53;
+    assert builtins.length (builtins.attrNames default.config.programs.pi-coding-agent.skills) == 50;
+    assert !(default.config.programs.pi-coding-agent.skills ? design-an-interface);
+    assert !(default.config.programs.pi-coding-agent.skills ? request-refactor-plan);
+    assert !(default.config.programs.pi-coding-agent.skills ? edit-article);
     assert
       default.config.home.file."${default.config.programs.pi-coding-agent.configDir}/skills".source.entries.writing-great-skills
       == default.config.programs.pi-coding-agent.skills.writing-great-skills;
@@ -1106,6 +1109,9 @@ in
         test "$#" -eq 13
         ! grep -RE '^(model|thinking|chain|loop|subagent|deterministic):' ${./config/prompts}
         test "$(grep -RE '^skill: writing-great-skills$' ${./config/prompts} | wc -l)" -eq 2
+        test ! -e ${./config/skills}/grilling
+        test "$(grep -F 'Stop asking questions when we reach a shared understanding and big decision was already made, because relatively smaller decisions would automatically derive.' \
+          ${default.config.programs.pi-coding-agent.skills.grilling}/SKILL.md | wc -l)" -eq 1
 
         check-jsonschema --check-metaschema \
           ${./config/templates/drain/contract.schema.json} \

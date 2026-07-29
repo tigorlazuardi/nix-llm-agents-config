@@ -151,13 +151,13 @@ Registry v1 deliberately omits package resource filters and `autoload`. Pi suppo
 
 The plugin interface is limited to `enable`, `source`, `skills`, `targets`, and `overrides.<name>.{prepend,append}`. Overrides modify only the selected skill's `SKILL.md`; support for generic patch files is deferred until a concrete need appears. Unknown skills, overrides for unselected skills, duplicate outputs, and target collisions fail evaluation.
 
-`writing-great-skills` is mandatory because prompt contracts, loop contracts, invocation rules, and future skill authoring depend on it. Both `grill-me` and `grill-with-docs` append this instruction:
+`writing-great-skills` is mandatory because prompt contracts, loop contracts, invocation rules, and future skill authoring depend on it. Nix patches the shared `grilling` skill so both `grill-me` and `grill-with-docs` inherit this instruction:
 
 ```text
 Stop asking questions when we reach a shared understanding and big decision was already made, because relatively smaller decisions would automatically derive.
 ```
 
-Initial implementation links only the mandatory complete skill directory from the pinned source. The broader target/override adapter remains deferred until a second target or real override exists.
+The Pi target links its explicit engineering/productivity allowlist directly from the pinned source. Matt-specific overrides build immutable derived skill directories; local skills bypass this patch pipeline. A broader target adapter remains deferred until a second target exists.
 
 This source is excluded from the automatic plugin update loop for least surprise. Updates are manual, reviewed, lock-pinned, and accepted only after `nix flake check`.
 
