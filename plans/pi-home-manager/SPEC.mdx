@@ -466,7 +466,7 @@ This inventory mirrors the active `settings.packages` allowlist as of 2026-07-26
 | `npm:@mrclrchtr/supi-extras` | `2.7.0` | Upgraded from `2.5.0`; bundled `supi-core` retained; `clipboardy` closure replaced by pinned `oscclip@0.4.1` OSC 52 backend |
 | `npm:pi-herdr-rename` | `0.1.0` | Replaces `@tifan/pi-rename@0.4.2`; exact npm tarball, zero npm closure, Herdr-gated tab rename tool, no persistent configuration |
 | `npm:@ogulcancelik/pi-herdr` | `0.4.0` | Upgraded from `0.3.0`; packaged from exact npm tarball with no npm closure; Herdr CLI remains an ambient runtime dependency |
-| `npm:pi-herdr-sudo-task` | `0.1.1` | Replaces git revision `c2c17cf`; exact npm artifact matches tagged source build and has no npm closure |
+| `npm:pi-herdr-sudo-task` | `0.1.2` | Replaces git revision `c2c17cf`; exact npm artifact matches tagged source build and has no npm closure |
 | `npm:pi-ask-herdr` | `0.2.2` | Replaces `0.2.1`; exact npm tarball, no npm closure, no persistent plugin configuration |
 | `npm:pi-patty-bg-tasks` | `1.1.6` | Exact npm tarball, zero npm closure, no persistent plugin configuration; locally hardened private runtime artifacts |
 | `npm:pi-intercom` | `0.6.0` | Exact npm extension closure with `tsx` and `typebox`; package-local TSX launcher and granular same-machine broker configuration |
@@ -528,7 +528,7 @@ No persistent settings exist. Herdr environment values and the ambient `herdr` C
 
 <Decision title="Control sudo-task releases through npm" status="accepted">
 
-`npm:pi-herdr-sudo-task@0.1.1` replaces direct git revision `c2c17cf0b1233a1f4837e7e4aff7e65bc98b8705`, giving explicit maintainer-controlled release pacing. The exact npm tarball is provenance-attested, matches the compiled output from tagged commit `a8b491e41c1cbb6a94d2568210b32b50046575c2`, and has no runtime dependency closure; managed Pi supplies peers, while `herdr` and `sudo` remain host commands. The release adds geometry-aware pane splitting and snapshots validated Herdr environment values across asynchronous work without weakening the privilege boundary. Upstream's full self-check passes against the published artifact.
+`npm:pi-herdr-sudo-task@0.1.2` replaces direct git revision `c2c17cf0b1233a1f4837e7e4aff7e65bc98b8705`, giving explicit maintainer-controlled release pacing. The exact npm tarball is provenance-attested, matches tagged commit `7c1be66240858a03e0830065f34a0bcc5996979f`, and has no npm dependency closure. Managed Pi supplies peers. Review-pane runtime requires Node 22.19 or newer, `herdr`, `sudo`, POSIX `sh`, and Linux `/proc`; these remain host runtime dependencies. The release waits for a PID/start-time runner handshake before parent cleanup, while the runner removes its launch files after successful start. This closes the race where Herdr queued a command but the parent deleted `runner.mjs` before the pane shell executed it. Upstream's full self-check and trusted-publish workflow pass against the published artifact.
 
 This remains security-critical code, not a sandbox. It validates absolute working directories, step counts, control characters, file ownership/modes, and live Herdr state; refuses headless Pi; requires separate Pi approval and terminal `y` consent before `sudo -v`; then runs only reviewed commands sequentially through `sudo sh -c`. Password input bypasses captured output, while command output is intentionally retained in private `/tmp/pi-herdr-sudo-task-<uid>/` transcripts that may contain sensitive data. Unknown outcomes are never retried automatically. No settings exist to migrate.
 
