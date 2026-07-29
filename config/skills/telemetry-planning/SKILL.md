@@ -1,40 +1,45 @@
 ---
 name: telemetry-planning
-description: Treat observability as part of "done" for every feature plan. Trigger this whenever planning a new feature, service, endpoint, background job, migration, or any program; whenever drafting a SCOPE.md, ADR, spec, or any implementation plan; whenever auditing an existing feature for observability gaps; or whenever the user mentions tracing, logs, metrics, OpenTelemetry, OTel, observability, monitoring, instrumentation, or telemetry. Enforces OpenTelemetry as the default standard, all three pillars (tracing + logs + metrics) covered, explicit histogram buckets, low-cardinality-by-default with high-value offers, and sensitive-data redaction that keeps the field name visible. Also triggers on "plan with telemetry", "add observability", "what metrics should we emit".
+description: Scale observability to operational need. Use when planning a daemon, long-running app, service, endpoint, background job, or migration; when auditing observability gaps; or when the user mentions logs, tracing, metrics, OpenTelemetry, OTel, monitoring, instrumentation, or telemetry. Small apps default to useful logs; consider OpenTelemetry when runtime duration, process boundaries, or operational complexity justify it.
 ---
 
-# Telemetry planning — observability is part of "done"
+# Telemetry planning — match operational weight
 
-Whenever you plan a new feature, service, endpoint, job, migration, or any work that produces user-visible behavior, observability is part of the plan AND part of the implementation. A feature that ships without telemetry is incomplete — write that into the acceptance criteria, not into a follow-up ticket.
+Choose the smallest observability level that can diagnose likely failures:
+
+1. **Small or short-lived app:** useful logs are enough. Do not add OpenTelemetry, collectors, exporters, traces, or metrics without a concrete operational need.
+2. **Daemon or long-running app:** consider OpenTelemetry. Adopt only the signals needed for restart diagnosis, latency, throughput, saturation, cross-process correlation, or alerting.
+3. **Distributed or operationally critical system:** prefer OpenTelemetry for vendor-neutral context propagation and correlated signals.
+
+Observability is part of done; OpenTelemetry is not automatically part of done.
 
 ## When this skill must run
 
-- Feature plan / SCOPE.md / ADR / spec / PROMPT.md drafting.
-- Designing a new service, endpoint, background job, scheduled task, or migration.
-- Refactor that crosses a process boundary, async boundary, or network call.
-- Audit of an existing feature for observability gaps.
-- Anything the user calls a "feature" or "program".
+- Designing a daemon, long-running service, endpoint, background job, scheduled task, or migration.
+- Refactor crossing a process, async, queue, or network boundary.
+- Audit of existing logs, traces, metrics, or monitoring gaps.
+- User explicitly asks about observability or telemetry.
 
-If you are planning and skipped this skill, restart the plan.
+For small feature plans, add only the log/error behavior needed to debug the feature. No mandatory telemetry section.
 
-## Three pillars — cover as much as possible
+## Signals — select only what earns its cost
 
-A plan should explicitly name what each pillar carries. "We will have OTel" is not a plan; "we will emit these spans, these logs, these metrics" is.
+Name only selected signals and why each exists. "We will have OTel" is not a plan.
 
-### Tracing
+### Tracing — when operation flow crosses meaningful boundaries
 - One trace per logical operation (request, job invocation, event-handler call).
 - One span per meaningful step (DB query, external HTTP call, cache lookup, expensive compute block, queue publish).
 - Propagate context across every process and async boundary (W3C `traceparent`/`tracestate` for HTTP, queue headers for async).
 - Span attributes: business identifiers (entity ids, tenant id when small), technical attrs (status, durations, byte sizes, error kind).
 - Errors: record exception on the span (OTel `RecordException` or language equivalent), set span status to `ERROR`. Do not swallow.
 
-### Logs
-- Structured (JSON or key=value), one event per line.
-- Correlate with the active trace: emit `trace_id` + `span_id` on every log line.
+### Logs — default for small apps
+- Structured (JSON or key=value), one event per line when practical.
+- When a trace is active, emit `trace_id` + `span_id` on every log line.
 - Severity discipline: debug for trace-only detail, info for state transitions, warn for recoverable anomalies, error for failures that need eyes.
 - Log on state transitions, decisions, and failures — not on every tick. If the span already carries the data, do not duplicate it as a log.
 
-### Metrics
+### Metrics — when trends, SLOs, or alerts need aggregation
 - Counter: monotonically growing values (requests, errors, items processed, retries triggered).
 - Gauge: values that go up and down at observation time (queue depth, pool size, active connections, in-flight requests).
 - Histogram: distributions (latency, payload size, batch size).
@@ -111,16 +116,17 @@ User answers ARE the project's PII contract. Write into the plan AND capture as 
 
 ### Per-plan output
 
-Every Telemetry section MUST list:
-1. **Tier A fields present** — name them so reviewers see the universal contract is honored.
+When selected logs, traces, or metrics contain sensitive fields, list relevant fields only:
+1. **Tier A fields present** — always name and redact them.
 2. **Tier B fields kept visible** — name them + state "support-debug default".
 3. **Tier C fields redacted** — name them + redaction strategy.
-4. **Tier D answers** — each field + chosen strategy (a/b/c/d) + pointer to company policy doc if one exists.
-5. **Committed project rule** — which `.agents/rules/<name>.md` codifies the above. If no rule yet, mark as follow-up before merge.
+4. **Tier D answers** — each field + chosen strategy (a/b/c/d) + policy pointer when one exists.
 
-## Histograms — explicit buckets
+Capture a project rule only when policy will recur; do not create one for a one-off small app.
 
-Default OTel histogram buckets are almost always wrong for your domain (the default latency boundaries jump 0, 5, 10, 25, 50, 75, 100, 250, 500, 750, 1000, 2500, 5000, 7500, 10000 — fine for some HTTP services, useless for sub-millisecond compute or multi-minute jobs). Pick buckets that match the actual distribution you expect.
+## Histograms — only when metrics are selected
+
+Default OTel histogram buckets are often wrong for the domain. If a histogram is justified, pick buckets matching the expected distribution.
 
 Worked examples:
 - HTTP endpoint where p99 is well under 1s: `[5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000]` ms.
@@ -132,9 +138,9 @@ Worked examples:
 
 Set buckets via the OTel Views API (or equivalent aggregation config) — do not hand-tune at every instrumentation site. Document the bucket choice next to the metric definition.
 
-## Cardinality — low by default, offer high when high value
+## Cardinality — only when metrics are selected
 
-High cardinality (label values that explode the metric time-series count) is the most common observability cost spike. Default to LOW cardinality. Treat any unbounded label as a tripwire.
+High cardinality (label values that explode the metric time-series count) is the most common observability cost spike. For selected metrics, default to LOW cardinality. Treat any unbounded label as a tripwire.
 
 Default-safe labels (low cardinality):
 - `http.method`, `http.status_code` (or `status_class`), `service.name`, `service.version`.
@@ -153,9 +159,9 @@ When a label is HIGH CARDINALITY but HIGH VALUE (e.g. `tenant_id` in a multi-ten
 
 Default to (b) unless the user picks otherwise. Record the decision in the plan.
 
-## OpenTelemetry as the standard
+## OpenTelemetry when escalation is justified
 
-Use the OpenTelemetry SDK for the language. Reasons that matter:
+When tracing or metrics justify instrumentation infrastructure, prefer the language's OpenTelemetry SDK. Reasons that matter:
 - Vendor-neutral export (OTLP). You can ship to Tempo, Jaeger, Honeycomb, Grafana Cloud, Datadog, New Relic — by changing config, not code.
 - Semantic conventions (`semconv`). Use the documented attribute names (`http.method`, `db.system`, `messaging.destination.name`, etc.) so dashboards, queries, and tools that understand semconv work out of the box.
 - Auto-instrumentation libraries exist for most frameworks (HTTP servers, gRPC, common DBs, queues, ORMs). Use them; do not hand-roll context propagation.
@@ -185,13 +191,13 @@ Minimum content for the captured rule/skill:
 
 ## In the SCOPE / acceptance criteria
 
-Every feature plan MUST include a Telemetry section answering:
+For a small app, put log behavior beside the feature acceptance criteria: important state transitions, actionable errors, output destination, and sensitive-field handling. Skip a separate Telemetry section when logs are the only signal.
 
-- **Spans:** which spans does this emit? What attributes? Where does context cross a boundary?
-- **Logs:** which events get a log line? Severity? Trace correlation confirmed?
-- **Metrics:** which counters / gauges / histograms? Bucket choice for histograms. Cardinality bound for every label.
-- **Sensitive data:** which fields are sensitive? Redaction strategy per field.
-- **High-cardinality offer:** any label that is high-value-but-high-cardinality? Which option (a/b/c/d above) did the user pick?
-- **Acceptance:** run the feature, see the expected spans/logs/metrics arrive in the configured backend with the expected attributes. Tests-pass alone is NOT the acceptance check.
+For a daemon, long-running app, or distributed system, record the observability decision:
 
-A plan that does not have this section is incomplete; restart the planning step.
+- **Why OTel is or is not justified.** Runtime duration alone triggers consideration, not mandatory adoption.
+- **Logs:** events, severity, destination, and trace correlation when tracing exists.
+- **Spans:** only selected operations, attributes, and context boundaries.
+- **Metrics:** only selected counters/gauges/histograms, buckets, and cardinality bounds.
+- **Sensitive data:** fields and redaction strategy for every selected signal.
+- **Acceptance:** observe each selected signal at its actual destination. Do not demand spans or metrics that the plan intentionally omitted.

@@ -1110,6 +1110,10 @@ in
         ! grep -RE '^(model|thinking|chain|loop|subagent|deterministic):' ${./config/prompts}
         test "$(grep -RE '^skill: writing-great-skills$' ${./config/prompts} | wc -l)" -eq 2
         test ! -e ${./config/skills}/grilling
+        grep -F '**Small or short-lived app:** useful logs are enough.' \
+          ${./config/skills}/telemetry-planning/SKILL.md
+        grep -F '**Daemon or long-running app:** consider OpenTelemetry.' \
+          ${./config/skills}/telemetry-planning/SKILL.md
         test "$(grep -F 'Stop asking questions when we reach a shared understanding and big decision was already made, because relatively smaller decisions would automatically derive.' \
           ${default.config.programs.pi-coding-agent.skills.grilling}/SKILL.md | wc -l)" -eq 1
 
