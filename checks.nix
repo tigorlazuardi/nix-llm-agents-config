@@ -259,6 +259,8 @@ in
     assert default.config.programs.pi-coding-agent.package == expectedPackage;
     assert
       default.config.programs.pi-coding-agent.settings == {
+        defaultProvider = "openai-codex";
+        defaultModel = "gpt-5.6-sol";
         defaultThinkingLevel = "medium";
         quietStartup = true;
         theme = "dark";

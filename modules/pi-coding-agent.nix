@@ -160,6 +160,8 @@ let
     builtins.filter (plugin: cfg.plugins.${plugin.name}.enable) pluginPackages
   );
   defaultSettings = {
+    defaultProvider = "openai-codex";
+    defaultModel = "gpt-5.6-sol";
     defaultThinkingLevel = "medium";
     quietStartup = true;
     theme = "dark";
