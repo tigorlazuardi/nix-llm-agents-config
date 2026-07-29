@@ -335,18 +335,7 @@ in
       }
     ];
 
-    programs.mcp = lib.mkIf (cfg.enable && mcpPlugin.enable) {
-      enable = lib.mkDefault true;
-      # ponytail: od stays an ambient PATH dependency until its package source is migrated.
-      servers.open-design = {
-        command = lib.mkDefault "od";
-        args = lib.mkDefault [
-          "mcp"
-          "--daemon-url"
-          "https://open-design.tigor.web.id"
-        ];
-      };
-    };
+    programs.mcp.enable = lib.mkIf (cfg.enable && mcpPlugin.enable) (lib.mkDefault true);
 
     home = {
       packages = lib.mkIf cfg.enable [ pinnedPkgs.oscclip ];

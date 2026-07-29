@@ -117,7 +117,7 @@ let
   invalidPluginEvaluation = builtins.tryEval (
     builtins.deepSeq invalidPlugin.config.home.activationPackage true
   );
-  invalidDisabledMcp = evaluate { programs.mcp.servers.open-design.enabled = false; };
+  invalidDisabledMcp = evaluate { programs.mcp.servers.disabled-test.enabled = false; };
   invalidDisabledMcpEvaluation = builtins.tryEval (
     builtins.deepSeq invalidDisabledMcp.config.home.activationPackage true
   );
@@ -347,13 +347,7 @@ in
       vccConfigured.config.home.sessionVariables.PI_VCC_CONFIG_PATH
       == "/home/test/.pi/agent/pi-vcc-config.json";
     assert default.config.programs.mcp.enable;
-    assert default.config.programs.mcp.servers.open-design.command == "od";
-    assert
-      default.config.programs.mcp.servers.open-design.args == [
-        "mcp"
-        "--daemon-url"
-        "https://open-design.tigor.web.id"
-      ];
+    assert !(default.config.programs.mcp.servers ? open-design);
     assert
       default.config.home.file."${default.config.programs.pi-coding-agent.configDir}/AGENTS.md".source
       == ./config/AGENTS.md;
@@ -408,8 +402,9 @@ in
       == ./config/templates/drain;
     assert
       default.config.home.file."${default.config.programs.pi-coding-agent.configDir}/templates/drain".force;
-    assert default.config.home.file ? "${default.config.programs.pi-coding-agent.configDir}/mcp.json";
-    assert default.config.xdg.configFile ? "mcp/mcp.json";
+    assert
+      !(default.config.home.file ? "${default.config.programs.pi-coding-agent.configDir}/mcp.json");
+    assert !(default.config.xdg.configFile ? "mcp/mcp.json");
     assert builtins.elem expectedPackage default.config.home.packages;
     assert
       !(builtins.elem disabled.config.programs.pi-coding-agent.package disabled.config.home.packages);
@@ -899,7 +894,7 @@ in
       }
       ''
         mcp_config=${secretWrappedMcpConfig}
-        jq -e '.mcpServers["open-design"].command == "od"' "$mcp_config"
+        jq -e '.mcpServers | has("open-design") | not' "$mcp_config"
         jq -e '.mcpServers.secret.env == {"PUBLIC":"visible"}' "$mcp_config"
         jq -e '.mcpServers.secret | has("args") | not' "$mcp_config"
         ! grep -F '/run/secrets/token' "$mcp_config"
