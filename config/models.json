@@ -1,0 +1,295 @@
+{
+  "providers": {
+    "omniroute": {
+      "name": "omniroute",
+      "baseUrl": "https://omniroute.tigor.web.id/v1",
+      "apiKey": "omniroute-no-api-key",
+      "models": [
+        {
+          "id": "cc/claude-fable-5",
+          "reasoning": true,
+          "contextWindow": 1000000,
+          "maxTokens": 128000,
+          "api": "anthropic-messages",
+          "input": [
+            "text",
+            "image"
+          ]
+        },
+        {
+          "id": "cc/claude-opus-4-8",
+          "reasoning": true,
+          "contextWindow": 1000000,
+          "maxTokens": 64000,
+          "api": "anthropic-messages",
+          "input": [
+            "text",
+            "image"
+          ]
+        },
+        {
+          "id": "cc/claude-sonnet-5",
+          "reasoning": true,
+          "contextWindow": 1000000,
+          "maxTokens": 128000,
+          "api": "anthropic-messages",
+          "input": [
+            "text",
+            "image"
+          ]
+        },
+        {
+          "id": "cc/claude-haiku-4-5-20251001",
+          "reasoning": true,
+          "contextWindow": 200000,
+          "maxTokens": 64000,
+          "api": "anthropic-messages",
+          "input": [
+            "text",
+            "image"
+          ]
+        },
+        {
+          "id": "cx/gpt-5.6-sol",
+          "name": "GPT 5.6 Sol",
+          "api": "openai-completions",
+          "input": [
+            "text",
+            "image"
+          ],
+          "contextWindow": 1000000,
+          "maxTokens": 128000,
+          "reasoning": true
+        },
+        {
+          "id": "cx/gpt-5.6-sol-ultra",
+          "name": "GPT 5.6 Sol (Ultra)",
+          "api": "openai-completions",
+          "input": [
+            "text",
+            "image"
+          ],
+          "contextWindow": 1000000,
+          "maxTokens": 128000,
+          "reasoning": true
+        },
+        {
+          "id": "cx/gpt-5.6-sol-max",
+          "name": "GPT 5.6 Sol (Max)",
+          "api": "openai-completions",
+          "input": [
+            "text",
+            "image"
+          ],
+          "contextWindow": 1000000,
+          "maxTokens": 128000,
+          "reasoning": true
+        },
+        {
+          "id": "cx/gpt-5.6-sol-xhigh",
+          "name": "GPT 5.6 Sol (Xhigh)",
+          "api": "openai-completions",
+          "input": [
+            "text",
+            "image"
+          ],
+          "contextWindow": 1000000,
+          "maxTokens": 128000,
+          "reasoning": true
+        },
+        {
+          "id": "cx/gpt-5.6-sol-high",
+          "name": "GPT 5.6 Sol (High)",
+          "api": "openai-completions",
+          "input": [
+            "text",
+            "image"
+          ],
+          "contextWindow": 1000000,
+          "maxTokens": 128000,
+          "reasoning": true
+        },
+        {
+          "id": "cx/gpt-5.6-sol-medium",
+          "name": "GPT 5.6 Sol (Medium)",
+          "api": "openai-completions",
+          "input": [
+            "text",
+            "image"
+          ],
+          "contextWindow": 1000000,
+          "maxTokens": 128000,
+          "reasoning": true
+        },
+        {
+          "id": "cx/gpt-5.6-sol-low",
+          "name": "GPT 5.6 Sol (Low)",
+          "api": "openai-completions",
+          "input": [
+            "text",
+            "image"
+          ],
+          "contextWindow": 1000000,
+          "maxTokens": 128000,
+          "reasoning": true
+        },
+        {
+          "id": "cx/gpt-5.6-terra",
+          "name": "GPT 5.6 Terra",
+          "api": "openai-completions",
+          "input": [
+            "text",
+            "image"
+          ],
+          "contextWindow": 1000000,
+          "maxTokens": 128000,
+          "reasoning": true
+        },
+        {
+          "id": "cx/gpt-5.6-terra-ultra",
+          "name": "GPT 5.6 Terra (Ultra)",
+          "api": "openai-completions",
+          "input": [
+            "text",
+            "image"
+          ],
+          "contextWindow": 1000000,
+          "maxTokens": 128000,
+          "reasoning": true
+        },
+        {
+          "id": "cx/gpt-5.6-terra-max",
+          "name": "GPT 5.6 Terra (Max)",
+          "api": "openai-completions",
+          "input": [
+            "text",
+            "image"
+          ],
+          "contextWindow": 1000000,
+          "maxTokens": 128000,
+          "reasoning": true
+        },
+        {
+          "id": "cx/gpt-5.6-terra-xhigh",
+          "name": "GPT 5.6 Terra (Xhigh)",
+          "api": "openai-completions",
+          "input": [
+            "text",
+            "image"
+          ],
+          "contextWindow": 1000000,
+          "maxTokens": 128000,
+          "reasoning": true
+        },
+        {
+          "id": "cx/gpt-5.6-terra-high",
+          "name": "GPT 5.6 Terra (High)",
+          "api": "openai-completions",
+          "input": [
+            "text",
+            "image"
+          ],
+          "contextWindow": 1000000,
+          "maxTokens": 128000,
+          "reasoning": true
+        },
+        {
+          "id": "cx/gpt-5.6-terra-medium",
+          "name": "GPT 5.6 Terra (Medium)",
+          "api": "openai-completions",
+          "input": [
+            "text",
+            "image"
+          ],
+          "contextWindow": 1000000,
+          "maxTokens": 128000,
+          "reasoning": true
+        },
+        {
+          "id": "cx/gpt-5.6-terra-low",
+          "name": "GPT 5.6 Terra (Low)",
+          "api": "openai-completions",
+          "input": [
+            "text",
+            "image"
+          ],
+          "contextWindow": 1000000,
+          "maxTokens": 128000,
+          "reasoning": true
+        },
+        {
+          "id": "cx/gpt-5.6-luna",
+          "name": "GPT 5.6 Luna",
+          "api": "openai-completions",
+          "input": [
+            "text",
+            "image"
+          ],
+          "contextWindow": 1000000,
+          "maxTokens": 128000,
+          "reasoning": true
+        },
+        {
+          "id": "cx/gpt-5.6-luna-max",
+          "name": "GPT 5.6 Luna (Max)",
+          "api": "openai-completions",
+          "input": [
+            "text",
+            "image"
+          ],
+          "contextWindow": 1000000,
+          "maxTokens": 128000,
+          "reasoning": true
+        },
+        {
+          "id": "cx/gpt-5.6-luna-xhigh",
+          "name": "GPT 5.6 Luna (Xhigh)",
+          "api": "openai-completions",
+          "input": [
+            "text",
+            "image"
+          ],
+          "contextWindow": 1000000,
+          "maxTokens": 128000,
+          "reasoning": true
+        },
+        {
+          "id": "cx/gpt-5.6-luna-high",
+          "name": "GPT 5.6 Luna (High)",
+          "api": "openai-completions",
+          "input": [
+            "text",
+            "image"
+          ],
+          "contextWindow": 1000000,
+          "maxTokens": 128000,
+          "reasoning": true
+        },
+        {
+          "id": "cx/gpt-5.6-luna-medium",
+          "name": "GPT 5.6 Luna (Medium)",
+          "api": "openai-completions",
+          "input": [
+            "text",
+            "image"
+          ],
+          "contextWindow": 1000000,
+          "maxTokens": 128000,
+          "reasoning": true
+        },
+        {
+          "id": "cx/gpt-5.6-luna-low",
+          "name": "GPT 5.6 Luna (Low)",
+          "api": "openai-completions",
+          "input": [
+            "text",
+            "image"
+          ],
+          "contextWindow": 1000000,
+          "maxTokens": 128000,
+          "reasoning": true
+        }
+      ]
+    }
+  }
+}

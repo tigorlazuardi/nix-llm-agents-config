@@ -10,6 +10,10 @@
 }:
 let
   cfg = config.programs.pi-coding-agent;
+  repoSkills = lib.mapAttrs (name: _: ../config/skills + "/${name}") (
+    lib.filterAttrs (_: type: type == "directory") (builtins.readDir ../config/skills)
+  );
+  defaultModels = builtins.fromJSON (builtins.readFile ../config/models.json);
   mcpPlugin = cfg.plugins.pi-mcp-adapter;
   optimizerPlugin = cfg.plugins.pix-optimizer;
   vccPlugin = cfg.plugins.pi-vcc;
@@ -167,6 +171,7 @@ let
     theme = "dark";
     hideThinkingBlock = false;
     showCacheMissNotices = false;
+    subagents.disableBuiltins = true;
   };
   defaultKeybindings = {
     "app.tools.expand" = "ctrl+o";
@@ -309,11 +314,6 @@ in
 
     home = {
       packages = lib.mkIf cfg.enable [ pinnedPkgs.oscclip ];
-      activation.piCodingAgentPixOptimizer = lib.mkIf (cfg.enable && optimizerPlugin.enable) (
-        lib.hm.dag.entryAfter [ "writeBoundary" ] ''
-          run install -D -m 0600 ${optimizerStateFile} ${lib.escapeShellArg "${cfg.configDir}/optimizer.json"}
-        ''
-      );
       sessionVariables = lib.mkIf (cfg.enable && vccPlugin.enable) {
         PI_VCC_CONFIG_PATH = lib.mkDefault "${cfg.configDir}/pi-vcc-config.json";
       };
@@ -329,10 +329,13 @@ in
         }
       ];
       keybindings = lib.mapAttrsRecursive (_: lib.mkDefault) defaultKeybindings;
+      models = lib.mapAttrsRecursive (_: lib.mkDefault) defaultModels;
       context = lib.mkDefault ../config/AGENTS.md;
-      # ponytail: expose only required skill; add allowlist adapter when another target or override exists.
-      skills.writing-great-skills = lib.mkDefault (
-        mattpocock-skills + "/skills/productivity/writing-great-skills"
+      skills = lib.mapAttrsRecursive (_: lib.mkDefault) (
+        repoSkills
+        // {
+          writing-great-skills = mattpocock-skills + "/skills/productivity/writing-great-skills";
+        }
       );
     };
 
@@ -351,6 +354,10 @@ in
       };
       "${cfg.configDir}/mcp.json" = lib.mkIf (mcpPlugin.enable && renderedMcpConfig != { }) {
         source = jsonFormat.generate "pi-mcp-adapter.json" renderedMcpConfig;
+      };
+      # ponytail: immutable config disables /optimizer persistence; change module options and switch.
+      "${cfg.configDir}/optimizer.json" = lib.mkIf optimizerPlugin.enable {
+        source = optimizerStateFile;
       };
       "${cfg.configDir}/pi-vcc-config.json" = lib.mkIf vccPlugin.enable { source = vccConfigFile; };
       "${cfg.configDir}/intercom/config.json" = lib.mkIf cfg.plugins.pi-intercom.enable {

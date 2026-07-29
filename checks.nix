@@ -46,7 +46,8 @@ let
     toon = "off";
     ponytail = "ultra";
   };
-  optimizerActivation = optimizerConfigured.config.home.activation.piCodingAgentPixOptimizer.data;
+  optimizerConfigSource =
+    optimizerConfigured.config.home.file."${optimizerConfigured.config.programs.pi-coding-agent.configDir}/optimizer.json".source;
   vccConfigured = evaluate {
     programs.pi-coding-agent.plugins.pi-vcc.settings = {
       overrideDefaultCompaction = false;
@@ -227,6 +228,7 @@ let
   expectedSupiExtrasPath = "${expectedSupiExtras}/lib/node_modules/@mrclrchtr/supi-extras";
   expectedOscclip = nixpkgs-unstable.legacyPackages.x86_64-linux.oscclip;
   expectedWritingGreatSkills = default.config.programs.pi-coding-agent.skills.writing-great-skills;
+  expectedModels = builtins.fromJSON (builtins.readFile ./config/models.json);
   secretWrappedMcpConfig =
     secretWrappedMcp.config.home.file."${secretWrappedMcp.config.programs.pi-coding-agent.configDir}/mcp.json".source;
 in
@@ -266,6 +268,7 @@ in
         theme = "dark";
         hideThinkingBlock = false;
         showCacheMissNotices = false;
+        subagents.disableBuiltins = true;
         packages = [
           expectedDietLspPath
           expectedEffortPath
@@ -300,7 +303,7 @@ in
         "app.tools.expand" = "ctrl+o";
         "tui.editor.cursorLeft" = "left";
       };
-    assert default.config.programs.pi-coding-agent.models == { };
+    assert default.config.programs.pi-coding-agent.models == expectedModels;
     assert default.config.programs.pi-coding-agent.context == ./config/AGENTS.md;
     assert default.config.programs.pi-coding-agent.plugins.pi-mcp-adapter.enable;
     assert default.config.programs.pi-coding-agent.plugins.pi-mcp-adapter.enableMcpIntegration;
@@ -324,10 +327,7 @@ in
         toon = false;
         ponytail = "ultra";
       };
-    assert pkgs.lib.hasInfix (builtins.unsafeDiscardStringContext "${expectedOptimizerStateFile}") (
-      builtins.unsafeDiscardStringContext optimizerActivation
-    );
-    assert pkgs.lib.hasInfix "/home/test/.pi/agent/optimizer.json" optimizerActivation;
+    assert optimizerConfigSource == expectedOptimizerStateFile;
     assert
       default.config.programs.pi-coding-agent.plugins.pi-vcc.settings == {
         overrideDefaultCompaction = true;
@@ -360,9 +360,14 @@ in
     assert builtins.pathExists (
       default.config.programs.pi-coding-agent.skills.writing-great-skills + "/SKILL.md"
     );
+    assert builtins.length (builtins.attrNames default.config.programs.pi-coding-agent.skills) == 53;
     assert
-      default.config.home.file."${default.config.programs.pi-coding-agent.configDir}/skills/writing-great-skills".source
+      default.config.home.file."${default.config.programs.pi-coding-agent.configDir}/skills".source.entries.writing-great-skills
       == default.config.programs.pi-coding-agent.skills.writing-great-skills;
+    assert
+      default.config.home.file."${default.config.programs.pi-coding-agent.configDir}/skills".source.entries.agents-load
+      == ./config/skills/agents-load;
+    assert default.config.home.file."${default.config.programs.pi-coding-agent.configDir}/skills".force;
     assert builtins.length (builtins.attrNames default.config.programs.pi-coding-agent.agents) == 10;
     assert
       default.config.home.file."${default.config.programs.pi-coding-agent.configDir}/agents/orchestrator.md".text
@@ -381,7 +386,7 @@ in
         ---
         Custom prompt.'';
     assert
-      resolvedAgent.config.home.file."${resolvedAgent.config.programs.pi-coding-agent.configDir}/skills/demo".source
+      resolvedAgent.config.home.file."${resolvedAgent.config.programs.pi-coding-agent.configDir}/skills".source.entries.demo
       == ./config/agents;
     assert !invalidPluginEvaluation.success;
     assert !invalidDisabledMcpEvaluation.success;
@@ -426,7 +431,10 @@ in
         ? "${disabled.config.programs.pi-coding-agent.configDir}/pi-vcc-config.json"
       );
     assert !(disabled.config.xdg.configFile ? "mcp/mcp.json");
-    assert !(disabled.config.home.activation ? piCodingAgentPixOptimizer);
+    assert
+      !(
+        disabled.config.home.file ? "${disabled.config.programs.pi-coding-agent.configDir}/optimizer.json"
+      );
     assert !(disabled.config.home.sessionVariables ? C2C_BIN);
     assert
       !(
@@ -435,10 +443,7 @@ in
       );
     assert !(disabled.config.home.sessionVariables ? PI_VCC_CONFIG_PATH);
     assert
-      !(
-        disabled.config.home.file
-        ? "${disabled.config.programs.pi-coding-agent.configDir}/skills/writing-great-skills"
-      );
+      !(disabled.config.home.file ? "${disabled.config.programs.pi-coding-agent.configDir}/skills");
     assert
       !(disabled.config.home.file ? "${disabled.config.programs.pi-coding-agent.configDir}/prompts");
     assert
@@ -466,7 +471,11 @@ in
         pluginsDisabled.config.home.file
         ? "${pluginsDisabled.config.programs.pi-coding-agent.configDir}/mcp.json"
       );
-    assert !(pluginsDisabled.config.home.activation ? piCodingAgentPixOptimizer);
+    assert
+      !(
+        pluginsDisabled.config.home.file
+        ? "${pluginsDisabled.config.programs.pi-coding-agent.configDir}/optimizer.json"
+      );
     assert !(pluginsDisabled.config.home.sessionVariables ? PI_VCC_CONFIG_PATH);
     assert
       !(
@@ -1094,7 +1103,7 @@ in
       }
       ''
         set -- ${./config/prompts}/*.md
-        test "$#" -eq 6
+        test "$#" -eq 13
         ! grep -RE '^(model|thinking|chain|loop|subagent|deterministic):' ${./config/prompts}
         test "$(grep -RE '^skill: writing-great-skills$' ${./config/prompts} | wc -l)" -eq 2
 

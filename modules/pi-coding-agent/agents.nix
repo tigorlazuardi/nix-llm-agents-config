@@ -1,11 +1,13 @@
 {
   config,
   lib,
+  pkgs,
   ...
 }:
 let
   cfg = config.programs.pi-coding-agent;
   defaultAgents = import ./default-agents.nix;
+  skillsTree = pkgs.linkFarm "pi-agent-skills" cfg.skills;
 in
 {
   options.programs.pi-coding-agent = {
@@ -73,10 +75,9 @@ in
   config = {
     programs.pi-coding-agent.agents = lib.mapAttrsRecursive (_: lib.mkDefault) defaultAgents;
 
-    home.file = lib.mkIf cfg.enable (
-      lib.mapAttrs' (
-        name: path: lib.nameValuePair "${cfg.configDir}/skills/${name}" { source = path; }
-      ) cfg.skills
-    );
+    home.file."${cfg.configDir}/skills" = lib.mkIf cfg.enable {
+      source = skillsTree;
+      force = true;
+    };
   };
 }
