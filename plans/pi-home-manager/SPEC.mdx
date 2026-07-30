@@ -389,7 +389,7 @@ Do not inject a generic reminder from `agent_end` or `agent_settled`: `agent_end
 - One bounded retry handles a concurrent update. Automation never force-pushes.
 - No-op updates write summary status but create no commit.
 - Commit subjects use `chore(deps): update nixpkgs and home-manager` and `chore(pi-plugins): update <alias> to <version>`.
-- Shell scripts use Nix, npm metadata commands, git, and jq only.
+- Shell scripts use Nix, npm metadata commands, git, and jq only. Committed npm locks may additionally use `npm install --package-lock-only --ignore-scripts`; it resolves metadata without lifecycle scripts.
 
 ### Update observability
 
