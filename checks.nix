@@ -1011,10 +1011,13 @@ in
         export PLAYWRIGHT_CLI_SESSION=nix-check
         export PLAYWRIGHT_MCP_HEADLESS=true
         mkdir -p "$PI_CODING_AGENT_DIR"
+        cat > "$TMPDIR/playwright-config.json" <<'EOF'
+        {"browser":{"launchOptions":{"chromiumSandbox":false}}}
+        EOF
 
         skill=${expectedPlaywrightPath}/skills/playwright-browser
         test "$(node "$skill/scripts/artifact-dir.js")" = "$PI_PLAYWRIGHT_ARTIFACTS"
-        node "$skill/scripts/pw.js" open about:blank
+        node "$skill/scripts/pw.js" open about:blank --config "$TMPDIR/playwright-config.json"
         node "$skill/scripts/pw.js" close
 
         pi --offline --no-extensions --no-skills --no-prompt-templates --no-context-files \

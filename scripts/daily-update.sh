@@ -138,16 +138,30 @@ npm_update() {
 }
 
 github_update() {
-  local alias=$1 entry=$2 owner repo track old_rev old_version rev version hash file check
-  owner=$(jq -r '.owner' <<<"$entry"); repo=$(jq -r '.repo' <<<"$entry"); track=$(jq -r '.track' <<<"$entry")
-  # Tag listing discovers GitHub releases; branch head remains explicit reviewed update target.
-  git ls-remote --tags "https://github.com/$owner/$repo.git" >/dev/null
+  local alias=$1 entry=$2 owner repo track tag_prefix old_rev old_version rev version hash file check release
+  owner=$(jq -r '.owner' <<<"$entry"); repo=$(jq -r '.repo' <<<"$entry"); track=$(jq -r '.track // empty' <<<"$entry"); tag_prefix=$(jq -r '.tagPrefix // empty' <<<"$entry")
   old_rev=$(jq -r '.rev' <<<"$entry")
   old_version=$(jq -r '.version' <<<"$entry")
-  rev=$(git ls-remote "https://github.com/$owner/$repo.git" "refs/heads/$track" | jq -R 'split("\t")[0]' -r)
-  [ -n "$rev" ] && [ "$rev" != "null" ] || return 1
-  [ "$rev" = "$old_rev" ] && { say "- $alias: unchanged ($old_rev)"; return 0; }
-  version="unstable-$(date -u +%F)"
+  if [ -n "$tag_prefix" ]; then
+    release=$(git ls-remote --tags "https://github.com/$owner/$repo.git" | jq -Rs --arg prefix "$tag_prefix" '
+      split("\n")
+      | map(select(length > 0) | capture("^(?<rev>[^\\t]+)\\trefs/tags/(?<tag>.+)$"))
+      | map(.peeled = (.tag | endswith("^{}")) | .tag |= sub("\\^\\{\\}$"; ""))
+      | group_by(.tag)
+      | map({tag: .[0].tag, rev: ((map(select(.peeled)) | first) // .[0]).rev})
+      | map(select(.tag | startswith($prefix)) | .version = (.tag | ltrimstr($prefix)) | select(.version | test("^[0-9]+(\\.[0-9]+)*$")))
+      | sort_by(.version | split(".") | map(tonumber))
+      | last
+    ') || return 1
+    rev=$(jq -r '.rev // empty' <<<"$release")
+    version=$(jq -r '.version // empty' <<<"$release")
+  else
+    [ -n "$track" ] || return 1
+    rev=$(git ls-remote "https://github.com/$owner/$repo.git" "refs/heads/$track" | jq -R 'split("\t")[0]' -r)
+    version="unstable-$(date -u +%F)"
+  fi
+  [ -n "$rev" ] && [ -n "$version" ] && [ "$rev" != "null" ] || return 1
+  [ "$rev" = "$old_rev" ] && { say "- $alias: unchanged ($old_version)"; return 0; }
   hash=$(nix flake prefetch --json "github:$owner/$repo/$rev" | jq -r .hash)
   file=$(jq -r '.packageFile' <<<"$entry")
   replace_literal "$file" "$old_rev" "$rev" && replace_literal "$file" "$old_version" "$version" && replace_literal "$file" "$(jq -r '.hash' <<<"$entry")" "$hash" || return 1

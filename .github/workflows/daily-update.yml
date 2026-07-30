@@ -16,6 +16,10 @@ jobs:
         with:
           fetch-depth: 0
       - uses: DeterminateSystems/nix-installer-action@v20
+      - name: Configure git author
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
       - name: Update inputs
         env:
           GITHUB_TOKEN: ${{ github.token }}
@@ -31,6 +35,10 @@ jobs:
           ref: main
           fetch-depth: 0
       - uses: DeterminateSystems/nix-installer-action@v20
+      - name: Configure git author
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
       - name: Update plugins
         env:
           GITHUB_TOKEN: ${{ github.token }}

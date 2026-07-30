@@ -9,6 +9,7 @@ test -x "$updater"
 grep -F 'cron: "0 3 * * *"' "$workflow"
 grep -Fx '  workflow_dispatch:' "$workflow"
 grep -F 'contents: write' "$workflow"
+test "$(grep -Fc 'git config user.name "github-actions[bot]"' "$workflow")" -eq 2
 grep -F 'if: always()' "$workflow"
 grep -F 'ref: main' "$workflow"
 grep -F "chore(deps): update nixpkgs and home-manager" "$updater"
@@ -25,6 +26,7 @@ grep -F 'nix run nixpkgs#prefetch-npm-deps -- "$source_dir/package-lock.json"' "
 grep -F 'git ls-remote --tags' "$updater"
 grep -F '"strategy":"npm"' "$registry"
 grep -F '"strategy":"github"' "$registry"
+grep -F '"tagPrefix":"v"' "$registry"
 grep -F '"strategy":"unsupported"' "$registry"
 ! grep -F 'git push --force' "$updater"
 ! grep -F 'git reset --hard origin/main' "$updater"
@@ -44,13 +46,18 @@ cat >"$tmp/fixture/package/package.json" <<'EOF'
 EOF
 tar -czf "$tmp/fixture.tgz" -C "$tmp/fixture" package
 cat >"$tmp/pi-plugins.json" <<'EOF'
-{"pi-rules":{"strategy":"npm","package":"@fixture/pi-rules","version":"0.5.4","src":"https://old.invalid/pi-rules-0.5.4.tgz","hash":"sha256-old-source","npmDepsHash":"sha256-old-deps","packageFile":"packages/pi-rules.nix","lockFile":"packages/pi-rules-package-lock.json","check":"rules"}}
+{"pi-rules":{"strategy":"npm","package":"@fixture/pi-rules","version":"0.5.4","src":"https://old.invalid/pi-rules-0.5.4.tgz","hash":"sha256-old-source","npmDepsHash":"sha256-old-deps","packageFile":"packages/pi-rules.nix","lockFile":"packages/pi-rules-package-lock.json","check":"rules"},"pi-vcc":{"strategy":"github","owner":"fixture","repo":"pi-vcc","tagPrefix":"v","version":"0.4.0","rev":"old-vcc-rev","hash":"sha256-old-vcc","packageFile":"packages/pi-vcc.nix","check":"pi-vcc"}}
 EOF
 cat >"$tmp/packages/pi-rules.nix" <<'EOF'
 version = "0.5.4";
 url = "https://old.invalid/pi-rules-0.5.4.tgz";
 hash = "sha256-old-source";
 npmDepsHash = "sha256-old-deps";
+EOF
+cat >"$tmp/packages/pi-vcc.nix" <<'EOF'
+version = "0.4.0";
+rev = "old-vcc-rev";
+hash = "sha256-old-vcc";
 EOF
 printf '#!%s\n' "$BASH" >"$tmp/bin/npm"
 cat >>"$tmp/bin/npm" <<'EOF'
@@ -81,7 +88,8 @@ case "$*" in
     jq -e '.packages[""].name == "@fixture/pi-rules" and .packages[""].dependencies == {"fixture-dependency":"1.2.3"} and .packages["node_modules/fixture-dependency"].version == "1.2.3"' "$lock" >/dev/null
     printf 'sha256-%s\n' "$(sha256sum "$lock" | cut -d' ' -f1)"
     ;;
-  'build .#checks.x86_64-linux.rules'|'build .#checks.x86_64-linux.formatting'|'flake check') ;;
+  'flake prefetch --json github:fixture/pi-vcc/new-vcc-rev') printf '%s\n' '{"hash":"sha256-new-vcc"}' ;;
+  'build .#checks.x86_64-linux.rules'|'build .#checks.x86_64-linux.pi-vcc'|'build .#checks.x86_64-linux.formatting'|'flake check') ;;
   'flake update nixpkgs-unstable home-manager')
     jq '.nodes["nixpkgs-unstable"].locked.rev = "new-nix" | .nodes["home-manager"].locked.rev = "new-home"' flake.lock >flake.lock.new
     mv flake.lock.new flake.lock
@@ -91,20 +99,28 @@ esac
 EOF
 printf '#!%s\n' "$BASH" >"$tmp/bin/git"
 cat >>"$tmp/bin/git" <<'EOF'
+if [ "$1" = ls-remote ] && [ "$2" = --tags ]; then
+  [ "${PREFETCH_FAIL:-}" != 1 ] || exit 1
+  printf '%s\n' \
+    $'old-vcc-rev\trefs/tags/v0.4.0' \
+    $'tag-object\trefs/tags/v0.5.0' \
+    $'new-vcc-rev\trefs/tags/v0.5.0^{}'
+  exit 0
+fi
 [ "$1" = diff ] && [ "${INPUT_CHANGED:-}" = 1 ] && exit 1
 [ "$1" = push ] && [ "${FAIL_PUSH:-}" = 1 ] && exit 1
 exit 0
 EOF
 chmod +x "$tmp/bin"/*
 
-before=$(cat "$tmp/pi-plugins.json" "$tmp/packages/pi-rules.nix")
+before=$(cat "$tmp/pi-plugins.json" "$tmp/packages/pi-rules.nix" "$tmp/packages/pi-vcc.nix")
 if (
   cd "$tmp"
   PATH="$tmp/bin:$PATH" FIXTURE_TARBALL="$tmp/fixture.tgz" PREFETCH_FAIL=1 GITHUB_STEP_SUMMARY="$tmp/summary" bash ./daily-update.sh plugins
 ); then
   exit 1
 fi
-[ "$before" = "$(cat "$tmp/pi-plugins.json" "$tmp/packages/pi-rules.nix")" ]
+[ "$before" = "$(cat "$tmp/pi-plugins.json" "$tmp/packages/pi-rules.nix" "$tmp/packages/pi-vcc.nix")" ]
 [ ! -e "$tmp/packages/pi-rules-package-lock.json" ]
 
 (
@@ -115,6 +131,10 @@ fixture_hash="sha256-$(sha256sum "$tmp/packages/pi-rules-package-lock.json" | cu
 jq -e '.packages[""].name == "@fixture/pi-rules" and .packages[""].dependencies == {"fixture-dependency":"1.2.3"} and has("node_modules/must-not-lock") | not' "$tmp/packages/pi-rules-package-lock.json" >/dev/null
 grep -F 'npmDepsHash = "'"$fixture_hash"'";' "$tmp/packages/pi-rules.nix"
 jq -e --arg hash "$fixture_hash" '."pi-rules".npmDepsHash == $hash and ."pi-rules".src == "https://new.invalid/pi-rules-0.5.5.tgz" and ."pi-rules".hash == "sha256-new-source"' "$tmp/pi-plugins.json" >/dev/null
+grep -F 'version = "0.5.0";' "$tmp/packages/pi-vcc.nix"
+grep -F 'rev = "new-vcc-rev";' "$tmp/packages/pi-vcc.nix"
+grep -F 'hash = "sha256-new-vcc";' "$tmp/packages/pi-vcc.nix"
+jq -e '."pi-vcc".version == "0.5.0" and ."pi-vcc".rev == "new-vcc-rev" and ."pi-vcc".hash == "sha256-new-vcc"' "$tmp/pi-plugins.json" >/dev/null
 
 mkdir "$tmp/inputs"
 cp "$updater" "$tmp/inputs/daily-update.sh"
