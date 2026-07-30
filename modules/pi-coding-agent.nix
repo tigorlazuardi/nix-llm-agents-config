@@ -11,7 +11,10 @@
 let
   cfg = config.programs.pi-coding-agent;
   repoSkills = lib.mapAttrs (name: _: ../config/skills + "/${name}") (
-    lib.filterAttrs (_: type: type == "directory") (builtins.readDir ../config/skills)
+    # ponytail: temporarily exclude tuxedo-todo; remove name check to restore it.
+    lib.filterAttrs (name: type: type == "directory" && name != "tuxedo-todo") (
+      builtins.readDir ../config/skills
+    )
   );
   grillingStopInstruction = "Stop asking questions when we reach a shared understanding and big decision was already made, because relatively smaller decisions would automatically derive.";
   appendMattSkillInstruction =

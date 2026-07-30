@@ -367,7 +367,8 @@ in
     assert builtins.pathExists (
       default.config.programs.pi-coding-agent.skills.writing-great-skills + "/SKILL.md"
     );
-    assert builtins.length (builtins.attrNames default.config.programs.pi-coding-agent.skills) == 50;
+    assert builtins.length (builtins.attrNames default.config.programs.pi-coding-agent.skills) == 49;
+    assert !(default.config.programs.pi-coding-agent.skills ? tuxedo-todo);
     assert !(default.config.programs.pi-coding-agent.skills ? design-an-interface);
     assert !(default.config.programs.pi-coding-agent.skills ? request-refactor-plan);
     assert !(default.config.programs.pi-coding-agent.skills ? edit-article);
