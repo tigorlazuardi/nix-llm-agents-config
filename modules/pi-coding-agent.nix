@@ -64,6 +64,7 @@ let
   pinnedPkgs = nixpkgs-unstable.legacyPackages.${pkgs.stdenv.hostPlatform.system};
   dietLsp = pinnedPkgs.callPackage ../packages/pi-diet-lsp.nix { };
   effort = pinnedPkgs.callPackage ../packages/pi-effort.nix { };
+  timestamps = pinnedPkgs.callPackage ../packages/pi-timestamps.nix { };
   piHerdr = pinnedPkgs.callPackage ../packages/pi-herdr.nix { };
   herdrSudoTask = pinnedPkgs.callPackage ../packages/pi-herdr-sudo-task.nix { };
   askHerdr = pinnedPkgs.callPackage ../packages/pi-ask-herdr.nix { };
@@ -92,6 +93,11 @@ let
     {
       name = "pi-effort";
       package = "${effort}/lib/node_modules/@nehlis/pi-effort";
+      default = true;
+    }
+    {
+      name = "pi-timestamps";
+      package = "${timestamps}/lib/node_modules/pi-timestamps";
       default = true;
     }
     {

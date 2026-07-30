@@ -473,6 +473,7 @@ This inventory mirrors the active `settings.packages` allowlist as of 2026-07-26
 | `npm:pi-vimmode` | `0.9.0` | Exact npm bundle; managed Pi peers; no current JSON or trusted-JS config to migrate |
 | `npm:@narumitw/pi-usage` | `0.34.0` | Exact provenance-attested npm tarball, zero npm closure; automatic official-provider usage calls and runtime credential boundary accepted; no configuration or persistence |
 | `npm:@nehlis/pi-effort` | `0.1.0` | Exact npm tarball matching `gitHead` `0be4dd0614ca2959ead7e0f435748221ed5e06d2`, zero npm closure, sole Pi peer; registers only `/effort` and calls native `getThinkingLevel`/`setThinkingLevel`, with no network, subprocess, config, or persistence; no module options. ponytail: release predates Pi `max`, so `/effort max` aliases `xhigh`; native `max` remains unavailable through this command until upstream adds support. |
+| `npm:pi-timestamps` | `0.1.0` | Exact npm tarball, zero npm closure; reads optional fixed-path `timestamps.json`, renders timing UI, and registers `/timestamps`; no network, subprocess, or writes. ponytail: no timezone option is rendered until system-local time proves insufficient. |
 
 Removed from the active allowlist: `@tifan/pi-rename`, `@juicesharp/rpiv-ask-user-question`, `@kmmuntasir/pi-nested-subagents`, `@misunders2d/pi-goal`, `@quintinshaw/pi-dynamic-workflows`, `@vanillagreen/pi-background-tasks`, `@yandy0725/pi-memory`, `pi-ask-user`, `pi-observational-memory`, and `remote-pi`. They remain excluded unless a later audit establishes a concrete need.
 

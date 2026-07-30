@@ -145,6 +145,10 @@ let
     nixpkgs-unstable.legacyPackages.x86_64-linux.callPackage ./packages/pi-effort.nix
       { };
   expectedEffortPath = "${expectedEffort}/lib/node_modules/@nehlis/pi-effort";
+  expectedTimestamps =
+    nixpkgs-unstable.legacyPackages.x86_64-linux.callPackage ./packages/pi-timestamps.nix
+      { };
+  expectedTimestampsPath = "${expectedTimestamps}/lib/node_modules/pi-timestamps";
   expectedPiHerdr =
     nixpkgs-unstable.legacyPackages.x86_64-linux.callPackage ./packages/pi-herdr.nix
       { };
@@ -235,6 +239,7 @@ in
 {
   diet-lsp = expectedDietLsp;
   pi-effort = expectedEffort;
+  pi-timestamps = expectedTimestamps;
   pi-herdr = expectedPiHerdr;
   pi-herdr-sudo-task = expectedHerdrSudoTask;
   pi-ask-herdr = expectedAskHerdr;
@@ -272,6 +277,7 @@ in
         packages = [
           expectedDietLspPath
           expectedEffortPath
+          expectedTimestampsPath
           expectedPiHerdrPath
           expectedHerdrSudoTaskPath
           expectedAskHerdrPath
@@ -510,6 +516,7 @@ in
       settingsOverridden.config.programs.pi-coding-agent.settings.packages == [
         expectedDietLspPath
         expectedEffortPath
+        expectedTimestampsPath
         expectedPiHerdrPath
         expectedHerdrSudoTaskPath
         expectedAskHerdrPath
@@ -569,7 +576,7 @@ in
   formatting =
     pkgs.runCommandLocal "pi-home-manager-formatting" { nativeBuildInputs = [ pkgs.nixfmt ]; }
       ''
-        nixfmt --check ${./flake.nix} ${./checks.nix} ${./modules/pi-coding-agent.nix} ${./modules/pi-coding-agent/agents.nix} ${./modules/pi-coding-agent/default-agents.nix} ${./modules/pi-coding-agent/pi-subagents.nix} ${./packages/pi-diet-lsp.nix} ${./packages/pi-effort.nix} ${./packages/pi-herdr.nix} ${./packages/pi-herdr-sudo-task.nix} ${./packages/pi-ask-herdr.nix} ${./packages/pi-herdr-rename.nix} ${./packages/pi-patty-bg-tasks.nix} ${./packages/pi-intercom.nix} ${./packages/pi-vimmode.nix} ${./packages/pi-usage.nix} ${./packages/pi-mcp-adapter.nix} ${./packages/pi-playwright.nix} ${./packages/pix-optimizer.nix} ${./packages/pi-vcc.nix} ${./packages/pi-prompt-template-model.nix} ${./packages/rpiv-todo.nix} ${./packages/pi-rules.nix} ${./packages/pi-searxng.nix} ${./packages/pi-subagents.nix} ${./packages/supi-context.nix} ${./packages/supi-extras.nix}
+        nixfmt --check ${./flake.nix} ${./checks.nix} ${./modules/pi-coding-agent.nix} ${./modules/pi-coding-agent/agents.nix} ${./modules/pi-coding-agent/default-agents.nix} ${./modules/pi-coding-agent/pi-subagents.nix} ${./packages/pi-diet-lsp.nix} ${./packages/pi-effort.nix} ${./packages/pi-timestamps.nix} ${./packages/pi-herdr.nix} ${./packages/pi-herdr-sudo-task.nix} ${./packages/pi-ask-herdr.nix} ${./packages/pi-herdr-rename.nix} ${./packages/pi-patty-bg-tasks.nix} ${./packages/pi-intercom.nix} ${./packages/pi-vimmode.nix} ${./packages/pi-usage.nix} ${./packages/pi-mcp-adapter.nix} ${./packages/pi-playwright.nix} ${./packages/pix-optimizer.nix} ${./packages/pi-vcc.nix} ${./packages/pi-prompt-template-model.nix} ${./packages/rpiv-todo.nix} ${./packages/pi-rules.nix} ${./packages/pi-searxng.nix} ${./packages/pi-subagents.nix} ${./packages/supi-context.nix} ${./packages/supi-extras.nix}
         touch $out
       '';
 
@@ -606,6 +613,26 @@ in
         grep -F 'pi.setThinkingLevel(requested)' "$effort/extensions/effort.ts"
         pi --offline --no-extensions --no-skills --no-prompt-templates --no-context-files \
           -e "$effort" \
+          --list-models > pi.log 2>&1
+        ! grep -E 'Extension issues|Failed to load extension|Cannot find module|Error:' pi.log
+        touch $out
+      '';
+
+  pi-timestamps-load =
+    pkgs.runCommandLocal "pi-timestamps-load" { nativeBuildInputs = [ expectedPackage ]; }
+      ''
+        export HOME="$TMPDIR/home"
+        export PI_CODING_AGENT_DIR="$HOME/.pi/agent"
+        export PI_TELEMETRY=0
+        mkdir -p "$PI_CODING_AGENT_DIR"
+        timestamps=${expectedTimestampsPath}
+        test -f "$timestamps/package.json"
+        test -f "$timestamps/extensions/timestamps.ts"
+        test ! -e "$timestamps/node_modules"
+        grep -F '"name": "pi-timestamps"' "$timestamps/package.json"
+        grep -F 'pi.registerCommand("timestamps"' "$timestamps/extensions/timestamps.ts"
+        pi --offline --no-extensions --no-skills --no-prompt-templates --no-context-files \
+          -e "$timestamps" \
           --list-models > pi.log 2>&1
         ! grep -E 'Extension issues|Failed to load extension|Cannot find module|Error:' pi.log
         touch $out
