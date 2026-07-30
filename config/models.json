@@ -17,7 +17,7 @@
           ]
         },
         {
-          "id": "cc/claude-opus-4-8",
+          "id": "cc/claude-opus-5",
           "reasoning": true,
           "contextWindow": 1000000,
           "maxTokens": 64000,
