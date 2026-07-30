@@ -579,6 +579,8 @@ in
         nativeBuildInputs = [
           pkgs.nixfmt
           pkgs.jq
+          pkgs.nodejs_22
+          pkgs.gnutar
         ];
       }
       ''

@@ -91,40 +91,48 @@ update_inputs() {
     return 1
   fi
   git add flake.lock
-  git commit -m 'chore(deps): update nixpkgs and home-manager'
-  push_inputs_checked
+  git commit -m 'chore(deps): update nixpkgs and home-manager' || return 1
+  push_inputs_checked || return 1
   say "- inputs: $old_nix → $(jq -r '.nodes["nixpkgs-unstable"].locked.rev' flake.lock); $old_home → $(jq -r '.nodes["home-manager"].locked.rev' flake.lock)"
 }
 
 npm_update() {
-  local alias=$1 entry=$2 package version src hash file lock check old_version old_src old_hash old_npm_deps_hash npm_deps_hash tmp
+  local alias=$1 entry=$2 package version src hash source_store source_metadata file lock check old_version old_src old_hash old_npm_deps_hash npm_deps_hash tmp source_dir registry
   npm_deps_hash=
   package=$(jq -r '.package' <<<"$entry")
   version=$(npm view "$package" version --json | jq -r .)
   old_version=$(jq -r '.version' <<<"$entry")
   [ "$version" = "$old_version" ] && { say "- $alias: unchanged ($version)"; return 0; }
   src=$(npm view "$package@$version" dist.tarball --json | jq -r .)
-  hash=$(nix store prefetch-file --json "$src" | jq -r .hash)
+  source_metadata=$(nix store prefetch-file --json "$src" | jq -r '[.hash, .storePath] | @tsv') || return 1
+  read -r hash source_store <<<"$source_metadata" || return 1
   file=$(jq -r '.packageFile' <<<"$entry")
   old_src=$(jq -r '.src' <<<"$entry")
   old_hash=$(jq -r '.hash' <<<"$entry")
   lock=$(jq -r '.lockFile // empty' <<<"$entry")
+  tmp=$(mktemp -d)
   if [ -n "$lock" ]; then
-    tmp=$(mktemp -d)
-    # ponytail: npm resolves committed lock only; add source extraction when a package proves this insufficient.
-    npm install --package-lock-only --ignore-scripts --prefix "$tmp" "$package@$version" >/dev/null
-    printf '%s\n' "$(<"$tmp/package-lock.json")" >"$lock"
+    source_dir="$tmp/source"
+    mkdir "$source_dir" || { rm -rf "$tmp"; return 1; }
+    tar -xzf "$source_store" --strip-components=1 -C "$source_dir" || { rm -rf "$tmp"; return 1; }
+    # Match build postPatch: lock roots omit build-only and host Pi dependencies.
+    node -e 'const fs = require("fs"); const p = require(process.argv[1]); delete p.devDependencies; delete p.peerDependencies; fs.writeFileSync(process.argv[1], JSON.stringify(p, null, 2) + "\n")' "$source_dir/package.json" || { rm -rf "$tmp"; return 1; }
+    jq -e --arg package "$package" --arg version "$version" '.name == $package and .version == $version' "$source_dir/package.json" >/dev/null || { rm -rf "$tmp"; return 1; }
+    npm install --package-lock-only --ignore-scripts --omit=dev --omit=peer --prefix "$source_dir" >/dev/null || { rm -rf "$tmp"; return 1; }
+    jq -e --arg package "$package" --arg version "$version" '.packages[""].name == $package and .packages[""].version == $version' "$source_dir/package-lock.json" >/dev/null || { rm -rf "$tmp"; return 1; }
     old_npm_deps_hash=$(jq -r '.npmDepsHash // empty' <<<"$entry")
-    [ -n "$old_npm_deps_hash" ] || return 1
-    npm_deps_hash=$(nix run nixpkgs#prefetch-npm-deps -- "$lock") || return 1
+    [ -n "$old_npm_deps_hash" ] || { rm -rf "$tmp"; return 1; }
+    npm_deps_hash=$(nix run nixpkgs#prefetch-npm-deps -- "$source_dir/package-lock.json") || { rm -rf "$tmp"; return 1; }
+    cp "$source_dir/package-lock.json" "$tmp/lock" || { rm -rf "$tmp"; return 1; }
   fi
-  replace_literal "$file" "$old_version" "$version" && replace_literal "$file" "$old_src" "$src" && replace_literal "$file" "$old_hash" "$hash" || return 1
+  cp "$file" "$tmp/package.nix" && replace_literal "$tmp/package.nix" "$old_version" "$version" && replace_literal "$tmp/package.nix" "$old_src" "$src" && replace_literal "$tmp/package.nix" "$old_hash" "$hash" || { rm -rf "$tmp"; return 1; }
   if [ -n "$lock" ]; then
-    replace_literal "$file" "$old_npm_deps_hash" "$npm_deps_hash" || return 1
+    replace_literal "$tmp/package.nix" "$old_npm_deps_hash" "$npm_deps_hash" || { rm -rf "$tmp"; return 1; }
   fi
-  local registry
-  registry=$(jq --arg a "$alias" --arg v "$version" --arg s "$src" --arg h "$hash" --arg n "$npm_deps_hash" '.[$a].version=$v | .[$a].src=$s | .[$a].hash=$h | if .[$a].npmDepsHash? then .[$a].npmDepsHash=$n else . end' pi-plugins.json) || return 1
-  printf '%s\n' "$registry" >pi-plugins.json
+  registry=$(jq --arg a "$alias" --arg v "$version" --arg s "$src" --arg h "$hash" --arg n "$npm_deps_hash" '.[$a].version=$v | .[$a].src=$s | .[$a].hash=$h | if .[$a].npmDepsHash? then .[$a].npmDepsHash=$n else . end' pi-plugins.json) || { rm -rf "$tmp"; return 1; }
+  printf '%s\n' "$registry" >"$tmp/pi-plugins.json"
+  mv "$tmp/package.nix" "$file" && mv "$tmp/pi-plugins.json" pi-plugins.json && { [ -z "$lock" ] || mv "$tmp/lock" "$lock"; } || { rm -rf "$tmp"; return 1; }
+  rm -rf "$tmp"
   check=$(jq -r '.check' <<<"$entry")
   plugin_commit "$alias" "$version" "$check" "$file" pi-plugins.json ${lock:+"$lock"} && say "- $alias: $old_version → $version"
 }
