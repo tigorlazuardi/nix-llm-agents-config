@@ -1081,7 +1081,11 @@ in
         export PI_TELEMETRY=0
         mkdir -p "$PI_CODING_AGENT_DIR"
         test -d ${expectedSubagentsPath}/node_modules/jiti
+        test -d ${expectedSubagentsPath}/node_modules/typebox
         test -d ${expectedSubagentsPath}/node_modules/yaml
+        cd ${expectedSubagentsPath}
+        ${pkgs.nodejs}/bin/node -e 'const { createJiti } = require("jiti"); const load = createJiti(process.cwd() + "/nix-check.cjs", { interopDefault: true }); const mod = load("./src/runs/shared/structured-output.ts"); const result = mod.validateStructuredOutputValue({ type: "object", required: ["ok"], properties: { ok: { type: "boolean" } }, additionalProperties: false }, { ok: true }); if (result.status !== "valid") { console.error(result); process.exit(1); }'
+        cd "$TMPDIR"
         pi --offline --no-extensions --no-skills --no-prompt-templates --no-context-files \
           -e ${expectedSubagentsPath} \
           --list-models > pi.log 2>&1

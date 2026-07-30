@@ -13,13 +13,13 @@ buildNpmPackage {
     hash = "sha256-R8+/NJunyEGUPam3fF27sEOaxf1vTKQp0ErzVM9O8/g=";
   };
 
-  # ponytail: omit test-only Pi copies; offline load check proves host Pi supplies optional peers.
+  # ponytail: omit test-only Pi copies; keep runner-loaded typebox in this package's closure.
   postPatch = ''
     cp ${./pi-subagents-package-lock.json} package-lock.json
-    ${nodejs}/bin/node -e 'const fs = require("fs"); const p = require("./package.json"); delete p.devDependencies; fs.writeFileSync("package.json", JSON.stringify(p, null, 2) + "\n")'
+    ${nodejs}/bin/node -e 'const fs = require("fs"); const p = require("./package.json"); delete p.devDependencies; p.dependencies.typebox = "1.3.8"; fs.writeFileSync("package.json", JSON.stringify(p, null, 2) + "\n")'
   '';
 
-  npmDepsHash = "sha256-VkexsgkRTUbMH5K8O513zdSCvItKEzGzqVZPSCxjjxQ=";
+  npmDepsHash = "sha256-ZXvyRRXIO2mtpOoBuyKPpQtKGo2Sd55cRF3nijNJXVw=";
   npmInstallFlags = [
     "--omit=dev"
     "--omit=peer"

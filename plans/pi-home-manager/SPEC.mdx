@@ -576,7 +576,7 @@ Typed Home Manager options under `programs.pi-coding-agent.plugins.pi-vcc.settin
 
 <Decision title="Resolve pi-subagents peers from host Pi" status="accepted">
 
-`pi-subagents` bundles only `jiti` and `yaml`, removes test-only Pi copies, and keeps its optional Pi peer declarations. Offline loading against the managed Pi package verifies compatibility without duplicating the host runtime closure.
+`pi-subagents` bundles `jiti`, `yaml`, and runner-loaded `typebox`, removes test-only Pi copies, and keeps its optional Pi peer declarations. Offline loading and structured-output validation against the managed Pi package verify compatibility without duplicating the host Pi runtime closure.
 
 </Decision>
 
