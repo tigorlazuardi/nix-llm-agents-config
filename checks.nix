@@ -231,6 +231,7 @@ let
       { };
   expectedSupiExtrasPath = "${expectedSupiExtras}/lib/node_modules/@mrclrchtr/supi-extras";
   expectedOscclip = nixpkgs-unstable.legacyPackages.x86_64-linux.oscclip;
+  expectedRtk = nixpkgs-unstable.legacyPackages.x86_64-linux.rtk;
   expectedWritingGreatSkills = default.config.programs.pi-coding-agent.skills.writing-great-skills;
   expectedModels = builtins.fromJSON (builtins.readFile ./config/models.json);
   secretWrappedMcpConfig =
@@ -300,6 +301,9 @@ in
         ];
       };
     assert builtins.elem expectedOscclip default.config.home.packages;
+    assert builtins.elem expectedRtk default.config.home.packages;
+    assert builtins.elem expectedRtk optimizerConfigured.config.home.packages;
+    assert !(builtins.elem expectedRtk pluginsDisabled.config.home.packages);
     assert
       default.config.home.file."${default.config.programs.pi-coding-agent.configDir}/intercom/config.json".source
       == expectedIntercomConfig;

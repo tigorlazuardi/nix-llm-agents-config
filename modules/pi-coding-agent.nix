@@ -347,7 +347,9 @@ in
     programs.mcp.enable = lib.mkIf (cfg.enable && mcpPlugin.enable) (lib.mkDefault true);
 
     home = {
-      packages = lib.mkIf cfg.enable [ pinnedPkgs.oscclip ];
+      packages = lib.mkIf cfg.enable (
+        [ pinnedPkgs.oscclip ] ++ lib.optional optimizerPlugin.enable pinnedPkgs.rtk
+      );
       sessionVariables = lib.mkIf (cfg.enable && vccPlugin.enable) {
         PI_VCC_CONFIG_PATH = lib.mkDefault "${cfg.configDir}/pi-vcc-config.json";
       };
