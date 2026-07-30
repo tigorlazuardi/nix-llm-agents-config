@@ -5,6 +5,7 @@ workflow=${WORKFLOW:-.github/workflows/daily-update.yml}
 updater=${UPDATER:-scripts/daily-update.sh}
 registry=${REGISTRY:-pi-plugins.json}
 
+test -x "$updater"
 grep -F 'cron: "0 3 * * *"' "$workflow"
 grep -Fx '  workflow_dispatch:' "$workflow"
 grep -F 'contents: write' "$workflow"
