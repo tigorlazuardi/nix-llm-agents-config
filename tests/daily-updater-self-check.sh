@@ -24,16 +24,18 @@ grep -F 'npm install --package-lock-only --ignore-scripts --omit=dev --omit=peer
 grep -F 'nix run nixpkgs#prefetch-npm-deps -- "$source_dir/package-lock.json"' "$updater"
 ! grep -F '"$package@$version" >/dev/null' "$updater"
 grep -F 'git ls-remote --tags' "$updater"
-grep -F '"strategy":"npm"' "$registry"
-grep -F '"strategy":"github"' "$registry"
-grep -F '"tagPrefix":"v"' "$registry"
-grep -F '"strategy":"unsupported"' "$registry"
+grep -F 'nix store prefetch-file --json --unpack "$source_url"' "$updater"
+grep -F 'hash=$(nix hash path "$tmp")' "$updater"
+jq -e '[.[] | .strategy] | index("npm") and index("github") and index("unsupported")' "$registry" >/dev/null
+jq -e '."pi-vcc".tagPrefix == "v" and ."pi-vcc".removePaths == ["demo.gif"]' "$registry" >/dev/null
 ! grep -F 'git push --force' "$updater"
 ! grep -F 'git reset --hard origin/main' "$updater"
 
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
-mkdir -p "$tmp/bin" "$tmp/packages" "$tmp/fixture/package"
+mkdir -p "$tmp/bin" "$tmp/packages" "$tmp/fixture/package" "$tmp/vcc-source"
+printf 'large demo\n' >"$tmp/vcc-source/demo.gif"
+printf 'runtime\n' >"$tmp/vcc-source/index.ts"
 cp "$updater" "$tmp/daily-update.sh"
 cat >"$tmp/fixture/package/package.json" <<'EOF'
 {
@@ -46,7 +48,7 @@ cat >"$tmp/fixture/package/package.json" <<'EOF'
 EOF
 tar -czf "$tmp/fixture.tgz" -C "$tmp/fixture" package
 cat >"$tmp/pi-plugins.json" <<'EOF'
-{"pi-rules":{"strategy":"npm","package":"@fixture/pi-rules","version":"0.5.4","src":"https://old.invalid/pi-rules-0.5.4.tgz","hash":"sha256-old-source","npmDepsHash":"sha256-old-deps","packageFile":"packages/pi-rules.nix","lockFile":"packages/pi-rules-package-lock.json","check":"rules"},"pi-vcc":{"strategy":"github","owner":"fixture","repo":"pi-vcc","tagPrefix":"v","version":"0.4.0","rev":"old-vcc-rev","hash":"sha256-old-vcc","packageFile":"packages/pi-vcc.nix","check":"pi-vcc"}}
+{"pi-rules":{"strategy":"npm","package":"@fixture/pi-rules","version":"0.5.4","src":"https://old.invalid/pi-rules-0.5.4.tgz","hash":"sha256-old-source","npmDepsHash":"sha256-old-deps","packageFile":"packages/pi-rules.nix","lockFile":"packages/pi-rules-package-lock.json","check":"rules"},"pi-vcc":{"strategy":"github","owner":"fixture","repo":"pi-vcc","tagPrefix":"v","version":"0.4.0","rev":"old-vcc-rev","hash":"sha256-old-vcc","removePaths":["demo.gif"],"packageFile":"packages/pi-vcc.nix","check":"pi-vcc"}}
 EOF
 cat >"$tmp/packages/pi-rules.nix" <<'EOF'
 version = "0.5.4";
@@ -81,6 +83,7 @@ EOF
 printf '#!%s\n' "$BASH" >"$tmp/bin/nix"
 cat >>"$tmp/bin/nix" <<'EOF'
 case "$*" in
+  'store prefetch-file --json --unpack https://github.com/fixture/pi-vcc/archive/new-vcc-rev.tar.gz') printf '{"hash":"sha256-raw-vcc","storePath":"%s"}\n' "$FIXTURE_VCC_SOURCE" ;;
   'store prefetch-file --json '*) printf '{"hash":"sha256-new-source","storePath":"%s"}\n' "$FIXTURE_TARBALL" ;;
   'run nixpkgs#prefetch-npm-deps -- '*)
     [ "${PREFETCH_FAIL:-}" != 1 ] || exit 1
@@ -88,7 +91,11 @@ case "$*" in
     jq -e '.packages[""].name == "@fixture/pi-rules" and .packages[""].dependencies == {"fixture-dependency":"1.2.3"} and .packages["node_modules/fixture-dependency"].version == "1.2.3"' "$lock" >/dev/null
     printf 'sha256-%s\n' "$(sha256sum "$lock" | cut -d' ' -f1)"
     ;;
-  'flake prefetch --json github:fixture/pi-vcc/new-vcc-rev') printf '%s\n' '{"hash":"sha256-new-vcc"}' ;;
+  'hash path '*)
+    source_path=${!#}
+    [ ! -e "$source_path/demo.gif" ] && [ -f "$source_path/index.ts" ]
+    printf '%s\n' 'sha256-new-vcc'
+    ;;
   'build .#checks.x86_64-linux.rules'|'build .#checks.x86_64-linux.pi-vcc'|'build .#checks.x86_64-linux.formatting'|'flake check') ;;
   'flake update nixpkgs-unstable home-manager')
     jq '.nodes["nixpkgs-unstable"].locked.rev = "new-nix" | .nodes["home-manager"].locked.rev = "new-home"' flake.lock >flake.lock.new
@@ -116,7 +123,7 @@ chmod +x "$tmp/bin"/*
 before=$(cat "$tmp/pi-plugins.json" "$tmp/packages/pi-rules.nix" "$tmp/packages/pi-vcc.nix")
 if (
   cd "$tmp"
-  PATH="$tmp/bin:$PATH" FIXTURE_TARBALL="$tmp/fixture.tgz" PREFETCH_FAIL=1 GITHUB_STEP_SUMMARY="$tmp/summary" bash ./daily-update.sh plugins
+  PATH="$tmp/bin:$PATH" FIXTURE_TARBALL="$tmp/fixture.tgz" FIXTURE_VCC_SOURCE="$tmp/vcc-source" PREFETCH_FAIL=1 GITHUB_STEP_SUMMARY="$tmp/summary" bash ./daily-update.sh plugins
 ); then
   exit 1
 fi
@@ -125,7 +132,7 @@ fi
 
 (
   cd "$tmp"
-  PATH="$tmp/bin:$PATH" FIXTURE_TARBALL="$tmp/fixture.tgz" GITHUB_STEP_SUMMARY="$tmp/summary" bash ./daily-update.sh plugins
+  PATH="$tmp/bin:$PATH" FIXTURE_TARBALL="$tmp/fixture.tgz" FIXTURE_VCC_SOURCE="$tmp/vcc-source" GITHUB_STEP_SUMMARY="$tmp/summary" bash ./daily-update.sh plugins
 )
 fixture_hash="sha256-$(sha256sum "$tmp/packages/pi-rules-package-lock.json" | cut -d' ' -f1)"
 jq -e '.packages[""].name == "@fixture/pi-rules" and .packages[""].dependencies == {"fixture-dependency":"1.2.3"} and has("node_modules/must-not-lock") | not' "$tmp/packages/pi-rules-package-lock.json" >/dev/null

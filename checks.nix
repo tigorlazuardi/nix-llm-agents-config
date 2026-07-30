@@ -1059,7 +1059,7 @@ in
       -e ${expectedPiVcc} \
       --list-models > pi.log 2>&1
     ! grep -E 'Extension issues|Failed to load extension|Cannot find module|Error:' pi.log
-    grep -F '"overrideDefaultCompaction": false' "$PI_VCC_CONFIG_PATH"
+    grep -F '"overrideDefaultCompaction": true' "$PI_VCC_CONFIG_PATH"
     grep -F '"smartKeepTail": true' "$PI_VCC_CONFIG_PATH"
     grep -F '"continueAfterThresholdCompact": true' "$PI_VCC_CONFIG_PATH"
     grep -F '"debug": false' "$PI_VCC_CONFIG_PATH"

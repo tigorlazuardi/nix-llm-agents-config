@@ -138,7 +138,7 @@ npm_update() {
 }
 
 github_update() {
-  local alias=$1 entry=$2 owner repo track tag_prefix old_rev old_version rev version hash file check release
+  local alias=$1 entry=$2 owner repo track tag_prefix old_rev old_version rev version hash file check release source_url source_metadata source_store tmp remove_path
   owner=$(jq -r '.owner' <<<"$entry"); repo=$(jq -r '.repo' <<<"$entry"); track=$(jq -r '.track // empty' <<<"$entry"); tag_prefix=$(jq -r '.tagPrefix // empty' <<<"$entry")
   old_rev=$(jq -r '.rev' <<<"$entry")
   old_version=$(jq -r '.version' <<<"$entry")
@@ -162,7 +162,20 @@ github_update() {
   fi
   [ -n "$rev" ] && [ -n "$version" ] && [ "$rev" != "null" ] || return 1
   [ "$rev" = "$old_rev" ] && { say "- $alias: unchanged ($old_version)"; return 0; }
-  hash=$(nix flake prefetch --json "github:$owner/$repo/$rev" | jq -r .hash)
+  source_url="https://github.com/$owner/$repo/archive/$rev.tar.gz"
+  source_metadata=$(nix store prefetch-file --json --unpack "$source_url") || return 1
+  hash=$(jq -r .hash <<<"$source_metadata")
+  source_store=$(jq -r .storePath <<<"$source_metadata")
+  if jq -e '.removePaths | length > 0' <<<"$entry" >/dev/null; then
+    tmp=$(mktemp -d)
+    cp -a "$source_store/." "$tmp/" && chmod -R u+w "$tmp" || { rm -rf "$tmp"; return 1; }
+    while IFS= read -r remove_path; do
+      case "$remove_path" in ""|..|/*|*../*|../*|*/..) rm -rf "$tmp"; return 1 ;; esac
+      rm -rf -- "$tmp/$remove_path"
+    done < <(jq -r '.removePaths[]' <<<"$entry")
+    hash=$(nix hash path "$tmp") || { rm -rf "$tmp"; return 1; }
+    rm -rf "$tmp"
+  fi
   file=$(jq -r '.packageFile' <<<"$entry")
   replace_literal "$file" "$old_rev" "$rev" && replace_literal "$file" "$old_version" "$version" && replace_literal "$file" "$(jq -r '.hash' <<<"$entry")" "$hash" || return 1
   local registry

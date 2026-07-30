@@ -462,7 +462,7 @@ This inventory mirrors the active `settings.packages` allowlist as of 2026-07-26
 | `npm:@juicesharp/rpiv-todo` | `2.1.0` | Upgraded from `1.20.0`; packaged with locked `rpiv-config` and `typebox` runtime deps; host Pi supplies peers; optional i18n omitted with documented English fallback |
 | `npm:@mrclrchtr/supi-context` | `2.6.1` | Upgraded from `2.5.0`; packaged with exact `supi-core` and `typebox` runtime deps; agent-callable tool remains disabled by default |
 | `npm:@xynogen/pix-optimizer` | `1.1.19` | Upgraded from `1.1.17`; packaged with only used `pix-pretty@1.7.24` source; `rtk`, `jq`, and `toon` remain ambient `PATH` dependencies |
-| `npm:@sting8k/pi-vcc` | `0.4.0` | Packaged from runtime-identical `v0.4.0` tag source without the npm tarball's 16 MiB demo; host Pi supplies peers |
+| `npm:@sting8k/pi-vcc` | `0.5.0` | Packaged from `v0.5.0` tag source without the 16 MiB demo; host Pi supplies peers |
 | `npm:@mrclrchtr/supi-extras` | `2.7.0` | Upgraded from `2.5.0`; bundled `supi-core` retained; `clipboardy` closure replaced by pinned `oscclip@0.4.1` OSC 52 backend |
 | `npm:pi-herdr-rename` | `0.1.0` | Replaces `@tifan/pi-rename@0.4.2`; exact npm tarball, zero npm closure, Herdr-gated tab rename tool, no persistent configuration |
 | `npm:@ogulcancelik/pi-herdr` | `0.4.0` | Upgraded from `0.3.0`; packaged from exact npm tarball with no npm closure; Herdr CLI remains an ambient runtime dependency |
@@ -563,7 +563,7 @@ The extension imports only `@xynogen/pix-pretty/modal-frame` and `@xynogen/pix-p
 
 <Decision title="Pin pi-vcc to its tagged source" status="accepted">
 
-`@sting8k/pi-vcc` remains at latest `0.4.0`. The npm tarball's declared `gitHead` points at an experiment branch rather than the `v0.4.0` tag and adds an untracked 16 MiB demo; all runtime and documentation files otherwise match tag commit `b9e0babee26732e2dca90b7d5cb2873a5e9bfad9`. The immutable package therefore uses that exact tag source, has no npm dependency closure, and relies on managed Pi for its `pi-coding-agent` and `typebox` peers. Upstream claims MIT in its README but publishes no license file or package license field, so the Nix metadata does not assert a license.
+`@sting8k/pi-vcc` uses latest `v0.5.0` tag commit `90f578f267f630ac50af6ce259b05d1b49c11dff`. The immutable package removes the repository's 16 MiB demo, has no npm dependency closure, and relies on managed Pi for its `pi-coding-agent` and `typebox` peers. Updater hashes this post-fetch output after applying the same removal. Upstream claims MIT in its README but publishes no license file or package license field, so Nix metadata does not assert a license.
 
 Typed Home Manager options under `programs.pi-coding-agent.plugins.pi-vcc.settings` migrate current state: default-compaction override, smart tail retention, and automatic post-compaction continuation enabled; debug snapshots disabled. Home Manager owns `pi-vcc-config.json` and exports `PI_VCC_CONFIG_PATH`, so custom Pi config directories remain correct and extension scaffolding becomes a no-op. `vcc_recall` reads the active session JSONL and exposes off-lineage content only through explicit `scope: "all"`. Raw regex recall can consume substantial CPU on large histories, and opt-in debug writes summary data to predictable `/tmp/pi-vcc-debug.json`; these accepted risks stay bounded by local session access and disabled debug defaults. The extension performs no network or subprocess calls.
 

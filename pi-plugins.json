@@ -26,7 +26,10 @@
     "tagPrefix": "v",
     "version": "0.5.0",
     "rev": "90f578f267f630ac50af6ce259b05d1b49c11dff",
-    "hash": "sha256-O7drHOWABCUioS45LtB61VjlnjsShr7tyra7sVZFdUQ=",
+    "hash": "sha256-38SCxaWT/cqVfj6A9GdBSA2EmnHoJoBUyN/dg2+MPj0=",
+    "removePaths": [
+      "demo.gif"
+    ],
     "packageFile": "packages/pi-vcc.nix",
     "check": "pi-vcc"
   },
