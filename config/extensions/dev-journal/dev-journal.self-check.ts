@@ -74,13 +74,14 @@ assert.equal(isRecordResult({ toolName: "dev_journal", input: { action: "record"
 assert.deepEqual(nudgeState({ ...initialState(), commit: true }), { commit: true, decided: false, nudged: true });
 assert.equal(nudgeState({ commit: true, decided: true, nudged: false }), null);
 const handlers = new Map<string, () => unknown>();
-let appendCalls = 0, sendCalls = 0;
+let appendCalls = 0, sendCalls = 0, relatedDescription = "";
 journal({
   on: (name: string, handler: () => unknown) => { handlers.set(name, handler); },
-  registerTool: () => {}, registerCommand: () => {},
+  registerTool: (tool: { parameters: { properties: { related: { description?: string } } } }) => { relatedDescription = tool.parameters.properties.related.description ?? ""; }, registerCommand: () => {},
   appendEntry: () => { appendCalls++; throw new Error("append failed"); },
   sendMessage: () => { sendCalls++; throw new Error("send failed"); },
 } as unknown as Parameters<typeof journal>[0]);
+assert.match(relatedDescription, /omit unless linking an existing journal ref.*lowercase/i);
 const toolResult = handlers.get("tool_result");
 assert.ok(toolResult);
 await toolResult({ toolName: "bash", input: { command: "git commit -m test" }, content: [{ type: "text", text: "[main abcdef0] test" }], isError: false });
