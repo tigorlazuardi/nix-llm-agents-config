@@ -1,6 +1,15 @@
 # Drain agent reference
 
-`/setup-drain-agents` materializes these machine-local agents. Generated prompts reference `.pi/drain/contract.json`; resolved tracker ids, branches, budgets, and provider URLs live only in contract.
+`/drain-wizard` loads this file only when a drain agent is missing/drifted or the user requests agent edits. Generated prompts reference `.pi/drain/contract.json`; resolved tracker ids, branches, budgets, and provider URLs live only in contract.
+
+## Conditional materialization procedure
+
+1. **Doctor:** require trusted Git root/common dir, approved schema-valid contract, matching generated prompt/hash, applicable project instructions, and installed models/tools/private skills. Inventory existing `.pi/agents/drain/`; unresolved capabilities block setup.
+2. **Propose:** generate exactly the ten agents below. Keep provider ids, branches, budgets, URLs, and state mappings in contract. Bind outward provider/SCM/deployment tools only to `delivery-orchestrator` and `housekeeper`; bind `subagent` only to `delivery-orchestrator` and `build-lead`. Missing required tool/skill blocks affected agent rather than weakening it.
+3. **Preview and write:** show file list, agent/model/tool/skill matrix, and redacted diffs. Require explicit approval before overwriting existing targets; re-read targets immediately before atomic writes. Add `/.pi/agents/drain/` and `/.pi/drain/` to clone-local Git exclude without changing committed `.gitignore`.
+4. **Smoke:** use live subagent discovery to prove exactly ten local runtime names resolve to expected paths/models. Mechanically verify only two fanout agents, every leaf lacks `subagent`, outward tools exist only on delivery/housekeeper, private skills resolve, generated paths are ignored, and tracker/SCM mutation count is zero. Write `.pi/drain/agent-setup-report.md`.
+
+Load and execute this procedure only after contract materialization, unless agent-only edit was explicitly requested against an already valid contract.
 
 ## Shared frontmatter
 

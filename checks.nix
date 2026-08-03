@@ -1283,9 +1283,13 @@ in
       }
       ''
         set -- ${./config/prompts}/*.md
-        test "$#" -eq 13
+        test "$#" -eq 12
         ! grep -RE '^(model|thinking|chain|loop|subagent|deterministic):' ${./config/prompts}
-        test "$(grep -RE '^skill: writing-great-skills$' ${./config/prompts} | wc -l)" -eq 2
+        test "$(grep -RE '^skill: writing-great-skills$' ${./config/prompts} | wc -l)" -eq 1
+        test ! -e ${./config/prompts}/setup-drain-agents.md
+        grep -F 'do not load `~/.pi/agent/templates/drain/AGENTS.md` unless' \
+          ${./config/prompts}/drain-wizard.md
+        grep -F '## Conditional materialization procedure' ${./config/templates/drain/AGENTS.md}
         test ! -e ${./config/skills}/grilling
         grep -F '**Small or short-lived app:** useful logs are enough.' \
           ${./config/skills}/telemetry-planning/SKILL.md

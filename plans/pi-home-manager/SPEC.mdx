@@ -187,15 +187,15 @@ Superseded by the project-local sequential ticket drain below. Do not migrate `c
 
 <Decision title="Set up project-local sequential ticket drain agents" status="accepted">
 
-Drain roles are repository-local machine policy, not universal user policy and not shared repository content. Manage one global `/setup-drain-agents` prompt, but have it create machine-local definitions under the trusted repository's canonical `.pi/agents/drain/` scope. Project agents override user and builtin agents by runtime name. The prompt must inspect the repository's instructions, tracker conventions, coding standards, checks, stack, UI evidence paths, and database paths; preview every target and refuse overwrite without explicit approval. Model, effort, tools, private skills, report paths, and conditional routing live in the generated agent frontmatter, avoiding project settings mutation, then are validated through live subagent discovery.
+Drain roles are repository-local machine policy, not universal user policy and not shared repository content. `/drain-wizard` creates machine-local definitions under the trusted repository's canonical `.pi/agents/drain/` scope only when discovery finds missing/drifted agents or the user requests agent edits. Detailed materialization policy lives behind its managed agent-reference context pointer and is loaded only for that conditional work. Project agents override user and builtin agents by runtime name. Agent setup must inspect the repository's instructions, tracker conventions, coding standards, checks, stack, UI evidence paths, and database paths; preview every target and refuse overwrite without explicit approval. Model, effort, tools, private skills, report paths, and conditional routing live in the generated agent frontmatter, avoiding project settings mutation, then are validated through live subagent discovery.
 
-Generated `.pi/agents/drain/` and private drain resources are excluded through the clone-local Git exclude file under the repository's Git common directory rather than committed `.gitignore` entries. This keeps drain mechanics private to each clone/machine and avoids changing shared repository policy. Agent-private UI/UX guidance uses `skillPath` plus explicit `skills`, so it is available only inside the relevant child and never enters the parent/global skill catalog. A new clone or machine runs `/setup-drain-agents` again.
+Generated `.pi/agents/drain/` and private drain resources are excluded through the clone-local Git exclude file under the repository's Git common directory rather than committed `.gitignore` entries. This keeps drain mechanics private to each clone/machine and avoids changing shared repository policy. Agent-private UI/UX guidance uses `skillPath` plus explicit `skills`, so it is available only inside the relevant child and never enters the parent/global skill catalog. A new clone or machine runs `/drain-wizard` again.
 
 ### Machine-local drain contract
 
 Use the existing `huly-loop-contract.json` and `HULY-LOOP-PROMPT.md` from `ms-sbn` as behavioral evidence, not files to copy verbatim. They contain useful validation, exact-state, route, dependency, ordering, URL-template, and idempotency lessons, but are coupled to Huly, GitLab, Telegram, systemd, branch deployment, and one employee identity. The generic setup must not import those private values or its monolithic runtime prompt.
 
-`/setup-drain-agents` also creates `.pi/drain/contract.json` from a managed versioned schema and excludes `.pi/drain/` through the same clone-local Git exclude. The contract is the single runtime source of truth; prompts and agent definitions must not restate provider ids, state names, budgets, report paths, branch targets, or routing rules.
+`/drain-wizard` also creates `.pi/drain/contract.json` from a managed versioned schema and excludes `.pi/drain/` through the same clone-local Git exclude. The contract is the single runtime source of truth; prompts and agent definitions must not restate provider ids, state names, budgets, report paths, branch targets, or routing rules.
 
 Minimum contract sections:
 
@@ -229,7 +229,7 @@ At each drain start, validate the contract again, hash it into the audit record,
 
 ```text
 Input:
-  /setup-drain-agents
+  /drain-wizard
   provider = github
   pool = issues in owner/repo with label ready-for-agent
   claimed = remove ready-for-agent, add delivery-running

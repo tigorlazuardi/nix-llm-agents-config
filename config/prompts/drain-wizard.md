@@ -12,6 +12,8 @@ Setup/edit only. Produce a brownfield mapping, contract, and provider-specific r
 Read `~/.pi/agent/templates/drain/REFERENCE.md` before interviewing. Use
 `contract.template.json` for shape, `contract.schema.json` and `state-event.schema.json` for validation, and `DRAIN-PROMPT.template.md` for runtime output. Those files are the reference; keep this prompt procedural.
 
+Agent setup/edit is conditional. Inspect discovery first; do not load `~/.pi/agent/templates/drain/AGENTS.md` unless one of the ten drain agents is missing/drifted or the user requested agent changes.
+
 ## 1. Doctor the current system
 
 Inspect Git common dir, remote/SCM, checks, coding standards, tracker docs, authenticated tracker/SCM tools, every candidate project, existing statuses/fields/labels, blocking relation, branches, environments, pipelines, existing `.pi/drain/contract.json`, and generated drain agents.
@@ -73,11 +75,17 @@ Preview both files. Ask one write/overwrite approval. Re-read targets immediatel
 
 **Complete when:** files parse, prompt hash equals contract hash, paths are ignored, and no shared repo file changed.
 
-## 6. Smoke
+## 6. Materialize agents when needed
 
-Run read-only candidate queries for every project. Reconstruct one sampled ledger if present. Confirm ordered selection can distinguish resumable, hotfix, normal, blocked, and unmatched tickets without mutation. Confirm ten drain agents resolve; if missing, point to `/setup-drain-agents` and stop before claiming success.
+Run live discovery for the ten drain agents. When all resolve and no agent edit was requested, leave them untouched. Otherwise read complete `~/.pi/agent/templates/drain/AGENTS.md` and follow its conditional materialization procedure. Do not duplicate that procedure here.
 
-Write `.pi/drain/setup-report.md` with redacted mappings, hashes, Doctor results, and timestamp.
+**Complete when:** existing agents remain untouched, or the reference procedure finishes with ten valid machine-local agents. A blocked setup blocks the wizard.
+
+## 7. Smoke
+
+Run read-only candidate queries for every project. Reconstruct one sampled ledger if present. Confirm ordered selection can distinguish resumable, hotfix, normal, blocked, and unmatched tickets without mutation. Confirm ten drain agents resolve.
+
+Write `.pi/drain/setup-report.md` with redacted mappings, hashes, agent result, Doctor results, and timestamp.
 
 **Complete when:** every mapped remote object resolves, candidate query succeeds, contract/prompt binding passes, ten agents resolve, and mutation count during smoke is zero.
 
@@ -87,6 +95,7 @@ Return exactly:
 WIZARD: PASS|BLOCKED
 CONTRACT_REF: .pi/drain/contract.json|none
 PROMPT_REF: .pi/drain/DRAIN-PROMPT.md|none
+AGENTS: UNCHANGED|MATERIALIZED|BLOCKED
 REPORT_REF: .pi/drain/setup-report.md|none
-NEXT: /setup-drain-agents when agent smoke is missing; otherwise /drain .pi/drain/DRAIN-PROMPT.md
+NEXT: /drain .pi/drain/DRAIN-PROMPT.md|fix-blocker-and-rerun-drain-wizard
 ```
