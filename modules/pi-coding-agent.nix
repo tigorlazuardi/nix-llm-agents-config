@@ -56,6 +56,7 @@ let
   mcpPlugin = cfg.plugins.pi-mcp-adapter;
   optimizerPlugin = cfg.plugins.pix-optimizer;
   vccPlugin = cfg.plugins.pi-vcc;
+  webAccessPlugin = cfg.plugins.pi-web-access;
   mkPluginOptions =
     default:
     lib.mkOption {
@@ -83,7 +84,7 @@ let
   promptTemplateModel = pinnedPkgs.callPackage ../packages/pi-prompt-template-model.nix { };
   rpivTodo = pinnedPkgs.callPackage ../packages/rpiv-todo.nix { };
   rules = pinnedPkgs.callPackage ../packages/pi-rules.nix { };
-  searxng = pinnedPkgs.callPackage ../packages/pi-searxng.nix { };
+  webAccess = pinnedPkgs.callPackage ../packages/pi-web-access.nix { };
   subagents = pinnedPkgs.callPackage ../packages/pi-subagents.nix { };
   supiContext = pinnedPkgs.callPackage ../packages/supi-context.nix { };
   supiExtras = pinnedPkgs.callPackage ../packages/supi-extras.nix { };
@@ -179,8 +180,8 @@ let
       default = true;
     }
     {
-      name = "pi-searxng";
-      package = "${searxng}/lib/node_modules/pi-searxng";
+      name = "pi-web-access";
+      package = "${webAccess}/lib/node_modules/pi-web-access";
       default = true;
     }
     {
@@ -252,6 +253,33 @@ let
     toon = if optimizerPlugin.settings.toon then "on" else "off";
   };
   vccConfigFile = jsonFormat.generate "pi-vcc-config.json" vccPlugin.settings;
+  webAccessCredentialNames = [
+    "anysearchApiKey"
+    "braveApiKey"
+    "brightdataApiKey"
+    "cloudflareApiKey"
+    "exaApiKey"
+    "firecrawlApiKey"
+    "geminiApiKey"
+    "kagiApiKey"
+    "ollamaApiKey"
+    "openaiApiKey"
+    "parallelApiKey"
+    "perplexityApiKey"
+    "queritApiKey"
+    "search1apiApiKey"
+    "searchinfinityApiKey"
+    "serpbaseApiKey"
+    "serpdiveApiKey"
+    "tavilyApiKey"
+    "tinyfishApiKey"
+    "xaiApiKey"
+  ];
+  webAccessCredentialConfig = lib.mapAttrs (
+    _: path: "!${pkgs.coreutils}/bin/cat ${lib.escapeShellArg (toString path)}"
+  ) webAccessPlugin.credentialFiles;
+  webAccessConfig = webAccessPlugin.settings // webAccessCredentialConfig;
+  webAccessConfigFile = jsonFormat.generate "web-search.json" webAccessConfig;
 in
 {
   imports = [
@@ -273,6 +301,20 @@ in
             inherit (jsonFormat) type;
             default = { };
             description = "pi-mcp-adapter settings written beside integrated user-level MCP servers.";
+          };
+        };
+
+        pi-web-access = {
+          credentialFiles = lib.mkOption {
+            type = lib.types.attrsOf (lib.types.either lib.types.path lib.types.str);
+            default = { };
+            example.openaiApiKey = "/run/secrets/openai-api-key";
+            description = "Provider credential files rendered as request-time !cat commands in web-search.json. Use string paths for runtime secrets; Nix path values are copied to the store.";
+          };
+          settings = lib.mkOption {
+            inherit (jsonFormat) type;
+            default = { };
+            description = "Non-secret pi-web-access settings written to web-search.json.";
           };
         };
 
@@ -342,6 +384,17 @@ in
           || disabledMcpServerNames == [ ];
         message = "pi-mcp-adapter cannot safely integrate disabled programs.mcp servers: ${lib.concatStringsSep ", " disabledMcpServerNames}";
       }
+      {
+        assertion = lib.all (name: builtins.elem name webAccessCredentialNames) (
+          builtins.attrNames webAccessPlugin.credentialFiles
+        );
+        message = "pi-web-access credentialFiles contains unsupported keys; use provider API-key field names.";
+      }
+      {
+        assertion =
+          lib.intersectLists webAccessCredentialNames (builtins.attrNames webAccessPlugin.settings) == [ ];
+        message = "pi-web-access credentials must use credentialFiles so secret values never enter the Nix store.";
+      }
     ];
 
     programs.mcp.enable = lib.mkIf (cfg.enable && mcpPlugin.enable) (lib.mkDefault true);
@@ -396,6 +449,10 @@ in
         source = optimizerStateFile;
       };
       "${cfg.configDir}/pi-vcc-config.json" = lib.mkIf vccPlugin.enable { source = vccConfigFile; };
+      # ponytail: immutable config disables /curator persistence; change module options and switch.
+      "${cfg.configDir}/web-search.json" = lib.mkIf (webAccessPlugin.enable && webAccessConfig != { }) {
+        source = webAccessConfigFile;
+      };
       "${cfg.configDir}/intercom/config.json" = lib.mkIf cfg.plugins.pi-intercom.enable {
         source = jsonFormat.generate "pi-intercom-config.json" {
           brokerCommand = "${intercom}/lib/node_modules/pi-intercom/node_modules/.bin/tsx";

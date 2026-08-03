@@ -56,6 +56,15 @@ let
       debug = true;
     };
   };
+  webAccessConfigured = evaluate {
+    programs.pi-coding-agent.plugins.pi-web-access = {
+      credentialFiles.openaiApiKey = "/run/secrets/openai-api-key";
+      settings.provider = "openai";
+    };
+  };
+  webAccessPathConfigured = evaluate {
+    programs.pi-coding-agent.plugins.pi-web-access.credentialFiles.braveApiKey = ./config/models.json;
+  };
   expectedVccConfigFile = (pkgs.formats.json { }).generate "pi-vcc-config.json" {
     overrideDefaultCompaction = false;
     smartKeepTail = false;
@@ -120,6 +129,18 @@ let
   invalidDisabledMcp = evaluate { programs.mcp.servers.disabled-test.enabled = false; };
   invalidDisabledMcpEvaluation = builtins.tryEval (
     builtins.deepSeq invalidDisabledMcp.config.home.activationPackage true
+  );
+  invalidWebAccessCredentialName = evaluate {
+    programs.pi-coding-agent.plugins.pi-web-access.credentialFiles.notAProviderKey = "/run/secrets/key";
+  };
+  invalidWebAccessCredentialNameEvaluation = builtins.tryEval (
+    builtins.deepSeq invalidWebAccessCredentialName.config.home.activationPackage true
+  );
+  invalidWebAccessLiteralCredential = evaluate {
+    programs.pi-coding-agent.plugins.pi-web-access.settings.openaiApiKey = "must-not-enter-store";
+  };
+  invalidWebAccessLiteralCredentialEvaluation = builtins.tryEval (
+    builtins.deepSeq invalidWebAccessLiteralCredential.config.home.activationPackage true
   );
   expectedOrchestrator = ''
     ---
@@ -214,10 +235,10 @@ let
     nixpkgs-unstable.legacyPackages.x86_64-linux.callPackage ./packages/pi-rules.nix
       { };
   expectedRulesPath = "${expectedRules}/lib/node_modules/@tigorhutasuhut/pi-rules";
-  expectedSearxng =
-    nixpkgs-unstable.legacyPackages.x86_64-linux.callPackage ./packages/pi-searxng.nix
+  expectedWebAccess =
+    nixpkgs-unstable.legacyPackages.x86_64-linux.callPackage ./packages/pi-web-access.nix
       { };
-  expectedSearxngPath = "${expectedSearxng}/lib/node_modules/pi-searxng";
+  expectedWebAccessPath = "${expectedWebAccess}/lib/node_modules/pi-web-access";
   expectedSubagents =
     nixpkgs-unstable.legacyPackages.x86_64-linux.callPackage ./packages/pi-subagents.nix
       { };
@@ -236,6 +257,12 @@ let
   expectedModels = builtins.fromJSON (builtins.readFile ./config/models.json);
   secretWrappedMcpConfig =
     secretWrappedMcp.config.home.file."${secretWrappedMcp.config.programs.pi-coding-agent.configDir}/mcp.json".source;
+  webAccessConfigSource =
+    webAccessConfigured.config.home.file."${webAccessConfigured.config.programs.pi-coding-agent.configDir}/web-search.json".source;
+  expectedWebAccessConfigFile = (pkgs.formats.json { }).generate "web-search.json" {
+    openaiApiKey = "!${pkgs.coreutils}/bin/cat /run/secrets/openai-api-key";
+    provider = "openai";
+  };
 in
 {
   diet-lsp = expectedDietLsp;
@@ -256,7 +283,7 @@ in
   prompt-template-model = expectedPromptTemplateModel;
   rpiv-todo = expectedRpivTodo;
   rules = expectedRules;
-  searxng = expectedSearxng;
+  web-access = expectedWebAccess;
   subagents = expectedSubagents;
   supi-context = expectedSupiContext;
   supi-extras = expectedSupiExtras;
@@ -294,7 +321,7 @@ in
           expectedPromptTemplateModelPath
           expectedRpivTodoPath
           expectedRulesPath
-          expectedSearxngPath
+          expectedWebAccessPath
           expectedSubagentsPath
           expectedSupiContextPath
           expectedSupiExtrasPath
@@ -353,6 +380,14 @@ in
         debug = true;
       };
     assert vccConfigSource == expectedVccConfigFile;
+    assert webAccessConfigSource == expectedWebAccessConfigFile;
+    assert
+      webAccessPathConfigured.config.programs.pi-coding-agent.plugins.pi-web-access.credentialFiles.braveApiKey
+      == ./config/models.json;
+    assert
+      !(
+        default.config.home.file ? "${default.config.programs.pi-coding-agent.configDir}/web-search.json"
+      );
     assert
       vccConfigured.config.home.sessionVariables.PI_VCC_CONFIG_PATH
       == "/home/test/.pi/agent/pi-vcc-config.json";
@@ -371,7 +406,7 @@ in
     assert builtins.pathExists (
       default.config.programs.pi-coding-agent.skills.writing-great-skills + "/SKILL.md"
     );
-    assert builtins.length (builtins.attrNames default.config.programs.pi-coding-agent.skills) == 49;
+    assert builtins.length (builtins.attrNames default.config.programs.pi-coding-agent.skills) == 50;
     assert !(default.config.programs.pi-coding-agent.skills ? tuxedo-todo);
     assert !(default.config.programs.pi-coding-agent.skills ? design-an-interface);
     assert !(default.config.programs.pi-coding-agent.skills ? request-refactor-plan);
@@ -405,6 +440,8 @@ in
       == ./config/agents;
     assert !invalidPluginEvaluation.success;
     assert !invalidDisabledMcpEvaluation.success;
+    assert !invalidWebAccessCredentialNameEvaluation.success;
+    assert !invalidWebAccessLiteralCredentialEvaluation.success;
     assert
       default.config.home.file."${default.config.programs.pi-coding-agent.configDir}/prompts".source
       == ./config/prompts;
@@ -537,7 +574,7 @@ in
         expectedPromptTemplateModelPath
         expectedRpivTodoPath
         expectedRulesPath
-        expectedSearxngPath
+        expectedWebAccessPath
         expectedSubagentsPath
         expectedSupiContextPath
         expectedSupiExtrasPath
@@ -589,7 +626,7 @@ in
         ];
       }
       ''
-        nixfmt --check ${./flake.nix} ${./checks.nix} ${./modules/pi-coding-agent.nix} ${./modules/pi-coding-agent/agents.nix} ${./modules/pi-coding-agent/default-agents.nix} ${./modules/pi-coding-agent/pi-subagents.nix} ${./packages/pi-diet-lsp.nix} ${./packages/pi-effort.nix} ${./packages/pi-timestamps.nix} ${./packages/pi-herdr.nix} ${./packages/pi-herdr-sudo-task.nix} ${./packages/pi-ask-herdr.nix} ${./packages/pi-herdr-rename.nix} ${./packages/pi-patty-bg-tasks.nix} ${./packages/pi-intercom.nix} ${./packages/pi-vimmode.nix} ${./packages/pi-usage.nix} ${./packages/pi-mcp-adapter.nix} ${./packages/pi-playwright.nix} ${./packages/pix-optimizer.nix} ${./packages/pi-vcc.nix} ${./packages/pi-prompt-template-model.nix} ${./packages/rpiv-todo.nix} ${./packages/pi-rules.nix} ${./packages/pi-searxng.nix} ${./packages/pi-subagents.nix} ${./packages/supi-context.nix} ${./packages/supi-extras.nix}
+        nixfmt --check ${./flake.nix} ${./checks.nix} ${./modules/pi-coding-agent.nix} ${./modules/pi-coding-agent/agents.nix} ${./modules/pi-coding-agent/default-agents.nix} ${./modules/pi-coding-agent/pi-subagents.nix} ${./packages/pi-diet-lsp.nix} ${./packages/pi-effort.nix} ${./packages/pi-timestamps.nix} ${./packages/pi-herdr.nix} ${./packages/pi-herdr-sudo-task.nix} ${./packages/pi-ask-herdr.nix} ${./packages/pi-herdr-rename.nix} ${./packages/pi-patty-bg-tasks.nix} ${./packages/pi-intercom.nix} ${./packages/pi-vimmode.nix} ${./packages/pi-usage.nix} ${./packages/pi-mcp-adapter.nix} ${./packages/pi-playwright.nix} ${./packages/pix-optimizer.nix} ${./packages/pi-vcc.nix} ${./packages/pi-prompt-template-model.nix} ${./packages/rpiv-todo.nix} ${./packages/pi-rules.nix} ${./packages/pi-web-access.nix} ${./packages/pi-subagents.nix} ${./packages/supi-context.nix} ${./packages/supi-extras.nix}
         WORKFLOW=${./.github/workflows/daily-update.yml} UPDATER=${./scripts/daily-update.sh} REGISTRY=${./pi-plugins.json} bash ${./tests/daily-updater-self-check.sh}
         touch $out
       '';
@@ -1103,15 +1140,21 @@ in
     touch $out
   '';
 
-  searxng-load =
-    pkgs.runCommandLocal "pi-searxng-load" { nativeBuildInputs = [ expectedPackage ]; }
+  web-access-load =
+    pkgs.runCommandLocal "pi-web-access-load" { nativeBuildInputs = [ expectedPackage ]; }
       ''
         export HOME="$TMPDIR/home"
         export PI_CODING_AGENT_DIR="$HOME/.pi/agent"
         export PI_TELEMETRY=0
         mkdir -p "$PI_CODING_AGENT_DIR"
+        test -d ${expectedWebAccessPath}/node_modules/@mozilla/readability
+        test -d ${expectedWebAccessPath}/node_modules/unpdf
+        grep -q 'webSearch: "web_search"' ${expectedWebAccessPath}/index.ts
+        grep -q 'fetchContent: "fetch_content"' ${expectedWebAccessPath}/index.ts
+        grep -q 'name: toolNames.webSearch' ${expectedWebAccessPath}/index.ts
+        grep -q 'name: toolNames.fetchContent' ${expectedWebAccessPath}/index.ts
         pi --offline --no-extensions --no-skills --no-prompt-templates --no-context-files \
-          -e ${expectedSearxngPath} \
+          -e ${expectedWebAccessPath} \
           --list-models > pi.log 2>&1
         ! grep -E 'Extension issues|Failed to load extension|Cannot find module|Error:' pi.log
         touch $out

@@ -92,9 +92,9 @@
     "strategy": "unsupported",
     "reason": "Package-specific lock metadata needs manual review."
   },
-  "pi-searxng": {
+  "pi-web-access": {
     "strategy": "unsupported",
-    "reason": "Source checkout lock update needs manual review."
+    "reason": "Package-specific lock metadata needs manual review."
   },
   "pi-subagents": {
     "strategy": "unsupported",
