@@ -80,6 +80,22 @@ let
   mcpAdapter = pinnedPkgs.callPackage ../packages/pi-mcp-adapter.nix { };
   playwright = pinnedPkgs.callPackage ../packages/pi-playwright.nix { };
   pixOptimizer = pinnedPkgs.callPackage ../packages/pix-optimizer.nix { };
+  pixTools = pinnedPkgs.callPackage ../packages/pix-tools.nix { };
+  pixToolsRoot = "${pixTools}/lib/node_modules/pix-tools/node_modules/@xynogen";
+  pixToolNames = [
+    "pretty"
+    "read"
+    "write"
+    "edit"
+    "ls"
+    "find"
+    "grep"
+  ];
+  pixToolPackages = map (name: {
+    name = "pix-${name}";
+    package = "${pixToolsRoot}/pix-${name}";
+    default = true;
+  }) pixToolNames;
   piVcc = pinnedPkgs.callPackage ../packages/pi-vcc.nix { };
   promptTemplateModel = pinnedPkgs.callPackage ../packages/pi-prompt-template-model.nix { };
   rpivTodo = pinnedPkgs.callPackage ../packages/rpiv-todo.nix { };
@@ -159,6 +175,9 @@ let
       package = "${pixOptimizer}/lib/node_modules/@xynogen/pix-optimizer";
       default = true;
     }
+  ]
+  ++ pixToolPackages
+  ++ [
     {
       name = "pi-vcc";
       package = "${piVcc}";

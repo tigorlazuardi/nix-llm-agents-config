@@ -221,6 +221,21 @@ let
     nixpkgs-unstable.legacyPackages.x86_64-linux.callPackage ./packages/pix-optimizer.nix
       { };
   expectedPixOptimizerPath = "${expectedPixOptimizer}/lib/node_modules/@xynogen/pix-optimizer";
+  expectedPixTools =
+    nixpkgs-unstable.legacyPackages.x86_64-linux.callPackage ./packages/pix-tools.nix
+      { };
+  expectedPixToolsRoot = "${expectedPixTools}/lib/node_modules/pix-tools/node_modules/@xynogen";
+  expectedPixToolNames = [
+    "pretty"
+    "read"
+    "write"
+    "edit"
+    "ls"
+    "find"
+    "grep"
+  ];
+  expectedPixToolPaths = map (name: "${expectedPixToolsRoot}/pix-${name}") expectedPixToolNames;
+  expectedPixPrettyPath = "${expectedPixToolsRoot}/pix-pretty";
   expectedPiVcc = nixpkgs-unstable.legacyPackages.x86_64-linux.callPackage ./packages/pi-vcc.nix { };
   expectedPiVccPath = "${expectedPiVcc}";
   expectedPromptTemplateModel =
@@ -279,6 +294,7 @@ in
   mcp-adapter = expectedMcpAdapter;
   playwright = expectedPlaywright;
   pix-optimizer = expectedPixOptimizer;
+  pix-tools = expectedPixTools;
   pi-vcc = expectedPiVcc;
   prompt-template-model = expectedPromptTemplateModel;
   rpiv-todo = expectedRpivTodo;
@@ -317,6 +333,9 @@ in
           expectedMcpAdapterPath
           expectedPlaywrightPath
           expectedPixOptimizerPath
+        ]
+        ++ expectedPixToolPaths
+        ++ [
           expectedPiVccPath
           expectedPromptTemplateModelPath
           expectedRpivTodoPath
@@ -346,6 +365,12 @@ in
     assert default.config.programs.pi-coding-agent.plugins.pi-mcp-adapter.enableMcpIntegration;
     assert default.config.programs.pi-coding-agent.plugins.pi-vcc.enable;
     assert default.config.programs.pi-coding-agent.plugins.pix-optimizer.enable;
+    assert builtins.all (
+      name: default.config.programs.pi-coding-agent.plugins."pix-${name}".enable
+    ) expectedPixToolNames;
+    assert builtins.all (
+      path: builtins.elem path default.config.programs.pi-coding-agent.settings.packages
+    ) expectedPixToolPaths;
     assert default.config.programs.pi-coding-agent.plugins.pi-rules.enable;
     assert builtins.elem expectedRulesPath default.config.programs.pi-coding-agent.settings.packages;
     assert builtins.elem expectedRulesPath
@@ -570,6 +595,9 @@ in
         expectedMcpAdapterPath
         expectedPlaywrightPath
         expectedPixOptimizerPath
+      ]
+      ++ expectedPixToolPaths
+      ++ [
         expectedPiVccPath
         expectedPromptTemplateModelPath
         expectedRpivTodoPath
@@ -626,7 +654,7 @@ in
         ];
       }
       ''
-        nixfmt --check ${./flake.nix} ${./checks.nix} ${./modules/pi-coding-agent.nix} ${./modules/pi-coding-agent/agents.nix} ${./modules/pi-coding-agent/default-agents.nix} ${./modules/pi-coding-agent/pi-subagents.nix} ${./packages/pi-diet-lsp.nix} ${./packages/pi-effort.nix} ${./packages/pi-timestamps.nix} ${./packages/pi-herdr.nix} ${./packages/pi-herdr-sudo-task.nix} ${./packages/pi-ask-herdr.nix} ${./packages/pi-herdr-rename.nix} ${./packages/pi-patty-bg-tasks.nix} ${./packages/pi-intercom.nix} ${./packages/pi-vimmode.nix} ${./packages/pi-usage.nix} ${./packages/pi-mcp-adapter.nix} ${./packages/pi-playwright.nix} ${./packages/pix-optimizer.nix} ${./packages/pi-vcc.nix} ${./packages/pi-prompt-template-model.nix} ${./packages/rpiv-todo.nix} ${./packages/pi-rules.nix} ${./packages/pi-web-access.nix} ${./packages/pi-subagents.nix} ${./packages/supi-context.nix} ${./packages/supi-extras.nix}
+        nixfmt --check ${./flake.nix} ${./checks.nix} ${./modules/pi-coding-agent.nix} ${./modules/pi-coding-agent/agents.nix} ${./modules/pi-coding-agent/default-agents.nix} ${./modules/pi-coding-agent/pi-subagents.nix} ${./packages/pi-diet-lsp.nix} ${./packages/pi-effort.nix} ${./packages/pi-timestamps.nix} ${./packages/pi-herdr.nix} ${./packages/pi-herdr-sudo-task.nix} ${./packages/pi-ask-herdr.nix} ${./packages/pi-herdr-rename.nix} ${./packages/pi-patty-bg-tasks.nix} ${./packages/pi-intercom.nix} ${./packages/pi-vimmode.nix} ${./packages/pi-usage.nix} ${./packages/pi-mcp-adapter.nix} ${./packages/pi-playwright.nix} ${./packages/pix-optimizer.nix} ${./packages/pix-tools.nix} ${./packages/pi-vcc.nix} ${./packages/pi-prompt-template-model.nix} ${./packages/rpiv-todo.nix} ${./packages/pi-rules.nix} ${./packages/pi-web-access.nix} ${./packages/pi-subagents.nix} ${./packages/supi-context.nix} ${./packages/supi-extras.nix}
         WORKFLOW=${./.github/workflows/daily-update.yml} UPDATER=${./scripts/daily-update.sh} REGISTRY=${./pi-plugins.json} bash ${./tests/daily-updater-self-check.sh}
         touch $out
       '';
@@ -1085,6 +1113,28 @@ in
           --list-models > pi.log 2>&1
         ! grep -E 'Extension issues|Failed to load extension|Cannot find module|Error:' pi.log
         test ! -e "$PI_CODING_AGENT_DIR/optimizer.json"
+        touch $out
+      '';
+
+  pix-tools-load =
+    pkgs.runCommandLocal "pix-tools-load" { nativeBuildInputs = [ expectedPackage ]; }
+      ''
+        export HOME="$TMPDIR/home"
+        export PI_CODING_AGENT_DIR="$HOME/.pi/agent"
+        export PI_TELEMETRY=0
+        mkdir -p "$PI_CODING_AGENT_DIR"
+        test -f ${expectedPixPrettyPath}/src/index.ts
+        test -d ${expectedPixTools}/lib/node_modules/pix-tools/node_modules/cli-highlight
+        for tool in read write edit ls find grep; do
+          test -f ${expectedPixToolsRoot}/pix-$tool/src/$tool.ts
+          grep -F "name: \"$tool\"" ${expectedPixToolsRoot}/pix-$tool/src/$tool.ts
+        done
+        cat > "$PI_CODING_AGENT_DIR/settings.json" <<'EOF'
+        {"packages":${builtins.toJSON expectedPixToolPaths}}
+        EOF
+        pi --offline --no-prompt-templates --no-context-files \
+          --list-models > pi.log 2>&1
+        ! grep -E 'Extension issues|Failed to load extension|Cannot find module|Error:' pi.log
         touch $out
       '';
 
