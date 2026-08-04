@@ -5,11 +5,11 @@
 }:
 stdenvNoCC.mkDerivation {
   pname = "pi-herdr-sudo-task";
-  version = "0.1.3";
+  version = "0.1.4";
 
   src = fetchurl {
-    url = "https://registry.npmjs.org/pi-herdr-sudo-task/-/pi-herdr-sudo-task-0.1.3.tgz";
-    hash = "sha256-R17r+W4cFmudrTqjXzatZQbDyCQYc+j7JGQ88ujKTzk=";
+    url = "https://registry.npmjs.org/pi-herdr-sudo-task/-/pi-herdr-sudo-task-0.1.4.tgz";
+    hash = "sha256-aAChwZRsJs2jB3bY0jwES33wQscoYn/wHCkYIqP4UFo=";
   };
 
   installPhase = ''
