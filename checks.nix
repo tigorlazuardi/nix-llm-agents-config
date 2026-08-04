@@ -232,6 +232,7 @@ let
     "edit"
     "ls"
     "find"
+    "footer"
     "grep"
   ];
   expectedPixToolPaths = map (name: "${expectedPixToolsRoot}/pix-${name}") expectedPixToolNames;
@@ -1141,6 +1142,8 @@ in
           test -f ${expectedPixToolsRoot}/pix-$tool/src/$tool.ts
           grep -F "name: \"$tool\"" ${expectedPixToolsRoot}/pix-$tool/src/$tool.ts
         done
+        test -f ${expectedPixToolsRoot}/pix-footer/src/extension.ts
+        grep -F 'ctx.ui.setFooter' ${expectedPixToolsRoot}/pix-footer/src/footer.ts
         cat > "$PI_CODING_AGENT_DIR/settings.json" <<'EOF'
         {"packages":${builtins.toJSON expectedPixToolPaths}}
         EOF

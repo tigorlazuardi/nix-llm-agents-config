@@ -15,6 +15,7 @@ buildNpmPackage {
       "version": "1.0.0",
       "private": true,
       "dependencies": {
+        "@xynogen/pix-footer": "0.1.20",
         "@xynogen/pix-pretty": "1.8.1",
         "@xynogen/pix-read": "0.1.20",
         "@xynogen/pix-write": "0.1.19",
@@ -31,7 +32,7 @@ buildNpmPackage {
     cp ${./pix-tools-package-lock.json} package-lock.json
   '';
 
-  npmDepsHash = "sha256-+cWAELYNtVwZSNbohAGcuwnPqf8xAXyHFDJESrvBd7Y=";
+  npmDepsHash = "sha256-UluEWs3Ui0aGs0tAP4xMDTzqc47sf8J+z8W+r9DKyX4=";
   npmInstallFlags = [
     "--omit=dev"
     "--legacy-peer-deps"

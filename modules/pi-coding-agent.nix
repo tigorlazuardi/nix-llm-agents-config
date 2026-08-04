@@ -90,6 +90,7 @@ let
     "edit"
     "ls"
     "find"
+    "footer"
     "grep"
   ];
   pixToolPackages = map (name: {

@@ -88,6 +88,10 @@
     "strategy": "unsupported",
     "reason": "Contains separately pinned runtime source."
   },
+  "pix-footer": {
+    "strategy": "unsupported",
+    "reason": "Shared Pix package lock needs manual review."
+  },
   "pix-pretty": {
     "strategy": "unsupported",
     "reason": "Shared Pix package lock needs manual review."
