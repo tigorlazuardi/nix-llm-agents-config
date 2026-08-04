@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://quintinshaw.dev/schemas/pi-drain-contract-v1.json",
+  "$id": "https://quintinshaw.dev/schemas/pi-drain-contract-v2.json",
   "title": "Pi drain contract",
   "type": "object",
   "additionalProperties": false,
@@ -23,7 +23,7 @@
   ],
   "properties": {
     "$schema": { "const": "./contract.schema.json" },
-    "schemaVersion": { "const": 1 },
+    "schemaVersion": { "const": 2 },
     "verticalProduct": { "$ref": "#/$defs/nonEmpty" },
     "botMarker": { "$ref": "#/$defs/nonEmpty" },
     "repository": { "$ref": "#/$defs/repository" },
@@ -535,26 +535,57 @@
         "claimConflict": { "const": "needsHumanReview" }
       }
     },
+    "notifications": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "notifierRef",
+        "destinationRef",
+        "remindAfterSeconds",
+        "repeatEverySeconds",
+        "statuses"
+      ],
+      "properties": {
+        "notifierRef": { "$ref": "#/$defs/nonEmpty" },
+        "destinationRef": { "$ref": "#/$defs/nonEmpty" },
+        "remindAfterSeconds": { "type": "integer", "minimum": 300, "maximum": 2592000 },
+        "repeatEverySeconds": { "type": "integer", "minimum": 3600, "maximum": 2592000 },
+        "statuses": { "const": ["merge-request-open", "build-running"] }
+      }
+    },
     "housekeeping": {
       "type": "object",
       "additionalProperties": false,
       "required": [
         "enabled",
+        "mode",
         "oldestFirst",
-        "maxTicketsPerRun",
+        "pollSeconds",
+        "roundWindowSeconds",
+        "maxTicketsPerRound",
         "autoDeployAllowedEnvironmentClasses",
         "autoDeployForbiddenEnvironmentClasses",
         "autoMerge",
-        "failureOutcome"
+        "failureOutcome",
+        "notifications"
       ],
       "properties": {
         "enabled": { "const": true },
+        "mode": { "const": "continuous-bounded-rounds" },
         "oldestFirst": { "const": true },
-        "maxTicketsPerRun": { "type": "integer", "minimum": 1, "maximum": 1000 },
+        "pollSeconds": { "type": "integer", "minimum": 30, "maximum": 600 },
+        "roundWindowSeconds": { "type": "integer", "minimum": 60, "maximum": 86400 },
+        "maxTicketsPerRound": { "type": "integer", "minimum": 1, "maximum": 1000 },
         "autoDeployAllowedEnvironmentClasses": { "const": ["development", "staging"] },
         "autoDeployForbiddenEnvironmentClasses": { "const": ["production", "production-like", "unknown"] },
         "autoMerge": { "const": false },
-        "failureOutcome": { "const": "needsHumanReview" }
+        "failureOutcome": { "const": "needsHumanReview" },
+        "notifications": {
+          "oneOf": [
+            { "$ref": "#/$defs/notifications" },
+            { "type": "null" }
+          ]
+        }
       }
     },
     "telemetry": {

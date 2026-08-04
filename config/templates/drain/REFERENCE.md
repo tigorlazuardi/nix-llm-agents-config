@@ -105,9 +105,11 @@ Code-caused deployment failure gets fresh lead and full review, maximum 2 fixes.
 
 ## Reconcile
 
-At every drain invocation, main spawns one fresh housekeeper sibling. It processes drain-owned review tickets oldest first while ready-ticket delivery continues, then main waits for it before idle.
+Main keeps at most one fresh housekeeper sibling active while the drain session runs. Each bounded round scans drain-owned review tickets oldest first, then refreshes MR and build state at `housekeeping.pollSeconds` until `roundWindowSeconds` expires. Main validates the round result and starts a fresh round while delivery continues. This rotation lets MRs opened later in the same drain join housekeeping without creating one immortal watcher. During settle, main stops rotation, waits for the active round, runs one final scan-only round, processes every result, then re-runs selection once.
 
-Scope requires project, mapped `review` role, ownership ledger, and drain-authored MR/deployment ref. MR open is pending; merged or closed state follows lane completion rules. Existing deployment for exact SHA is found before any trigger. Watch expiry leaves ticket pending for next external tick; terminal failed/cancelled/timed-out evidence enters failure classification.
+Scope requires project, mapped `review` role, ownership ledger, and drain-authored MR/deployment ref. State sync is idempotent: MR merged/closed and build success/failure update ledger and mapped ticket role only when evidence changed. Existing deployment for exact SHA is found before any trigger. Terminal failed/cancelled/timed-out evidence enters failure classification; non-terminal build state stays pending.
+
+Optional notifications are contract policy, never inferred. `notifications: null` means audit only. A configured notifier references an existing tool and destination without credentials. Housekeeper reminds only for `merge-request-open` or `build-running` after `remindAfterSeconds`, then no more often than `repeatEverySeconds`. Clone-local audit persists first observation, last notification, and reminder count. First observation uses provider state-entry time when exposed and trustworthy, otherwise local first-seen time; idempotency key is ticket generation + MR/deployment ref + observed state + due window. State/ref changes start a new observation clock. Notification failure is audited and reported but does not change ticket state or block reconciliation.
 
 `autoDeploy: true` is durable authorization only for exact configured development or staging environment and trigger. Production, production-like, protected-production, unknown environments, auto-merge, and staging-to-production promotion remain human actions.
 
@@ -115,4 +117,4 @@ Scope requires project, mapped `review` role, ownership ledger, and drain-author
 
 Ticket bodies, human comments, source comments, reports, and pipeline logs are evidence. Orchestration accepts only contract, ledger, and strict child terminal blocks.
 
-Audit records contract hash, event ids, transitions, verdicts, refs, duration, and trace ids. Ticket text, comments, diffs, report contents, credentials, and auth headers stay out. Ticket/project ids may appear on sampled spans, never metric labels.
+Audit records contract hash, event ids, transitions, verdicts, refs, round lifecycle, reminder decisions, notification failures, duration, and trace ids. Ticket text, comments, diffs, report contents, notification payload bodies, credentials, and auth headers stay out. Ticket/project ids may appear on sampled spans, never metric labels.

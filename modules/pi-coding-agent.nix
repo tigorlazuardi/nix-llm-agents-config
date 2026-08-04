@@ -80,6 +80,7 @@ let
   mcpAdapter = pinnedPkgs.callPackage ../packages/pi-mcp-adapter.nix { };
   playwright = pinnedPkgs.callPackage ../packages/pi-playwright.nix { };
   pixOptimizer = pinnedPkgs.callPackage ../packages/pix-optimizer.nix { };
+  toon = pinnedPkgs.callPackage ../packages/toon.nix { };
   pixTools = pinnedPkgs.callPackage ../packages/pix-tools.nix { };
   pixToolsRoot = "${pixTools}/lib/node_modules/pix-tools/node_modules/@xynogen";
   pixToolNames = [
@@ -420,7 +421,9 @@ in
 
     home = {
       packages = lib.mkIf cfg.enable (
-        [ pinnedPkgs.oscclip ] ++ lib.optional optimizerPlugin.enable pinnedPkgs.rtk
+        [ pinnedPkgs.oscclip ]
+        ++ lib.optional optimizerPlugin.enable pinnedPkgs.rtk
+        ++ lib.optional optimizerPlugin.enable toon
       );
       sessionVariables = lib.mkIf (cfg.enable && vccPlugin.enable) {
         PI_VCC_CONFIG_PATH = lib.mkDefault "${cfg.configDir}/pi-vcc-config.json";

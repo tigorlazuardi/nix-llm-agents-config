@@ -16,7 +16,7 @@ Agent setup/edit is conditional. Inspect discovery first; do not load `~/.pi/age
 
 ## 1. Doctor the current system
 
-Inspect Git common dir, remote/SCM, checks, coding standards, tracker docs, authenticated tracker/SCM tools, every candidate project, existing statuses/fields/labels, blocking relation, branches, environments, pipelines, existing `.pi/drain/contract.json`, and generated drain agents.
+Inspect Git common dir, remote/SCM, checks, coding standards, tracker docs, authenticated tracker/SCM tools, optional existing notifier/destination, every candidate project, existing statuses/fields/labels, blocking relation, branches, environments, pipelines, existing `.pi/drain/contract.json`, and generated drain agents.
 
 For an existing contract, compare every remote id/name/capability with current reality. Preserve valid mappings; list drift rather than silently repairing it.
 
@@ -42,7 +42,9 @@ Hotfix lane uses production source → reviewed cherry-pick to development/stagi
 
 Classify deployment environments from provider/CI evidence. `autoDeploy` may be offered only for proven development/staging targets. Unknown or production-like targets are human-only.
 
-**Complete when:** every lane resolves to real branches/provider operations, at least one normal lane exists, overlaps are visible by array order, and no automated path reaches production or auto-merge.
+Map continuous bounded housekeeping rounds. Recommend `pollSeconds: 60`, `roundWindowSeconds: 900`, and one active round. Notifications are optional: when requested, resolve one installed notifier plus destination and collect per-repo `remindAfterSeconds`/`repeatEverySeconds` (defaults 7200/86400). Otherwise write `notifications: null`. Load detailed reconciliation/reminder semantics from `REFERENCE.md`; do not restate them here.
+
+**Complete when:** every lane resolves to real branches/provider operations, housekeeping cadence is bounded, optional notifier refs resolve without credentials, at least one normal lane exists, overlaps are visible by array order, and no automated path reaches production or auto-merge.
 
 ## 4. Preview mutations
 
@@ -52,7 +54,7 @@ Show:
 2. authoritative ticket-context source;
 3. hotfix and normal lane order/matchers;
 4. branch/MR/deployment flow;
-5. ledger, budgets, resume, housekeeping, and failure transitions;
+5. ledger, budgets, resume, housekeeping round/cadence, optional reminder policy, and failure transitions;
 6. exact remote statuses/labels/fields proposed for creation;
 7. local files created/changed and redacted diffs.
 
@@ -62,9 +64,9 @@ Ask approval for remote additions first. Immediately re-read remote state; drift
 
 ## 5. Materialize atomically
 
-Fill every placeholder in `contract.template.json`. Validate exact keys, project references, first-match lanes, branch existence, role distinguishability, work-contract extraction against one sampled ticket, provider operations, non-production autoDeploy guard, and secret absence.
+Fill every placeholder in `contract.template.json`. Validate exact keys, project references, first-match lanes, branch existence, role distinguishability, work-contract extraction against one sampled ticket, provider operations, bounded housekeeping cadence, optional notifier capability/destination, non-production autoDeploy guard, and secret absence.
 
-Generate `.pi/drain/DRAIN-PROMPT.md` from `DRAIN-PROMPT.template.md`. Materialize provider/SCM operations and lane branches, but keep ids, branches, budgets, and state mappings referenced from sibling contract. Compute contract SHA-256 and bind it in prompt frontmatter.
+Generate `.pi/drain/DRAIN-PROMPT.md` from `DRAIN-PROMPT.template.md`. Materialize provider/SCM operations, optional notification operation or explicit disabled marker, and lane branches, but keep ids, branches, budgets, and state mappings referenced from sibling contract. Compute contract SHA-256 and bind it in prompt frontmatter.
 
 Preview both files. Ask one write/overwrite approval. Re-read targets immediately; drift cancels approval. Write contract then prompt via temp+rename. Add these clone-local Git exclude entries without disturbing others:
 
@@ -83,7 +85,7 @@ Run live discovery for the ten drain agents. When all resolve and no agent edit 
 
 ## 7. Smoke
 
-Run read-only candidate queries for every project. Reconstruct one sampled ledger if present. Confirm ordered selection can distinguish resumable, hotfix, normal, blocked, and unmatched tickets without mutation. Confirm ten drain agents resolve.
+Run read-only candidate queries for every project. Reconstruct one sampled ledger if present. Confirm ordered selection can distinguish resumable, hotfix, normal, blocked, and unmatched tickets without mutation. Dry-run housekeeping scope plus reminder due/dedupe decisions without sending. Confirm ten drain agents resolve.
 
 Write `.pi/drain/setup-report.md` with redacted mappings, hashes, agent result, Doctor results, and timestamp.
 

@@ -268,6 +268,7 @@ let
   expectedSupiExtrasPath = "${expectedSupiExtras}/lib/node_modules/@mrclrchtr/supi-extras";
   expectedOscclip = nixpkgs-unstable.legacyPackages.x86_64-linux.oscclip;
   expectedRtk = nixpkgs-unstable.legacyPackages.x86_64-linux.rtk;
+  expectedToon = nixpkgs-unstable.legacyPackages.x86_64-linux.callPackage ./packages/toon.nix { };
   expectedWritingGreatSkills = default.config.programs.pi-coding-agent.skills.writing-great-skills;
   expectedModels = builtins.fromJSON (builtins.readFile ./config/models.json);
   secretWrappedMcpConfig =
@@ -350,6 +351,9 @@ in
     assert builtins.elem expectedRtk default.config.home.packages;
     assert builtins.elem expectedRtk optimizerConfigured.config.home.packages;
     assert !(builtins.elem expectedRtk pluginsDisabled.config.home.packages);
+    assert builtins.elem expectedToon default.config.home.packages;
+    assert builtins.elem expectedToon optimizerConfigured.config.home.packages;
+    assert !(builtins.elem expectedToon pluginsDisabled.config.home.packages);
     assert
       default.config.home.file."${default.config.programs.pi-coding-agent.configDir}/intercom/config.json".source
       == expectedIntercomConfig;
@@ -654,8 +658,8 @@ in
         ];
       }
       ''
-        nixfmt --check ${./flake.nix} ${./checks.nix} ${./modules/pi-coding-agent.nix} ${./modules/pi-coding-agent/agents.nix} ${./modules/pi-coding-agent/default-agents.nix} ${./modules/pi-coding-agent/pi-subagents.nix} ${./packages/pi-diet-lsp.nix} ${./packages/pi-effort.nix} ${./packages/pi-timestamps.nix} ${./packages/pi-herdr.nix} ${./packages/pi-herdr-sudo-task.nix} ${./packages/pi-ask-herdr.nix} ${./packages/pi-herdr-rename.nix} ${./packages/pi-patty-bg-tasks.nix} ${./packages/pi-intercom.nix} ${./packages/pi-vimmode.nix} ${./packages/pi-usage.nix} ${./packages/pi-mcp-adapter.nix} ${./packages/pi-playwright.nix} ${./packages/pix-optimizer.nix} ${./packages/pix-tools.nix} ${./packages/pi-vcc.nix} ${./packages/pi-prompt-template-model.nix} ${./packages/rpiv-todo.nix} ${./packages/pi-rules.nix} ${./packages/pi-web-access.nix} ${./packages/pi-subagents.nix} ${./packages/supi-context.nix} ${./packages/supi-extras.nix}
         WORKFLOW=${./.github/workflows/daily-update.yml} UPDATER=${./scripts/daily-update.sh} REGISTRY=${./pi-plugins.json} bash ${./tests/daily-updater-self-check.sh}
+        nixfmt --check ${./flake.nix} ${./checks.nix} ${./modules/pi-coding-agent.nix} ${./modules/pi-coding-agent/agents.nix} ${./modules/pi-coding-agent/default-agents.nix} ${./modules/pi-coding-agent/pi-subagents.nix} ${./packages/pi-diet-lsp.nix} ${./packages/pi-effort.nix} ${./packages/pi-timestamps.nix} ${./packages/pi-herdr.nix} ${./packages/pi-herdr-sudo-task.nix} ${./packages/pi-ask-herdr.nix} ${./packages/pi-herdr-rename.nix} ${./packages/pi-patty-bg-tasks.nix} ${./packages/pi-intercom.nix} ${./packages/pi-vimmode.nix} ${./packages/pi-usage.nix} ${./packages/pi-mcp-adapter.nix} ${./packages/pi-playwright.nix} ${./packages/pix-optimizer.nix} ${./packages/pix-tools.nix} ${./packages/pi-vcc.nix} ${./packages/pi-prompt-template-model.nix} ${./packages/rpiv-todo.nix} ${./packages/pi-rules.nix} ${./packages/pi-web-access.nix} ${./packages/pi-subagents.nix} ${./packages/supi-context.nix} ${./packages/supi-extras.nix} ${./packages/toon.nix}
         touch $out
       '';
 
@@ -1097,7 +1101,13 @@ in
       '';
 
   pix-optimizer-load =
-    pkgs.runCommandLocal "pix-optimizer-load" { nativeBuildInputs = [ expectedPackage ]; }
+    pkgs.runCommandLocal "pix-optimizer-load"
+      {
+        nativeBuildInputs = [
+          expectedPackage
+          expectedToon
+        ];
+      }
       ''
         export HOME="$TMPDIR/home"
         export PI_CODING_AGENT_DIR="$HOME/.pi/agent"
@@ -1106,6 +1116,8 @@ in
         test -f ${expectedPixOptimizerPath}/src/index.ts
         test -f ${expectedPixOptimizerPath}/node_modules/@xynogen/pix-pretty/src/modal-frame.ts
         test ! -e ${expectedPixOptimizerPath}/node_modules/@xynogen/pix-pretty/node_modules
+        test "$(toon --version)" = "2.3.0"
+        printf '{"answer":42}\n' | toon | grep -Fx 'answer: 42'
         cat > "$PI_CODING_AGENT_DIR/settings.json" <<EOF
         {"packages":["${expectedPixOptimizerPath}"]}
         EOF
@@ -1290,6 +1302,8 @@ in
         grep -F 'do not load `~/.pi/agent/templates/drain/AGENTS.md` unless' \
           ${./config/prompts}/drain-wizard.md
         grep -F '## Conditional materialization procedure' ${./config/templates/drain/AGENTS.md}
+        grep -F 'continuous-bounded-rounds' ${./config/templates/drain/DRAIN-PROMPT.template.md}
+        grep -F 'Notification failure is audited' ${./config/templates/drain/REFERENCE.md}
         test ! -e ${./config/skills}/grilling
         grep -F '**Small or short-lived app:** useful logs are enough.' \
           ${./config/skills}/telemetry-planning/SKILL.md
@@ -1304,7 +1318,21 @@ in
         check-jsonschema \
           --schemafile ${./config/templates/drain/contract.schema.json} \
           ${./config/templates/drain/contract.template.json}
-
+        node -e '
+          const fs = require("fs");
+          const contract = JSON.parse(fs.readFileSync(process.argv[1]));
+          contract.housekeeping.notifications = {
+            notifierRef: "existing-notifier",
+            destinationRef: "ops-channel",
+            remindAfterSeconds: 7200,
+            repeatEverySeconds: 86400,
+            statuses: ["merge-request-open", "build-running"]
+          };
+          fs.writeFileSync(process.argv[2], JSON.stringify(contract));
+        ' ${./config/templates/drain/contract.template.json} "$TMPDIR/notified-contract.json"
+        check-jsonschema \
+          --schemafile ${./config/templates/drain/contract.schema.json} \
+          "$TMPDIR/notified-contract.json"
         export HOME="$TMPDIR/home"
         export PI_TELEMETRY=0
         mkdir -p "$HOME"

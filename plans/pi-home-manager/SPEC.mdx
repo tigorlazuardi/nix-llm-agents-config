@@ -205,13 +205,13 @@ Minimum contract sections:
 | `repository` | Resolved Git common directory identity, remote, base branch, delivery branch pattern, PR target, exact check commands as argument arrays, coding-standards path, report root, and accepted UI evidence roots. |
 | `ticketPool` | One provider per clone; provider kind (`github` or `huly` initially), existing auth/tool reference without credentials, workspace/repository and project ids, ticket URL template, ready filter, dependency relation, deterministic ordering, and claim selector. |
 | `ticketStates` | Provider-native selectors and transitions for `ready`, `claimed`, `review`, `readyForHuman`, and `done`; use immutable ids when the provider exposes them, otherwise exact repository-scoped names. State plus required labels must uniquely identify each phase. |
-| `housekeeping` | Review-ticket selector, completion gate (`merge` or `deployment`), MR provider, exact deployment environment/trigger, terminal pipeline selectors, bounded watch interval/timeout, and failure outcome. |
+| `housekeeping` | Continuous bounded-round cadence, review-ticket selector, completion gate (`merge` or `deployment`), MR provider, exact deployment environment/trigger, terminal pipeline selectors, optional notifier/destination plus reminder cadence, and failure outcome. |
 | `routing` | Changed-path rules for UI, UX, database, and low-tolerance review. Overlapping rules accumulate reviewers; they never remove a mandatory gate. |
 | `budgets` | `quick: 5` and `deep: 3`; setup may lower them but cannot disable a mandatory review. |
 | `ownership` | Machine/clone marker used for comments and claims, plus explicit `claimBeforeSpawn: true`. No secret values. |
 | `telemetry` | Local audit path, configured OTel endpoint reference if present, and redaction policy reference. |
 
-V1 supports exactly one ticket pool, one PR-delivery policy, and one housekeeping policy per clone. Delivery ends at opened PR; a fresh `housekeeper` reconciles asynchronous MR and build-deployment state on each later drain invocation. Auto-merge remains forbidden. Auto-deploy is allowed only for an environment proven to be development or staging; production, production-like, protected-production, and unknown environments are human-only. Hotfixes never bypass review.
+V2 supports exactly one ticket pool and one housekeeping policy per clone, plus ordered hotfix and normal delivery lanes. Delivery ends at opened PR; fresh bounded `housekeeper` rounds reconcile asynchronous MR and build-deployment state throughout the same drain invocation and on later invocations. Auto-merge remains forbidden. Auto-deploy is allowed only for an environment proven to be development or staging; production, production-like, protected-production, and unknown environments are human-only. Hotfixes never bypass review.
 
 Setup runs a fail-closed Doctor before writing agents:
 
@@ -290,7 +290,7 @@ Review routing belongs to delivery. UI changes add `ui-reviewer` to the quick ga
 
 ### Sequential drain state machine
 
-Exactly one drain orchestrator may run per Git common directory per machine, and it consumes exactly one ticket at a time. At invocation start, main spawns one fresh `housekeeper` as a non-blocking sibling, continues sequential ready-ticket delivery, then waits for housekeeping before final idle. Ticket-level work is sequential; `build-lead` may still fan out disjoint work inside that ticket. The tracker is durable workflow state: drain queries one open `ready-for-agent` ticket whose blockers are closed, claims it before spawning, and queries the tracker again only after successful delivery. An opened PR completes delivery for that ticket, so another independent ticket may run; dependent tickets remain unavailable until housekeeping verifies the configured merge/deployment completion gate and moves the blocker ticket to `done`.
+Exactly one drain orchestrator may run per Git common directory per machine, and it consumes exactly one ticket at a time. At invocation start, main starts one fresh bounded `housekeeper` as a non-blocking sibling and rotates fresh rounds while sequential ready-ticket delivery continues, then performs a final scan before idle. Ticket-level work is sequential; `build-lead` may still fan out disjoint work inside that ticket. The tracker is durable workflow state: drain queries one open `ready-for-agent` ticket whose blockers are closed, claims it before spawning, and queries the tracker again only after successful delivery. An opened PR completes delivery for that ticket, so another independent ticket may run; dependent tickets remain unavailable until housekeeping verifies the configured merge/deployment completion gate and moves the blocker ticket to `done`.
 
 Review counters are local to one `delivery-orchestrator` invocation and need no persisted resume state:
 
@@ -315,7 +315,7 @@ quick/deep budget exhausted | blocked | escalated | delivery crash
   → issue stays open, so dependents remain blocked
 ```
 
-Housekeeping scopes candidates by project/repository, configured review selector, drain ownership marker, and drain-authored PR reference; it never sweeps a shared team column by status alone. Open MR is a no-op. Closed-unmerged, missing/inconsistent evidence, terminal failed/cancelled/timed-out deployment, or trigger failure moves the ticket to `readyForHuman` with evidence pointer. Merged MR completes immediately only when `completionGate` is `merge`. For `deployment`, housekeeper first finds a deployment for the exact merged SHA; green moves ticket to `done`, running is watched to terminal, and absent deployment is triggered only when `autoDeploy` is true, current invocation carries outward-action approval, and provider/CI evidence proves the target is development or staging. It never auto-merges, promotes to production, retries failed code, or duplicates a trigger already identifiable by SHA/marker.
+Housekeeping scopes candidates by project/repository, configured review selector, drain ownership marker, and drain-authored PR reference; it never sweeps a shared team column by status alone. Open MR stays pending and may produce an idempotent reminder only when notifications are configured and due. Closed-unmerged, missing/inconsistent evidence, terminal failed/cancelled/timed-out deployment, or trigger failure moves the ticket to `readyForHuman` with evidence pointer. Merged MR completes immediately only when `completionGate` is `merge`. For `deployment`, housekeeper first finds a deployment for the exact merged SHA; green moves ticket to `done`, running is watched to terminal, and absent deployment is triggered only when `autoDeploy` is true, current invocation carries outward-action approval, and provider/CI evidence proves the target is development or staging. It never auto-merges, promotes to production, retries failed code, or duplicates a trigger already identifiable by SHA/marker.
 
 A ticket marked `ready-for-human` is never consumed again. Human re-adding `ready-for-agent` is explicit retry authorization and starts a new delivery with fresh local budgets. Local singleton enforcement does not replace the remote tracker claim if multiple machines may drain the same repository.
 
@@ -349,14 +349,65 @@ Selection re-queries tracker after every ticket and uses this fixed order:
 oldest resumable inProgress
   → oldest ticket matching first hotfixPolicies[] entry
   → oldest ticket matching first policies[] entry
-  → wait for housekeeping, then stop until external ticker
+  → settle housekeeping, final scan, then stop until external ticker
 ```
 
 Every ticket outcome—PASS, failure, exhaustion, ambiguous, or L/XL—persists its terminal event and continues to next-best ticket. `build-lead` returns `NEEDS_HUMAN_REVIEW` before implementation for ambiguous or L/XL scope; delivery/main performs tracker mutation. Resume requires same owner, valid ledger, and branch ref, and continues persisted budgets.
 
 `hotfixPolicies[]` is a separate tier, not a kind inside normal `policies[]`. Hotfix uses production source, full review, reviewed cherry-pick to a development/staging validation branch, deployment babysitting, then one upstream MR per ticket to production after green. Normal lanes open one active MR per ticket; a code-caused post-merge deployment failure may open a follow-up fix MR. Fresh `deep-reviewer` classifies deployment failure: infrastructure/ambiguous → `needsHumanReview`; code → fresh lead plus all review gates. Deploy-fix budget is two.
 
-Housekeeper reconciles async MR/deployment state on each external tick, opens the hotfix upstream MR after non-production green, and updates mapped ticket roles idempotently. `autoDeploy` is durable authorization only for an exact development or staging environment/trigger. Production, production-like, protected-production, unknown environments, auto-merge, and staging-to-production promotion remain human actions.
+Housekeeper reconciles async MR/deployment state through rotating bounded rounds in the active drain and again on each external tick, opens the hotfix upstream MR after non-production green, and updates mapped ticket roles idempotently. `autoDeploy` is durable authorization only for an exact development or staging environment/trigger. Production, production-like, protected-production, unknown environments, auto-merge, and staging-to-production promotion remain human actions.
+
+</Decision>
+
+<Decision title="Rotate bounded housekeeping throughout one drain session" status="accepted">
+
+This decision supersedes the original external-tick-only housekeeping cadence. Contract schema advances to v2; append-only ticket state events remain v1 because reminder timing is clone-local operational state. Existing machine-local v1 contracts must be regenerated through `/drain-wizard` rather than guessed forward.
+
+Main keeps at most one asynchronous housekeeper and one asynchronous ticket delivery active. It waits for whichever sibling settles, preserving sequential tickets while allowing housekeeping rotation during long delivery. Each fresh bounded round scans drain-owned review tickets, synchronizes MR/PR and ticket roles, refreshes build/deployment status at configured cadence, then terminates at its round deadline. Main validates the result and rotates another fresh sibling while the drain remains active. Settle stops rotation, waits for the current round, runs one final scan-only round, processes all outcomes, and re-runs ticket selection once. MRs opened later in the same invocation therefore enter housekeeping without one immortal watcher or a separate daemon.
+
+Housekeeping configuration is per repository: `pollSeconds` defaults to 60, `roundWindowSeconds` to 900, and `maxTicketsPerRound` bounds load. Notifications remain optional. `notifications: null` means sync plus local audit only. When configured, wizard must resolve an installed notifier and destination without embedding credentials; `remindAfterSeconds` defaults to 7200 and `repeatEverySeconds` to 86400. Reminders cover only `merge-request-open` and `build-running`. Clone-local audit persists reference, first observation, last notification, and reminder count. First observation uses trustworthy provider state-entry time when available, otherwise local first-seen time; ticket generation + ref + observed state + due window forms an idempotency key. Ref/state changes reset the clock. Notification failure is audited but never changes ticket state or blocks reconciliation.
+
+Existing safety stays fixed: no auto-merge, no production deploy/promotion, exact-SHA deployment lookup before trigger, and failure classification before `needsHumanReview`. Reminder payload contains ticket/MR/build refs and bounded state only—no ticket/comment text, credentials, headers, or report contents.
+
+Telemetry reuses the existing drain trace and local audit. Add child spans for housekeeping round, MR/build refresh, and notifier call; record round lifecycle, reminder due/dedupe decision, notification result, duration, and trace id. No new daemon, collector, metric family, or high-cardinality metric label.
+
+### I/O examples
+
+```text
+Input:
+  notifications = null
+  MR #42 remains open for 3 hours
+
+Output:
+  ticket role remains review
+  audit records merge-request-open
+  notifications sent = 0
+```
+
+```text
+Input:
+  remindAfterSeconds = 7200
+  repeatEverySeconds = 86400
+  MR #42 first observed open at 10:00
+  bounded round observes it open at 12:05
+
+Output:
+  one reminder sent to configured destination
+  local audit stores firstObservedAt=10:00, lastNotifiedAt=12:05, reminderCount=1
+  next reminder is not due before 12:05 next day
+```
+
+```text
+Input:
+  build for exact merged SHA changes running → success
+  notifier call fails
+
+Output:
+  ticket transitions idempotently to done when completion gate is satisfied
+  notification failure stays in audit/report
+  reconciliation verdict remains PASS
+```
 
 </Decision>
 
@@ -461,7 +512,7 @@ This inventory mirrors the active `settings.packages` allowlist as of 2026-07-26
 | `npm:pi-diet-lsp` | `0.1.6` | Packaged from exact npm tarball with no npm closure; host Pi supplies TypeScript loading and peers; on-demand subprocess execution uses language servers from `PATH` or trusted user config |
 | `npm:@juicesharp/rpiv-todo` | `2.1.0` | Upgraded from `1.20.0`; packaged with locked `rpiv-config` and `typebox` runtime deps; host Pi supplies peers; optional i18n omitted with documented English fallback |
 | `npm:@mrclrchtr/supi-context` | `2.6.1` | Upgraded from `2.5.0`; packaged with exact `supi-core` and `typebox` runtime deps; agent-callable tool remains disabled by default |
-| `npm:@xynogen/pix-optimizer` | `1.1.19` | Packaged with only used `pix-pretty@1.7.24` source; Home Manager installs pinned `rtk@0.44.0`; `jq` and `toon` remain ambient `PATH` dependencies |
+| `npm:@xynogen/pix-optimizer` | `1.1.19` | Packaged with only used `pix-pretty@1.7.24` source; Home Manager installs pinned `rtk@0.44.0` and `toon@2.3.0`; `jq` remains an ambient `PATH` dependency |
 | `npm:@sting8k/pi-vcc` | `0.5.0` | Packaged from `v0.5.0` tag source without the 16 MiB demo; host Pi supplies peers |
 | `npm:@mrclrchtr/supi-extras` | `2.7.0` | Upgraded from `2.5.0`; bundled `supi-core` retained; `clipboardy` closure replaced by pinned `oscclip@0.4.1` OSC 52 backend |
 | `npm:pi-herdr-rename` | `0.1.0` | Replaces `@tifan/pi-rename@0.4.2`; exact npm tarball, zero npm closure, Herdr-gated tab rename tool, no persistent configuration |
@@ -557,7 +608,7 @@ Audit found upstream creates `/tmp/pi-bg` as `0755`, logs as `0644`, and agent p
 
 `@xynogen/pix-optimizer` is upgraded from `1.1.17` to `1.1.19`. Changes add Kitty-keyboard-compatible overlay controls, remove the obsolete `pix.json` state fallback, and deduplicate caveman/ponytail mode plumbing. Existing `~/.pi/agent/optimizer.json` state remains compatible. Typed Home Manager options under `programs.pi-coding-agent.plugins.pix-optimizer.settings` migrate the current `caveman = "ultra"`, `rtk = false`, `toon = true`, and `ponytail = "full"` state. Home Manager owns immutable `optimizer.json`, normalizing booleans to the extension's required `"on"`/`"off"` strings. Enabling pix-optimizer also installs pinned `rtk@0.44.0` on `PATH`, even when `settings.rtk = false`, so toggling optimization never leaves a missing binary. `/optimizer` cannot persist runtime changes; change module options and switch instead.
 
-The extension imports only `@xynogen/pix-pretty/modal-frame` and `@xynogen/pix-pretty/icon-catalog`, so the package includes `pix-pretty@1.7.24` source without its unrelated 53-package renderer/search closure; an offline package-manifest load check guards that boundary. `rtk`, `jq`, and `toon` remain documented ambient `PATH` dependencies and degrade safely when absent. Startup reads optimizer state and probes `rtk`; outside Home Manager activation, writes occur only after an explicit `/optimizer` change.
+The extension imports only `@xynogen/pix-pretty/modal-frame` and `@xynogen/pix-pretty/icon-catalog`, so the package includes `pix-pretty@1.7.24` source without its unrelated 53-package renderer/search closure; an offline package-manifest load check guards that boundary. Home Manager installs pinned `rtk@0.44.0` and `toon@2.3.0` whenever pix-optimizer is enabled because runtime toggles can enable either feature; `jq` remains an ambient `PATH` dependency. TOON is packaged from its prebuilt npm tarball plus only its three runtime dependencies. Startup reads optimizer state and probes `rtk`; outside Home Manager activation, writes occur only after an explicit `/optimizer` change.
 
 </Decision>
 

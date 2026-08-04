@@ -1,6 +1,6 @@
 {
   "$schema": "./contract.schema.json",
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "verticalProduct": "<vertical-product>",
   "botMarker": "🤖 Pi Drain: ",
   "repository": {
@@ -288,8 +288,11 @@
   },
   "housekeeping": {
     "enabled": true,
+    "mode": "continuous-bounded-rounds",
     "oldestFirst": true,
-    "maxTicketsPerRun": 100,
+    "pollSeconds": 60,
+    "roundWindowSeconds": 900,
+    "maxTicketsPerRound": 100,
     "autoDeployAllowedEnvironmentClasses": [
       "development",
       "staging"
@@ -300,7 +303,8 @@
       "unknown"
     ],
     "autoMerge": false,
-    "failureOutcome": "needsHumanReview"
+    "failureOutcome": "needsHumanReview",
+    "notifications": null
   },
   "telemetry": {
     "auditPath": ".pi/drain/audit.jsonl",
