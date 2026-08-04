@@ -227,6 +227,8 @@ let
   expectedPixToolsRoot = "${expectedPixTools}/lib/node_modules/pix-tools/node_modules/@xynogen";
   expectedPixToolNames = [
     "pretty"
+    "data"
+    "display"
     "read"
     "write"
     "edit"
@@ -1142,6 +1144,9 @@ in
           test -f ${expectedPixToolsRoot}/pix-$tool/src/$tool.ts
           grep -F "name: \"$tool\"" ${expectedPixToolsRoot}/pix-$tool/src/$tool.ts
         done
+        test -f ${expectedPixToolsRoot}/pix-data/src/index.ts
+        grep -F 'void modelgrep.get()' ${expectedPixToolsRoot}/pix-data/src/index.ts
+        test -f ${expectedPixToolsRoot}/pix-display/src/index.ts
         test -f ${expectedPixToolsRoot}/pix-footer/src/extension.ts
         grep -F 'ctx.ui.setFooter' ${expectedPixToolsRoot}/pix-footer/src/footer.ts
         cat > "$PI_CODING_AGENT_DIR/settings.json" <<'EOF'

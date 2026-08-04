@@ -85,6 +85,8 @@ let
   pixToolsRoot = "${pixTools}/lib/node_modules/pix-tools/node_modules/@xynogen";
   pixToolNames = [
     "pretty"
+    "data"
+    "display"
     "read"
     "write"
     "edit"
