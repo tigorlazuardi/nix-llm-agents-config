@@ -22,8 +22,18 @@
       ...
     }:
     let
-      system = "x86_64-linux";
-      pkgs = nixpkgs-unstable.legacyPackages.${system};
+      systems = [
+        "x86_64-linux"
+        "aarch64-darwin"
+      ];
+      forAllSystems =
+        f:
+        builtins.listToAttrs (
+          map (system: {
+            name = system;
+            value = f system;
+          }) systems
+        );
       piModule = import ./modules/pi-coding-agent.nix {
         inherit mattpocock-skills nixpkgs-unstable;
       };
@@ -31,15 +41,18 @@
     {
       homeManagerModules.default = piModule;
 
-      checks.${system} = import ./checks.nix {
-        inherit
-          home-manager
-          nixpkgs-unstable
-          piModule
-          pkgs
-          ;
-      };
+      checks = forAllSystems (
+        system:
+        import ./checks.nix {
+          inherit
+            home-manager
+            nixpkgs-unstable
+            piModule
+            ;
+          pkgs = nixpkgs-unstable.legacyPackages.${system};
+        }
+      );
 
-      formatter.${system} = pkgs.nixfmt;
+      formatter = forAllSystems (system: nixpkgs-unstable.legacyPackages.${system}.nixfmt);
     };
 }

@@ -169,42 +169,24 @@ let
     ---
     ${builtins.readFile ./config/agents/orchestrator.md}'';
 
-  expectedPackage = nixpkgs-unstable.legacyPackages.x86_64-linux.pi-coding-agent;
-  expectedDietLsp =
-    nixpkgs-unstable.legacyPackages.x86_64-linux.callPackage ./packages/pi-diet-lsp.nix
-      { };
+  expectedPackage = pkgs.pi-coding-agent;
+  expectedDietLsp = pkgs.callPackage ./packages/pi-diet-lsp.nix { };
   expectedDietLspPath = "${expectedDietLsp}";
-  expectedEffort =
-    nixpkgs-unstable.legacyPackages.x86_64-linux.callPackage ./packages/pi-effort.nix
-      { };
+  expectedEffort = pkgs.callPackage ./packages/pi-effort.nix { };
   expectedEffortPath = "${expectedEffort}/lib/node_modules/@nehlis/pi-effort";
-  expectedTimestamps =
-    nixpkgs-unstable.legacyPackages.x86_64-linux.callPackage ./packages/pi-timestamps.nix
-      { };
+  expectedTimestamps = pkgs.callPackage ./packages/pi-timestamps.nix { };
   expectedTimestampsPath = "${expectedTimestamps}/lib/node_modules/pi-timestamps";
-  expectedPiHerdr =
-    nixpkgs-unstable.legacyPackages.x86_64-linux.callPackage ./packages/pi-herdr.nix
-      { };
+  expectedPiHerdr = pkgs.callPackage ./packages/pi-herdr.nix { };
   expectedPiHerdrPath = "${expectedPiHerdr}/lib/node_modules/@ogulcancelik/pi-herdr";
-  expectedHerdrSudoTask =
-    nixpkgs-unstable.legacyPackages.x86_64-linux.callPackage ./packages/pi-herdr-sudo-task.nix
-      { };
+  expectedHerdrSudoTask = pkgs.callPackage ./packages/pi-herdr-sudo-task.nix { };
   expectedHerdrSudoTaskPath = "${expectedHerdrSudoTask}/lib/node_modules/pi-herdr-sudo-task";
-  expectedAskHerdr =
-    nixpkgs-unstable.legacyPackages.x86_64-linux.callPackage ./packages/pi-ask-herdr.nix
-      { };
+  expectedAskHerdr = pkgs.callPackage ./packages/pi-ask-herdr.nix { };
   expectedAskHerdrPath = "${expectedAskHerdr}/lib/node_modules/pi-ask-herdr";
-  expectedHerdrRename =
-    nixpkgs-unstable.legacyPackages.x86_64-linux.callPackage ./packages/pi-herdr-rename.nix
-      { };
+  expectedHerdrRename = pkgs.callPackage ./packages/pi-herdr-rename.nix { };
   expectedHerdrRenamePath = "${expectedHerdrRename}/lib/node_modules/pi-herdr-rename";
-  expectedPattyBgTasks =
-    nixpkgs-unstable.legacyPackages.x86_64-linux.callPackage ./packages/pi-patty-bg-tasks.nix
-      { };
+  expectedPattyBgTasks = pkgs.callPackage ./packages/pi-patty-bg-tasks.nix { };
   expectedPattyBgTasksPath = "${expectedPattyBgTasks}/lib/node_modules/pi-patty-bg-tasks";
-  expectedIntercom =
-    nixpkgs-unstable.legacyPackages.x86_64-linux.callPackage ./packages/pi-intercom.nix
-      { };
+  expectedIntercom = pkgs.callPackage ./packages/pi-intercom.nix { };
   expectedIntercomPath = "${expectedIntercom}/lib/node_modules/pi-intercom";
   expectedIntercomConfig = (pkgs.formats.json { }).generate "pi-intercom-config.json" {
     brokerCommand = "${expectedIntercomPath}/node_modules/.bin/tsx";
@@ -213,29 +195,24 @@ let
     enabled = true;
     replyHint = true;
   };
-  expectedVimMode =
-    nixpkgs-unstable.legacyPackages.x86_64-linux.callPackage ./packages/pi-vimmode.nix
-      { };
+  expectedVimMode = pkgs.callPackage ./packages/pi-vimmode.nix { };
   expectedVimModePath = "${expectedVimMode}/lib/node_modules/pi-vimmode";
-  expectedUsage =
-    nixpkgs-unstable.legacyPackages.x86_64-linux.callPackage ./packages/pi-usage.nix
-      { };
+  expectedUsage = pkgs.callPackage ./packages/pi-usage.nix { };
   expectedUsagePath = "${expectedUsage}/lib/node_modules/@narumitw/pi-usage";
-  expectedMcpAdapter =
-    nixpkgs-unstable.legacyPackages.x86_64-linux.callPackage ./packages/pi-mcp-adapter.nix
-      { };
+  expectedMcpAdapter = pkgs.callPackage ./packages/pi-mcp-adapter.nix { };
   expectedMcpAdapterPath = "${expectedMcpAdapter}/lib/node_modules/pi-mcp-adapter";
-  expectedPlaywright =
-    nixpkgs-unstable.legacyPackages.x86_64-linux.callPackage ./packages/pi-playwright.nix
-      { };
+  expectedBrowserExecutable =
+    if pkgs.stdenv.hostPlatform.isDarwin then
+      "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+    else
+      "${pkgs.chromium}/bin/chromium";
+  expectedPlaywright = pkgs.callPackage ./packages/pi-playwright.nix {
+    browserExecutable = expectedBrowserExecutable;
+  };
   expectedPlaywrightPath = "${expectedPlaywright}/lib/node_modules/pi-playwright";
-  expectedPixOptimizer =
-    nixpkgs-unstable.legacyPackages.x86_64-linux.callPackage ./packages/pix-optimizer.nix
-      { };
+  expectedPixOptimizer = pkgs.callPackage ./packages/pix-optimizer.nix { };
   expectedPixOptimizerPath = "${expectedPixOptimizer}/lib/node_modules/@xynogen/pix-optimizer";
-  expectedPixTools =
-    nixpkgs-unstable.legacyPackages.x86_64-linux.callPackage ./packages/pix-tools.nix
-      { };
+  expectedPixTools = pkgs.callPackage ./packages/pix-tools.nix { };
   expectedPixToolsRoot = "${expectedPixTools}/lib/node_modules/pix-tools/node_modules/@xynogen";
   expectedPixToolNames = [
     "pretty"
@@ -251,39 +228,25 @@ let
   ];
   expectedPixToolPaths = map (name: "${expectedPixToolsRoot}/pix-${name}") expectedPixToolNames;
   expectedPixPrettyPath = "${expectedPixToolsRoot}/pix-pretty";
-  expectedPiVcc = nixpkgs-unstable.legacyPackages.x86_64-linux.callPackage ./packages/pi-vcc.nix { };
+  expectedPiVcc = pkgs.callPackage ./packages/pi-vcc.nix { };
   expectedPiVccPath = "${expectedPiVcc}";
-  expectedPromptTemplateModel =
-    nixpkgs-unstable.legacyPackages.x86_64-linux.callPackage ./packages/pi-prompt-template-model.nix
-      { };
+  expectedPromptTemplateModel = pkgs.callPackage ./packages/pi-prompt-template-model.nix { };
   expectedPromptTemplateModelPath = "${expectedPromptTemplateModel}/lib/node_modules/pi-prompt-template-model";
-  expectedRpivTodo =
-    nixpkgs-unstable.legacyPackages.x86_64-linux.callPackage ./packages/rpiv-todo.nix
-      { };
+  expectedRpivTodo = pkgs.callPackage ./packages/rpiv-todo.nix { };
   expectedRpivTodoPath = "${expectedRpivTodo}/lib/node_modules/@juicesharp/rpiv-todo";
-  expectedRules =
-    nixpkgs-unstable.legacyPackages.x86_64-linux.callPackage ./packages/pi-rules.nix
-      { };
+  expectedRules = pkgs.callPackage ./packages/pi-rules.nix { };
   expectedRulesPath = "${expectedRules}/lib/node_modules/@tigorhutasuhut/pi-rules";
-  expectedWebAccess =
-    nixpkgs-unstable.legacyPackages.x86_64-linux.callPackage ./packages/pi-web-access.nix
-      { };
+  expectedWebAccess = pkgs.callPackage ./packages/pi-web-access.nix { };
   expectedWebAccessPath = "${expectedWebAccess}/lib/node_modules/pi-web-access";
-  expectedSubagents =
-    nixpkgs-unstable.legacyPackages.x86_64-linux.callPackage ./packages/pi-subagents.nix
-      { };
+  expectedSubagents = pkgs.callPackage ./packages/pi-subagents.nix { };
   expectedSubagentsPath = "${expectedSubagents}/lib/node_modules/pi-subagents";
-  expectedSupiContext =
-    nixpkgs-unstable.legacyPackages.x86_64-linux.callPackage ./packages/supi-context.nix
-      { };
+  expectedSupiContext = pkgs.callPackage ./packages/supi-context.nix { };
   expectedSupiContextPath = "${expectedSupiContext}/lib/node_modules/@mrclrchtr/supi-context";
-  expectedSupiExtras =
-    nixpkgs-unstable.legacyPackages.x86_64-linux.callPackage ./packages/supi-extras.nix
-      { };
+  expectedSupiExtras = pkgs.callPackage ./packages/supi-extras.nix { };
   expectedSupiExtrasPath = "${expectedSupiExtras}/lib/node_modules/@mrclrchtr/supi-extras";
-  expectedOscclip = nixpkgs-unstable.legacyPackages.x86_64-linux.oscclip;
-  expectedRtk = nixpkgs-unstable.legacyPackages.x86_64-linux.rtk;
-  expectedToon = nixpkgs-unstable.legacyPackages.x86_64-linux.callPackage ./packages/toon.nix { };
+  expectedOscclip = pkgs.oscclip;
+  expectedRtk = pkgs.rtk;
+  expectedToon = pkgs.callPackage ./packages/toon.nix { };
   expectedWritingGreatSkills = default.config.programs.pi-coding-agent.skills.writing-great-skills;
   expectedModels = builtins.fromJSON (builtins.readFile ./config/models.json);
   secretWrappedMcpConfig =
