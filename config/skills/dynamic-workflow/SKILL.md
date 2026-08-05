@@ -35,12 +35,11 @@ Dynamic-workflow is **breadth-of-SAFE-work**, not depth, not risk. Use it only w
   schema / public-API / money-payment / data-deletion / irreversible work.
 
 If either fails → this is the WRONG flow:
-- Low-tolerance present → route to **fleet or goal** (never dynamic-workflow).
-- Heavy inter-dependency between parts → route to **fleet**.
-- Single deep sequential slice → **goal**.
+- Low-tolerance present → route to **supervise** (never dynamic-workflow).
+- Heavy inter-dependency between parts → route to **supervise**.
+- Single deep sequential slice → **direct or supervise**.
 
-This safety-first split is the AGENTS.md "Dynamic-workflow vs Fleet disambiguation" rule. Confirm it before you
-scaffold.
+Confirm this safety-first split before scaffolding.
 
 ## Preconditions
 
@@ -50,7 +49,7 @@ scaffold.
    and every worker prompt bakes their conventions; the script never authors the spec. No spec → stop
    and route back to FASE-1 planning.
 3. **Safety gate passed** — you have confirmed the scope is free of any low-tolerance surface. If a
-   low-tolerance concern exists, REJECT dynamic-workflow here and offer goal/fleet.
+   low-tolerance concern exists, REJECT dynamic-workflow here and offer supervise.
 4. Keyword auto-trigger is OFF (`~/.pi/workflows/settings.json` → `keywordTriggerEnabled: false`).
    Dynamic-workflow runs only via explicit `/workflows run`.
 
@@ -128,7 +127,7 @@ low-tolerance, the script must STOP that branch and surface it, not upgrade in p
 ### 4. Escape hatch on low-tolerance discovery
 Worker prompts instruct: if a target touches a low-tolerance surface (auth / secrets / migration /
 schema / money / data-deletion), STOP that branch, return a flagged result, and do NOT modify it. The
-main agent raises those flags to the user after the run — they get re-routed to goal/fleet, never
+main agent raises those flags to the user after the run — they get re-routed to supervise, never
 auto-handled inside dynamic-workflow.
 
 ### 5. Isolation for parallel edits

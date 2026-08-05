@@ -1,6 +1,6 @@
 ---
 name: astro-docs-authoring
-description: How to author plan/design/spec docs in the Astro + Starlight MDX dialect. Trigger when writing ANY plan/design/spec doc — SPEC.mdx, docs design docs (docs/src/content/docs/design/<yyyy-mm-dd>-<topic>.mdx), ADRs, slice docs (SCOPE/IMPLEMENTATION/TASKS/RESUME) — or when a planning skill (feature planning, fleet, workflow sweep, or grill-me output) writes its artifacts. Covers the MDX dialect (Aside, Tabs, Decision), the frontmatter schema with draft exclusion, code blocks, mermaid, and tables. Replaces the retired plandeck-authoring skill. For scaffolding the docs site itself, use astro-docs-setup.
+description: How to author plan/design/spec docs in the Astro + Starlight MDX dialect. Trigger when writing ANY plan/design/spec doc — SPEC.mdx, docs design docs (docs/src/content/docs/design/<yyyy-mm-dd>-<topic>.mdx), ADRs, slice docs (SCOPE/IMPLEMENTATION/TASKS/RESUME) — or when a planning skill (feature planning, workflow sweep, or grill-me output) writes its artifacts. Covers the MDX dialect (Aside, Tabs, Decision), the frontmatter schema with draft exclusion, code blocks, mermaid, and tables. Replaces the retired plandeck-authoring skill. For scaffolding the docs site itself, use astro-docs-setup.
 ---
 
 # Authoring docs — Astro/Starlight MDX dialect

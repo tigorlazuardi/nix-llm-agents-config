@@ -1,15 +1,4 @@
 {
-  fleet-draw = {
-    description = "Render fleet status HTML; Luna leaf";
-    prompt = ../../config/agents/fleet-draw.md;
-    model = "gpt-5.6-terra";
-    effort = "medium";
-    tools.allow = [
-      "read"
-      "bash"
-      "write"
-    ];
-  };
   frontier-implementer = {
     description = "Sol implementation for low-tolerance code";
     prompt = ../../config/agents/frontier-implementer.md;
@@ -51,20 +40,8 @@
       "find"
     ];
   };
-  judge = {
-    description = "Sol post-orchestration terminal gate";
-    prompt = ../../config/agents/judge.md;
-    model = "gpt-5.6-sol";
-    effort = "high";
-    tools.allow = [
-      "read"
-      "grep"
-      "find"
-      "write"
-    ];
-  };
   orchestrator = {
-    description = "Deterministic black-box one-shot and fleet state machine";
+    description = "Deterministic black-box one-shot state machine";
     prompt = ../../config/agents/orchestrator.md;
     model = "gpt-5.6-terra";
     effort = "medium";

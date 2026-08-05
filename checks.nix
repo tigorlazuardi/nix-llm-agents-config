@@ -157,7 +157,7 @@ let
   expectedOrchestrator = ''
     ---
     name: orchestrator
-    description: Deterministic black-box one-shot and fleet state machine
+    description: Deterministic black-box one-shot state machine
     tools: read, bash, subagent
     model: gpt-5.6-terra
     thinking: medium
@@ -417,7 +417,7 @@ in
     assert builtins.pathExists (
       default.config.programs.pi-coding-agent.skills.writing-great-skills + "/SKILL.md"
     );
-    assert builtins.length (builtins.attrNames default.config.programs.pi-coding-agent.skills) == 50;
+    assert builtins.length (builtins.attrNames default.config.programs.pi-coding-agent.skills) == 47;
     assert !(default.config.programs.pi-coding-agent.skills ? tuxedo-todo);
     assert !(default.config.programs.pi-coding-agent.skills ? design-an-interface);
     assert !(default.config.programs.pi-coding-agent.skills ? request-refactor-plan);
@@ -429,7 +429,7 @@ in
       default.config.home.file."${default.config.programs.pi-coding-agent.configDir}/skills".source.entries.agents-load
       == ./config/skills/agents-load;
     assert default.config.home.file."${default.config.programs.pi-coding-agent.configDir}/skills".force;
-    assert builtins.length (builtins.attrNames default.config.programs.pi-coding-agent.agents) == 10;
+    assert builtins.length (builtins.attrNames default.config.programs.pi-coding-agent.agents) == 8;
     assert
       default.config.home.file."${default.config.programs.pi-coding-agent.configDir}/agents/orchestrator.md".text
       == expectedOrchestrator;
@@ -458,11 +458,6 @@ in
       == ./config/prompts;
     assert
       default.config.home.file."${default.config.programs.pi-coding-agent.configDir}/prompts".force;
-    assert
-      default.config.home.file."${default.config.programs.pi-coding-agent.configDir}/templates/fleet".source
-      == ./config/templates/fleet;
-    assert
-      default.config.home.file."${default.config.programs.pi-coding-agent.configDir}/templates/fleet".force;
     assert
       default.config.home.file."${default.config.programs.pi-coding-agent.configDir}/templates/drain".source
       == ./config/templates/drain;
@@ -515,10 +510,6 @@ in
       );
     assert
       !(disabled.config.home.file ? "${disabled.config.programs.pi-coding-agent.configDir}/prompts");
-    assert
-      !(
-        disabled.config.home.file ? "${disabled.config.programs.pi-coding-agent.configDir}/templates/fleet"
-      );
     assert
       !(
         disabled.config.home.file ? "${disabled.config.programs.pi-coding-agent.configDir}/templates/drain"
@@ -1282,7 +1273,7 @@ in
       }
       ''
         set -- ${./config/prompts}/*.md
-        test "$#" -eq 12
+        test "$#" -eq 10
         ! grep -RE '^(model|thinking|chain|loop|subagent|deterministic):' ${./config/prompts}
         test "$(grep -RE '^skill: writing-great-skills$' ${./config/prompts} | wc -l)" -eq 1
         test ! -e ${./config/prompts}/setup-drain-agents.md
@@ -1330,10 +1321,6 @@ in
           --list-models > pi.log 2>&1
         ! grep -E 'Extension issues|Failed to load extension|Cannot find module|Error:' pi.log
 
-        mkdir -p run/dags/d1
-        cp ${./config/templates/fleet/fleet.template.json} run/fleet.json
-        cp ${./config/templates/fleet/state.template.json} run/dags/d1/state.json
-        node ${./config/templates/fleet/validate.mjs} run
         touch $out
       '';
 }

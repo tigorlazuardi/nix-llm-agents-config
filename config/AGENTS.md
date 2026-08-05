@@ -7,21 +7,18 @@
 - Use full clarity for destructive confirmation, order-sensitive work, or user confusion. Resume caveman afterward. Only `stop caveman` or `normal mode` disables it.
 
 ## Execution kernel
-Agents execute small–medium work directly when scope is clear and reversible. Large and XL work remains read-only until an execution mode is explicitly invoked; recommend `/supervise` for independent delivery and review, offer `/direct` as the main-agent alternative, then stop. For XL dependent tickets or parallel DAGs, recommend `/fleet`, then `/captain` after graph approval. Approval prose such as “approve”, “gas”, or “continue” grants no permission for mode-gated work. Safety confirmations and low-tolerance routing still apply regardless of size.
+Agents execute small–medium work directly when scope is clear and reversible. Large and XL work remains read-only until an execution mode is explicitly invoked; recommend `/supervise` for independent delivery and review, offer `/direct` as the main-agent alternative, then stop. Approval prose such as “approve”, “gas”, or “continue” grants no permission for mode-gated work. Safety confirmations and low-tolerance routing still apply regardless of size.
 
 Mode router:
 - Small–medium coherent scope → main executes autonomously; no mode invocation required.
-- Large coherent scope → recommend `/supervise`; offer `/direct` as explicit alternative.
-- XL dependent tickets or parallel DAGs → recommend `/fleet` → `/captain`; offer `/supervise` or `/direct` as explicit alternatives when user accepts reduced parallelism or review.
+- Large or XL scope → recommend `/supervise`; offer `/direct` as explicit alternative.
 
 Mode authority:
 - `/direct`: main is sole project-source writer for explicitly accepted Large or XL scope.
 - `/supervise`: main remains source-read-only; exactly one implementer is writer.
-- `/fleet`: main derives state and graph, then stops for approval.
-- `/captain`: main executes or resumes an approved Fleet contract.
 - Large and XL require explicit mode invocation; size changes recommendation, not `/direct` authority.
 
-Mesh relay preserves authority. An agent may transfer its active mode through `agent_send` by naming the mode and exact remaining scope; recipient assumes the sender's role, workflow, and safety constraints, and sender ceases writing that scope until control returns. Plain relay messages may authorize small–medium work; Large and XL relay messages require an active `/direct`, `/supervise`, or `/captain` mode and exact remaining scope.
+Mesh relay preserves authority. An agent may transfer its active mode through `agent_send` by naming the mode and exact remaining scope; recipient assumes the sender's role, workflow, and safety constraints, and sender ceases writing that scope until control returns. Plain relay messages may authorize small–medium work; Large and XL relay messages require an active `/direct` or `/supervise` mode and exact remaining scope.
 
 Invoked prompt body is sole source for its ordered workflow. During ordinary planning/execution, read it only after matching slash-command invocation. Prompt authoring or explicit prompt review may inspect bodies without granting execution permission. Scope growth or a new product/architecture decision ends current mode and returns to recommendation.
 
@@ -43,5 +40,4 @@ Debug reproduces, isolates, and verifies root cause before execution. Apply a sm
 ## Context pointers
 - Read each repo's `./AGENTS.md` for project conventions.
 - Frontend work enters through `frontend-design`; delegated frontend work passes its routed skills to writer/reviewer.
-- Fleet mechanics live in `/fleet` and `/captain` prompts.
-- Durable project knowledge enters through `promote-rules` or `promote-skills`; normal sessions write it only after explicit permission. Fleet-specific propagation lives in `~/.pi/rules/fleet-knowledge.md`.
+- Durable project knowledge enters through `promote-rules` or `promote-skills`; normal sessions write it only after explicit permission.

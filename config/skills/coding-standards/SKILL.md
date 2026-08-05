@@ -1,6 +1,6 @@
 ---
 name: coding-standards
-description: Author a CODING_STANDARDS.md for a repo that doesn't have one — derive it from existing code patterns, stack, and specs/ADRs rather than inventing rules. Use when the user says "author coding standards", "define coding standard", "bikin CODING_STANDARDS", "write CODING_STANDARDS.md", "establish code conventions", "document our conventions", or when a fleet-plan / preflight check reports standards are missing before parallel implementer fan-out (fleet-revamp preflight step 1 — N implementers with no shared standard each invent their own style). Also triggers on "standards preflight".
+description: Author a CODING_STANDARDS.md for a repo that doesn't have one — derive it from existing code patterns, stack, and specs/ADRs rather than inventing rules. Use when the user says "author coding standards", "define coding standard", "bikin CODING_STANDARDS", "write CODING_STANDARDS.md", "establish code conventions", "document our conventions", or when a preflight check reports standards are missing before parallel implementer fan-out. Also triggers on "standards preflight".
 ---
 
 A repo about to fan out N implementer agents in parallel needs one documented
@@ -80,9 +80,7 @@ rules a linter can't check anyway.
 
 **Permission gate:** in a normal interactive session, propose the `.pi/rules/`
 file and get explicit user approval before writing it — same as
-`promote-rules`. Only skip the ask when this skill is invoked as part of an
-automated fleet preflight (no user in the loop to ask), where writing
-`.pi/rules/` directly is expected.
+`promote-rules`.
 
 ## 5. Close with the pathfinder note
 
