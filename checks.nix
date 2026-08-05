@@ -317,7 +317,6 @@ in
           expectedPlaywrightPath
           expectedPixOptimizerPath
         ]
-        ++ expectedPixToolPaths
         ++ [
           expectedPiVccPath
           expectedPromptTemplateModelPath
@@ -327,7 +326,8 @@ in
           expectedSubagentsPath
           expectedSupiContextPath
           expectedSupiExtrasPath
-        ];
+        ]
+        ++ expectedPixToolPaths;
       };
     assert builtins.elem expectedOscclip default.config.home.packages;
     assert builtins.elem expectedRtk default.config.home.packages;
@@ -573,7 +573,6 @@ in
         expectedPlaywrightPath
         expectedPixOptimizerPath
       ]
-      ++ expectedPixToolPaths
       ++ [
         expectedPiVccPath
         expectedPromptTemplateModelPath
@@ -583,7 +582,8 @@ in
         expectedSubagentsPath
         expectedSupiContextPath
         expectedSupiExtrasPath
-      ];
+      ]
+      ++ expectedPixToolPaths;
     assert
       settingsOverridden.config.programs.pi-coding-agent.keybindings == {
         "app.tools.expand" = "ctrl+e";

@@ -182,7 +182,6 @@ let
       default = true;
     }
   ]
-  ++ pixToolPackages
   ++ [
     {
       name = "pi-vcc";
@@ -224,7 +223,8 @@ let
       package = "${supiExtras}/lib/node_modules/@mrclrchtr/supi-extras";
       default = true;
     }
-  ];
+  ]
+  ++ pixToolPackages;
   pluginDefaults = builtins.listToAttrs (
     map (plugin: {
       inherit (plugin) name;
