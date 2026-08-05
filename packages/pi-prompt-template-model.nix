@@ -5,13 +5,13 @@
 }:
 buildNpmPackage {
   pname = "pi-prompt-template-model";
-  version = "0.10.0";
+  version = "unstable-2026-08-05";
 
   src = fetchFromGitHub {
     owner = "nicobailon";
     repo = "pi-prompt-template-model";
-    rev = "ab60d66af05c4a2196111dc7a2c468b1566481e1";
-    hash = "sha256-+TDe46xLCDq2M7H9b4BTNK3ErWLR4pjDteyz+NsCBDo=";
+    rev = "d4ed02cd65f4a53be436ad1768612b625b3dd605";
+    hash = "sha256-7lyl4FCIZ7fklMTsdgWfw40ZAKAAPlLaadO22Nnb26Q=";
   };
 
   npmDepsHash = "sha256-5ung+ZzNQrA5jwZ7Hv58SGoZK14+Mq25Eli7VD9iIAo=";
