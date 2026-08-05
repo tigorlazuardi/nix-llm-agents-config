@@ -21,6 +21,18 @@ let
     };
 
   default = evaluate { };
+  darwin = home-manager.lib.homeManagerConfiguration {
+    pkgs = nixpkgs-unstable.legacyPackages.aarch64-darwin;
+    modules = [
+      piModule
+      {
+        home.stateVersion = "26.05";
+        home.username = "test";
+        home.homeDirectory = "/Users/test";
+      }
+    ];
+  };
+  darwinEvaluation = builtins.tryEval darwin.config.home.activationPackage.drvPath;
   disabled = evaluate { programs.pi-coding-agent.enable = false; };
   overridePackage = pkgs.writeShellScriptBin "pi" "exit 0";
   overridden = evaluate { programs.pi-coding-agent.package = overridePackage; };
@@ -310,6 +322,10 @@ in
 
   module-evaluation =
     assert default.config.programs.pi-coding-agent.enable;
+    assert darwinEvaluation.success;
+    assert
+      darwin.config.programs.pi-coding-agent.plugins.pi-playwright.executablePath
+      == "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
     assert !disabled.config.programs.pi-coding-agent.enable;
     assert default.config.programs.pi-coding-agent.package == expectedPackage;
     assert

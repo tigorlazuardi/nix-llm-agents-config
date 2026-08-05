@@ -78,7 +78,9 @@ let
   vimMode = pinnedPkgs.callPackage ../packages/pi-vimmode.nix { };
   usage = pinnedPkgs.callPackage ../packages/pi-usage.nix { };
   mcpAdapter = pinnedPkgs.callPackage ../packages/pi-mcp-adapter.nix { };
-  playwright = pinnedPkgs.callPackage ../packages/pi-playwright.nix { };
+  playwright = pinnedPkgs.callPackage ../packages/pi-playwright.nix {
+    browserExecutable = cfg.plugins.pi-playwright.executablePath;
+  };
   pixOptimizer = pinnedPkgs.callPackage ../packages/pix-optimizer.nix { };
   toon = pinnedPkgs.callPackage ../packages/toon.nix { };
   pixTools = pinnedPkgs.callPackage ../packages/pix-tools.nix { };
@@ -325,6 +327,17 @@ in
             default = { };
             description = "pi-mcp-adapter settings written beside integrated user-level MCP servers.";
           };
+        };
+
+        pi-playwright.executablePath = lib.mkOption {
+          type = lib.types.str;
+          # ponytail: use conventional macOS Chrome path; override this option for another browser location.
+          default =
+            if pinnedPkgs.stdenv.hostPlatform.isDarwin then
+              "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+            else
+              "${pinnedPkgs.chromium}/bin/chromium";
+          description = "Chromium-compatible browser executable used by Playwright.";
         };
 
         pi-web-access = {
