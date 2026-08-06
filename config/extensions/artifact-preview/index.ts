@@ -20,6 +20,14 @@ export default function (pi: ExtensionAPI) {
       configuredPort(),
     ).then((host) => runtime = host).finally(() => starting = undefined);
   };
+  const stopRuntime = async () => {
+    if (!runtime && !starting) return false;
+    const host = runtime ?? await starting;
+    runtime = undefined;
+    starting = undefined;
+    await host?.close();
+    return true;
+  };
 
   pi.registerTool({
     name: "host_artifact",
@@ -43,12 +51,23 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
+  pi.registerTool({
+    name: "stop_artifact_host",
+    label: "Stop Artifact Host",
+    description: "Stop HTTP server and invalidate every artifact preview URL from this session. A later host_artifact call starts a new server.",
+    parameters: Type.Object({}),
+    async execute(_id, _params, _signal, _update, ctx) {
+      const stopped = await stopRuntime();
+      ctx.ui.setStatus("artifact-preview", undefined);
+      return {
+        content: [{ type: "text", text: stopped ? "Artifact host stopped." : "Artifact host is not running." }],
+        details: { stopped },
+      };
+    },
+  });
+
   pi.on("session_shutdown", async (_event, ctx) => {
     ctx.ui.setStatus("artifact-preview", undefined);
-    if (!runtime && !starting) return;
-    const host = runtime ?? await starting;
-    runtime = undefined;
-    starting = undefined;
-    await host?.close();
+    await stopRuntime();
   });
 }
