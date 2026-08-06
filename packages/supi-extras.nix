@@ -41,7 +41,7 @@ stdenvNoCC.mkDerivation {
     EOF
     substituteInPlace package.json \
       --replace-fail '    "clipboardy": "^5.3.1",' ""
-    # ponytail: retain SuPi utilities while pi-starship owns sole footer; remove when upstream adds a footer toggle.
+    # ponytail: retain SuPi utilities while pix-footer owns sole footer; remove when upstream adds a footer toggle.
     substituteInPlace src/index.ts \
       --replace-fail 'import supiFooter from "./supi-footer.ts";' "" \
       --replace-fail '  supiFooter(pi);' ""

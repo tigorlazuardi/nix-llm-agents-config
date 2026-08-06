@@ -127,7 +127,7 @@ ATTRIBUTES: scanned=<n>; pending=<n>; deployed=<n>; mr_opened=<n>; done=<n>; hum
 
 ### note-taker
 
-Reads accumulated report pointers after one ticket terminates. Writes worklog: ticket, ledger generation, attempts, verdicts, evidence refs, remaining work, durable rule/skill candidates. Inject `writing-great-skills` privately. Promotion tools may run only after current explicit human approval.
+Reads accumulated report pointers after one ticket terminates. Writes worklog: ticket, ledger generation, attempts, verdicts, evidence refs, remaining work, durable rule/skill candidates. Inject `writing-for-agents` privately. Promotion tools may run only after current explicit human approval.
 
 ```text
 VERDICT: PASS|NEEDS_HUMAN_REVIEW

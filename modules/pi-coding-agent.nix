@@ -43,14 +43,18 @@ let
     to-tickets = mattpocock-skills + "/skills/engineering/to-tickets";
     triage = mattpocock-skills + "/skills/engineering/triage";
     wayfinder = mattpocock-skills + "/skills/engineering/wayfinder";
+    wizard = mattpocock-skills + "/skills/engineering/wizard";
     grill-me = mattpocock-skills + "/skills/productivity/grill-me";
     grilling = mattpocock-skills + "/skills/productivity/grilling";
     handoff = mattpocock-skills + "/skills/productivity/handoff";
     teach = mattpocock-skills + "/skills/productivity/teach";
-    writing-great-skills = mattpocock-skills + "/skills/productivity/writing-great-skills";
+    to-questionnaire = mattpocock-skills + "/skills/productivity/to-questionnaire";
+    wait-what = mattpocock-skills + "/skills/productivity/wait-what";
+    writing-for-agents = mattpocock-skills + "/skills/productivity/writing-for-agents";
   };
   patchedMattSkills = mattSkills // {
-    grilling = appendMattSkillInstruction "grilling" mattSkills.grilling grillingStopInstruction;
+    # ponytail: v1.2 grilling uses frontier rounds; keep local stop patch disabled.
+    # grilling = appendMattSkillInstruction "grilling" mattSkills.grilling grillingStopInstruction;
   };
   defaultModels = builtins.fromJSON (builtins.readFile ../config/models.json);
   mcpPlugin = cfg.plugins.pi-mcp-adapter;
@@ -77,7 +81,6 @@ let
   intercom = pinnedPkgs.callPackage ../packages/pi-intercom.nix { };
   vimMode = pinnedPkgs.callPackage ../packages/pi-vimmode.nix { };
   usage = pinnedPkgs.callPackage ../packages/pi-usage.nix { };
-  starship = pinnedPkgs.callPackage ../packages/pi-starship.nix { };
   mcpAdapter = pinnedPkgs.callPackage ../packages/pi-mcp-adapter.nix { };
   playwright = pinnedPkgs.callPackage ../packages/pi-playwright.nix {
     browserExecutable = cfg.plugins.pi-playwright.executablePath;
@@ -95,8 +98,7 @@ let
     "edit"
     "ls"
     "find"
-    # ponytail: pi-starship owns footer; uncomment to compare Pix again.
-    # "footer"
+    "footer"
     "grep"
   ];
   pixToolPackages = map (name: {
@@ -223,11 +225,6 @@ let
     {
       name = "supi-extras";
       package = "${supiExtras}/lib/node_modules/@mrclrchtr/supi-extras";
-      default = true;
-    }
-    {
-      name = "pi-starship";
-      package = "${starship}/lib/node_modules/@narumitw/pi-starship";
       default = true;
     }
   ]
@@ -484,9 +481,6 @@ in
       };
       "${cfg.configDir}/mcp.json" = lib.mkIf (mcpPlugin.enable && renderedMcpConfig != { }) {
         source = jsonFormat.generate "pi-mcp-adapter.json" renderedMcpConfig;
-      };
-      "${cfg.configDir}/pi-starship.toml" = lib.mkIf cfg.plugins.pi-starship.enable {
-        source = ../config/pi-starship.toml;
       };
       # ponytail: immutable config disables /optimizer persistence; change module options and switch.
       "${cfg.configDir}/optimizer.json" = lib.mkIf optimizerPlugin.enable {

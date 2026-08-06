@@ -199,8 +199,6 @@ let
   expectedVimModePath = "${expectedVimMode}/lib/node_modules/pi-vimmode";
   expectedUsage = pkgs.callPackage ./packages/pi-usage.nix { };
   expectedUsagePath = "${expectedUsage}/lib/node_modules/@narumitw/pi-usage";
-  expectedStarship = pkgs.callPackage ./packages/pi-starship.nix { };
-  expectedStarshipPath = "${expectedStarship}/lib/node_modules/@narumitw/pi-starship";
   expectedMcpAdapter = pkgs.callPackage ./packages/pi-mcp-adapter.nix { };
   expectedMcpAdapterPath = "${expectedMcpAdapter}/lib/node_modules/pi-mcp-adapter";
   expectedBrowserExecutable =
@@ -225,6 +223,7 @@ let
     "edit"
     "ls"
     "find"
+    "footer"
     "grep"
   ];
   expectedPixToolPaths = map (name: "${expectedPixToolsRoot}/pix-${name}") expectedPixToolNames;
@@ -248,7 +247,7 @@ let
   expectedOscclip = pkgs.oscclip;
   expectedRtk = pkgs.rtk;
   expectedToon = pkgs.callPackage ./packages/toon.nix { };
-  expectedWritingGreatSkills = default.config.programs.pi-coding-agent.skills.writing-great-skills;
+  expectedWritingForAgents = default.config.programs.pi-coding-agent.skills.writing-for-agents;
   expectedModels = builtins.fromJSON (builtins.readFile ./config/models.json);
   secretWrappedMcpConfig =
     secretWrappedMcp.config.home.file."${secretWrappedMcp.config.programs.pi-coding-agent.configDir}/mcp.json".source;
@@ -271,7 +270,6 @@ in
   pi-intercom = expectedIntercom;
   pi-vimmode = expectedVimMode;
   pi-usage = expectedUsage;
-  pi-starship = expectedStarship;
   mcp-adapter = expectedMcpAdapter;
   playwright = expectedPlaywright;
   pix-optimizer = expectedPixOptimizer;
@@ -328,7 +326,6 @@ in
           expectedSubagentsPath
           expectedSupiContextPath
           expectedSupiExtrasPath
-          expectedStarshipPath
         ]
         ++ expectedPixToolPaths;
       };
@@ -354,7 +351,6 @@ in
     assert default.config.programs.pi-coding-agent.plugins.pi-mcp-adapter.enableMcpIntegration;
     assert default.config.programs.pi-coding-agent.plugins.pi-vcc.enable;
     assert default.config.programs.pi-coding-agent.plugins.pix-optimizer.enable;
-    assert default.config.programs.pi-coding-agent.plugins.pi-starship.enable;
     assert builtins.all (
       name: default.config.programs.pi-coding-agent.plugins."pix-${name}".enable
     ) expectedPixToolNames;
@@ -418,11 +414,13 @@ in
     assert
       default.config.home.file."${default.config.programs.pi-coding-agent.configDir}/AGENTS.md".source
       == ./config/AGENTS.md;
-    assert
-      default.config.home.file."${default.config.programs.pi-coding-agent.configDir}/pi-starship.toml".source
-      == ./config/pi-starship.toml;
     assert builtins.pathExists (
-      default.config.programs.pi-coding-agent.skills.writing-great-skills + "/SKILL.md"
+      default.config.programs.pi-coding-agent.skills.writing-for-agents + "/SKILL.md"
+    );
+    assert builtins.pathExists (default.config.programs.pi-coding-agent.skills.wait-what + "/SKILL.md");
+    assert builtins.pathExists (default.config.programs.pi-coding-agent.skills.wizard + "/SKILL.md");
+    assert builtins.pathExists (
+      default.config.programs.pi-coding-agent.skills.to-questionnaire + "/SKILL.md"
     );
     # ponytail: assert required/excluded skills only; upstream additions must not block input updates.
     assert !(default.config.programs.pi-coding-agent.skills ? tuxedo-todo);
@@ -430,8 +428,8 @@ in
     assert !(default.config.programs.pi-coding-agent.skills ? request-refactor-plan);
     assert !(default.config.programs.pi-coding-agent.skills ? edit-article);
     assert
-      default.config.home.file."${default.config.programs.pi-coding-agent.configDir}/skills".source.entries.writing-great-skills
-      == default.config.programs.pi-coding-agent.skills.writing-great-skills;
+      default.config.home.file."${default.config.programs.pi-coding-agent.configDir}/skills".source.entries.writing-for-agents
+      == default.config.programs.pi-coding-agent.skills.writing-for-agents;
     assert
       default.config.home.file."${default.config.programs.pi-coding-agent.configDir}/skills".source.entries.agents-load
       == ./config/skills/agents-load;
@@ -589,7 +587,6 @@ in
         expectedSubagentsPath
         expectedSupiContextPath
         expectedSupiExtrasPath
-        expectedStarshipPath
       ]
       ++ expectedPixToolPaths;
     assert
@@ -639,7 +636,7 @@ in
         ];
       }
       ''
-        nixfmt --check ${./flake.nix} ${./checks.nix} ${./modules/pi-coding-agent.nix} ${./modules/pi-coding-agent/agents.nix} ${./modules/pi-coding-agent/default-agents.nix} ${./modules/pi-coding-agent/pi-subagents.nix} ${./packages/pi-diet-lsp.nix} ${./packages/pi-effort.nix} ${./packages/pi-timestamps.nix} ${./packages/pi-herdr.nix} ${./packages/pi-herdr-sudo-task.nix} ${./packages/pi-ask-herdr.nix} ${./packages/pi-herdr-rename.nix} ${./packages/pi-patty-bg-tasks.nix} ${./packages/pi-intercom.nix} ${./packages/pi-vimmode.nix} ${./packages/pi-usage.nix} ${./packages/pi-starship.nix} ${./packages/pi-mcp-adapter.nix} ${./packages/pi-playwright.nix} ${./packages/pix-optimizer.nix} ${./packages/pix-tools.nix} ${./packages/pi-vcc.nix} ${./packages/pi-prompt-template-model.nix} ${./packages/rpiv-todo.nix} ${./packages/pi-rules.nix} ${./packages/pi-web-access.nix} ${./packages/pi-subagents.nix} ${./packages/supi-context.nix} ${./packages/supi-extras.nix} ${./packages/toon.nix}
+        nixfmt --check ${./flake.nix} ${./checks.nix} ${./modules/pi-coding-agent.nix} ${./modules/pi-coding-agent/agents.nix} ${./modules/pi-coding-agent/default-agents.nix} ${./modules/pi-coding-agent/pi-subagents.nix} ${./packages/pi-diet-lsp.nix} ${./packages/pi-effort.nix} ${./packages/pi-timestamps.nix} ${./packages/pi-herdr.nix} ${./packages/pi-herdr-sudo-task.nix} ${./packages/pi-ask-herdr.nix} ${./packages/pi-herdr-rename.nix} ${./packages/pi-patty-bg-tasks.nix} ${./packages/pi-intercom.nix} ${./packages/pi-vimmode.nix} ${./packages/pi-usage.nix} ${./packages/pi-mcp-adapter.nix} ${./packages/pi-playwright.nix} ${./packages/pix-optimizer.nix} ${./packages/pix-tools.nix} ${./packages/pi-vcc.nix} ${./packages/pi-prompt-template-model.nix} ${./packages/rpiv-todo.nix} ${./packages/pi-rules.nix} ${./packages/pi-web-access.nix} ${./packages/pi-subagents.nix} ${./packages/supi-context.nix} ${./packages/supi-extras.nix} ${./packages/toon.nix}
         WORKFLOW=${./.github/workflows/daily-update.yml} UPDATER=${./scripts/daily-update.sh} REGISTRY=${./pi-plugins.json} CHECKS=${./checks.nix} bash ${./tests/daily-updater-self-check.sh}
         touch $out
       '';
@@ -805,25 +802,6 @@ in
         grep -aF 'registerCommand(`vimmode`' ${expectedVimModePath}/index.js
         pi --offline --no-extensions --no-skills --no-prompt-templates --no-context-files \
           -e ${expectedVimModePath} \
-          --list-models > pi.log 2>&1
-        ! grep -E 'Extension issues|Failed to load extension|Cannot find module|Error:' pi.log
-        touch $out
-      '';
-
-  pi-starship-load =
-    pkgs.runCommandLocal "pi-starship-load" { nativeBuildInputs = [ expectedPackage ]; }
-      ''
-        export HOME="$TMPDIR/home"
-        export PI_CODING_AGENT_DIR="$HOME/.pi/agent"
-        export PI_TELEMETRY=0
-        mkdir -p "$PI_CODING_AGENT_DIR"
-        cp ${./config/pi-starship.toml} "$PI_CODING_AGENT_DIR/pi-starship.toml"
-        test -f ${expectedStarshipPath}/src/index.ts
-        test -d ${expectedStarshipPath}/node_modules/@narumitw/pi-tui-kit
-        test -d ${expectedStarshipPath}/node_modules/smol-toml
-        test -d ${expectedStarshipPath}/node_modules/yaml
-        pi --offline --no-extensions --no-skills --no-prompt-templates --no-context-files \
-          -e ${expectedStarshipPath} \
           --list-models > pi.log 2>&1
         ! grep -E 'Extension issues|Failed to load extension|Cannot find module|Error:' pi.log
         touch $out
@@ -1304,7 +1282,7 @@ in
         set -- ${./config/prompts}/*.md
         test "$#" -eq 10
         ! grep -RE '^(model|thinking|chain|loop|subagent|deterministic):' ${./config/prompts}
-        test "$(grep -RE '^skill: writing-great-skills$' ${./config/prompts} | wc -l)" -eq 1
+        test "$(grep -RE '^skill: writing-for-agents$' ${./config/prompts} | wc -l)" -eq 1
         test ! -e ${./config/prompts}/setup-drain-agents.md
         grep -F 'do not load `~/.pi/agent/templates/drain/AGENTS.md` unless' \
           ${./config/prompts}/drain-wizard.md
@@ -1316,8 +1294,8 @@ in
           ${./config/skills}/telemetry-planning/SKILL.md
         grep -F '**Daemon or long-running app:** consider OpenTelemetry.' \
           ${./config/skills}/telemetry-planning/SKILL.md
-        test "$(grep -F 'Stop asking questions when we reach a shared understanding and big decision was already made, because relatively smaller decisions would automatically derive.' \
-          ${default.config.programs.pi-coding-agent.skills.grilling}/SKILL.md | wc -l)" -eq 1
+        ! grep -F 'Stop asking questions when we reach a shared understanding and big decision was already made, because relatively smaller decisions would automatically derive.' \
+          ${default.config.programs.pi-coding-agent.skills.grilling}/SKILL.md
 
         check-jsonschema --check-metaschema \
           ${./config/templates/drain/contract.schema.json} \
@@ -1345,7 +1323,7 @@ in
         mkdir -p "$HOME"
         pi --offline --no-extensions --no-skills --no-prompt-templates --no-context-files \
           -e ${expectedPromptTemplateModelPath} \
-          --skill ${expectedWritingGreatSkills} \
+          --skill ${expectedWritingForAgents} \
           --prompt-template ${./config/prompts} \
           --list-models > pi.log 2>&1
         ! grep -E 'Extension issues|Failed to load extension|Cannot find module|Error:' pi.log

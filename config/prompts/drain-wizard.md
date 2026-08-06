@@ -1,7 +1,7 @@
 ---
 description: Configure or edit one machine-local ticket drain
 argument-hint: "[existing contract or setup hints]"
-skill: writing-great-skills
+skill: writing-for-agents
 ---
 Drain wizard request: $@
 
