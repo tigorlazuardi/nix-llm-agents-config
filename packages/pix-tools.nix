@@ -38,7 +38,7 @@ buildNpmPackage {
     substituteInPlace "$out/lib/node_modules/pix-tools/node_modules/@xynogen/pix-footer/src/footer.ts" \
       --replace-fail \
         'const line = `''${modePart}''${loc}''${markersPart}''${ctxPart}''${sep}''${model}''${otherPart}''${tokensPart}''${tpsPart}`;' \
-        'const lines = [`''${modePart}''${loc}''${markersPart}''${ctxPart}`, `''${model}''${otherPart}''${tokensPart}''${tpsPart}`];' \
+        'const lines = [`''${modePart}''${loc}''${markersPart}''${ctxPart}''${sep}''${model}`, `''${otherPart}''${tokensPart}''${tpsPart}`.slice(sep.length)];' \
       --replace-fail \
         'return [truncateToWidth(line, width)];' \
         'return lines.map((line) => truncateToWidth(line, width));'
