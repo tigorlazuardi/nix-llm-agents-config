@@ -92,7 +92,6 @@ let
   pixToolNames = [
     "pretty"
     "data"
-    "display"
     "read"
     "write"
     "edit"
@@ -246,6 +245,11 @@ let
     theme = "dark";
     hideThinkingBlock = false;
     showCacheMissNotices = false;
+    compaction = {
+      enabled = true;
+      reserveTokens = 40000;
+      keepRecentTokens = 20000;
+    };
     subagents.disableBuiltins = true;
   };
   defaultKeybindings = {

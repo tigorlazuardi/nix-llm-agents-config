@@ -217,7 +217,6 @@ let
   expectedPixToolNames = [
     "pretty"
     "data"
-    "display"
     "read"
     "write"
     "edit"
@@ -300,6 +299,11 @@ in
         theme = "dark";
         hideThinkingBlock = false;
         showCacheMissNotices = false;
+        compaction = {
+          enabled = true;
+          reserveTokens = 40000;
+          keepRecentTokens = 20000;
+        };
         subagents.disableBuiltins = true;
         packages = [
           expectedDietLspPath
@@ -1121,7 +1125,7 @@ in
         done
         test -f ${expectedPixToolsRoot}/pix-data/src/index.ts
         grep -F 'void modelgrep.get()' ${expectedPixToolsRoot}/pix-data/src/index.ts
-        test -f ${expectedPixToolsRoot}/pix-display/src/index.ts
+        test ! -e ${expectedPixToolsRoot}/pix-display
         test -f ${expectedPixToolsRoot}/pix-footer/src/extension.ts
         grep -F 'ctx.ui.setFooter' ${expectedPixToolsRoot}/pix-footer/src/footer.ts
         grep -F 'return lines.map((line) => truncateToWidth(line, width));' ${expectedPixToolsRoot}/pix-footer/src/footer.ts

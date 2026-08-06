@@ -16,7 +16,6 @@ buildNpmPackage {
       "private": true,
       "dependencies": {
         "@xynogen/pix-data": "0.4.1",
-        "@xynogen/pix-display": "0.1.14",
         "@xynogen/pix-footer": "0.1.20",
         "@xynogen/pix-pretty": "1.8.1",
         "@xynogen/pix-read": "0.1.20",
@@ -45,7 +44,7 @@ buildNpmPackage {
         'return lines.map((line) => truncateToWidth(line, width));'
   '';
 
-  npmDepsHash = "sha256-UMIYMDwQ7dzeWao8Vj4DbCki0fj+ZOiRuHUP0lntZdk=";
+  npmDepsHash = "sha256-Frc+oO8xFXjFIIke5i4i1bAhNQ66HX4oHUxPfOhvcls=";
   npmInstallFlags = [
     "--omit=dev"
     "--legacy-peer-deps"
