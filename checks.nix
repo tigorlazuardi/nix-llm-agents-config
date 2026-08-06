@@ -1124,6 +1124,7 @@ in
         test -f ${expectedPixToolsRoot}/pix-display/src/index.ts
         test -f ${expectedPixToolsRoot}/pix-footer/src/extension.ts
         grep -F 'ctx.ui.setFooter' ${expectedPixToolsRoot}/pix-footer/src/footer.ts
+        grep -F 'return lines.map((line) => truncateToWidth(line, width));' ${expectedPixToolsRoot}/pix-footer/src/footer.ts
         cat > "$PI_CODING_AGENT_DIR/settings.json" <<'EOF'
         {"packages":${builtins.toJSON expectedPixToolPaths}}
         EOF

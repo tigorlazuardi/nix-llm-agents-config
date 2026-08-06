@@ -34,6 +34,17 @@ buildNpmPackage {
     cp ${./pix-tools-package-lock.json} package-lock.json
   '';
 
+  postInstall = ''
+    # ponytail: pix-footer 0.1.20 has no layout config; drop patch when upstream supports two-line layout.
+    substituteInPlace "$out/lib/node_modules/pix-tools/node_modules/@xynogen/pix-footer/src/footer.ts" \
+      --replace-fail \
+        'const line = `''${modePart}''${loc}''${markersPart}''${ctxPart}''${sep}''${model}''${otherPart}''${tokensPart}''${tpsPart}`;' \
+        'const lines = [`''${modePart}''${loc}''${markersPart}''${ctxPart}`, `''${model}''${otherPart}''${tokensPart}''${tpsPart}`];' \
+      --replace-fail \
+        'return [truncateToWidth(line, width)];' \
+        'return lines.map((line) => truncateToWidth(line, width));'
+  '';
+
   npmDepsHash = "sha256-UMIYMDwQ7dzeWao8Vj4DbCki0fj+ZOiRuHUP0lntZdk=";
   npmInstallFlags = [
     "--omit=dev"
