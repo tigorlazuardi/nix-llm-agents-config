@@ -77,6 +77,7 @@ let
   intercom = pinnedPkgs.callPackage ../packages/pi-intercom.nix { };
   vimMode = pinnedPkgs.callPackage ../packages/pi-vimmode.nix { };
   usage = pinnedPkgs.callPackage ../packages/pi-usage.nix { };
+  starship = pinnedPkgs.callPackage ../packages/pi-starship.nix { };
   mcpAdapter = pinnedPkgs.callPackage ../packages/pi-mcp-adapter.nix { };
   playwright = pinnedPkgs.callPackage ../packages/pi-playwright.nix {
     browserExecutable = cfg.plugins.pi-playwright.executablePath;
@@ -94,7 +95,8 @@ let
     "edit"
     "ls"
     "find"
-    "footer"
+    # ponytail: pi-starship owns footer; uncomment to compare Pix again.
+    # "footer"
     "grep"
   ];
   pixToolPackages = map (name: {
@@ -221,6 +223,11 @@ let
     {
       name = "supi-extras";
       package = "${supiExtras}/lib/node_modules/@mrclrchtr/supi-extras";
+      default = true;
+    }
+    {
+      name = "pi-starship";
+      package = "${starship}/lib/node_modules/@narumitw/pi-starship";
       default = true;
     }
   ]

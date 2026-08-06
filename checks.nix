@@ -199,6 +199,8 @@ let
   expectedVimModePath = "${expectedVimMode}/lib/node_modules/pi-vimmode";
   expectedUsage = pkgs.callPackage ./packages/pi-usage.nix { };
   expectedUsagePath = "${expectedUsage}/lib/node_modules/@narumitw/pi-usage";
+  expectedStarship = pkgs.callPackage ./packages/pi-starship.nix { };
+  expectedStarshipPath = "${expectedStarship}/lib/node_modules/@narumitw/pi-starship";
   expectedMcpAdapter = pkgs.callPackage ./packages/pi-mcp-adapter.nix { };
   expectedMcpAdapterPath = "${expectedMcpAdapter}/lib/node_modules/pi-mcp-adapter";
   expectedBrowserExecutable =
@@ -223,7 +225,6 @@ let
     "edit"
     "ls"
     "find"
-    "footer"
     "grep"
   ];
   expectedPixToolPaths = map (name: "${expectedPixToolsRoot}/pix-${name}") expectedPixToolNames;
@@ -270,6 +271,7 @@ in
   pi-intercom = expectedIntercom;
   pi-vimmode = expectedVimMode;
   pi-usage = expectedUsage;
+  pi-starship = expectedStarship;
   mcp-adapter = expectedMcpAdapter;
   playwright = expectedPlaywright;
   pix-optimizer = expectedPixOptimizer;
@@ -326,6 +328,7 @@ in
           expectedSubagentsPath
           expectedSupiContextPath
           expectedSupiExtrasPath
+          expectedStarshipPath
         ]
         ++ expectedPixToolPaths;
       };
@@ -351,6 +354,7 @@ in
     assert default.config.programs.pi-coding-agent.plugins.pi-mcp-adapter.enableMcpIntegration;
     assert default.config.programs.pi-coding-agent.plugins.pi-vcc.enable;
     assert default.config.programs.pi-coding-agent.plugins.pix-optimizer.enable;
+    assert default.config.programs.pi-coding-agent.plugins.pi-starship.enable;
     assert builtins.all (
       name: default.config.programs.pi-coding-agent.plugins."pix-${name}".enable
     ) expectedPixToolNames;
@@ -582,6 +586,7 @@ in
         expectedSubagentsPath
         expectedSupiContextPath
         expectedSupiExtrasPath
+        expectedStarshipPath
       ]
       ++ expectedPixToolPaths;
     assert
@@ -632,7 +637,7 @@ in
       }
       ''
         WORKFLOW=${./.github/workflows/daily-update.yml} UPDATER=${./scripts/daily-update.sh} REGISTRY=${./pi-plugins.json} bash ${./tests/daily-updater-self-check.sh}
-        nixfmt --check ${./flake.nix} ${./checks.nix} ${./modules/pi-coding-agent.nix} ${./modules/pi-coding-agent/agents.nix} ${./modules/pi-coding-agent/default-agents.nix} ${./modules/pi-coding-agent/pi-subagents.nix} ${./packages/pi-diet-lsp.nix} ${./packages/pi-effort.nix} ${./packages/pi-timestamps.nix} ${./packages/pi-herdr.nix} ${./packages/pi-herdr-sudo-task.nix} ${./packages/pi-ask-herdr.nix} ${./packages/pi-herdr-rename.nix} ${./packages/pi-patty-bg-tasks.nix} ${./packages/pi-intercom.nix} ${./packages/pi-vimmode.nix} ${./packages/pi-usage.nix} ${./packages/pi-mcp-adapter.nix} ${./packages/pi-playwright.nix} ${./packages/pix-optimizer.nix} ${./packages/pix-tools.nix} ${./packages/pi-vcc.nix} ${./packages/pi-prompt-template-model.nix} ${./packages/rpiv-todo.nix} ${./packages/pi-rules.nix} ${./packages/pi-web-access.nix} ${./packages/pi-subagents.nix} ${./packages/supi-context.nix} ${./packages/supi-extras.nix} ${./packages/toon.nix}
+        nixfmt --check ${./flake.nix} ${./checks.nix} ${./modules/pi-coding-agent.nix} ${./modules/pi-coding-agent/agents.nix} ${./modules/pi-coding-agent/default-agents.nix} ${./modules/pi-coding-agent/pi-subagents.nix} ${./packages/pi-diet-lsp.nix} ${./packages/pi-effort.nix} ${./packages/pi-timestamps.nix} ${./packages/pi-herdr.nix} ${./packages/pi-herdr-sudo-task.nix} ${./packages/pi-ask-herdr.nix} ${./packages/pi-herdr-rename.nix} ${./packages/pi-patty-bg-tasks.nix} ${./packages/pi-intercom.nix} ${./packages/pi-vimmode.nix} ${./packages/pi-usage.nix} ${./packages/pi-starship.nix} ${./packages/pi-mcp-adapter.nix} ${./packages/pi-playwright.nix} ${./packages/pix-optimizer.nix} ${./packages/pix-tools.nix} ${./packages/pi-vcc.nix} ${./packages/pi-prompt-template-model.nix} ${./packages/rpiv-todo.nix} ${./packages/pi-rules.nix} ${./packages/pi-web-access.nix} ${./packages/pi-subagents.nix} ${./packages/supi-context.nix} ${./packages/supi-extras.nix} ${./packages/toon.nix}
         touch $out
       '';
 
@@ -797,6 +802,24 @@ in
         grep -aF 'registerCommand(`vimmode`' ${expectedVimModePath}/index.js
         pi --offline --no-extensions --no-skills --no-prompt-templates --no-context-files \
           -e ${expectedVimModePath} \
+          --list-models > pi.log 2>&1
+        ! grep -E 'Extension issues|Failed to load extension|Cannot find module|Error:' pi.log
+        touch $out
+      '';
+
+  pi-starship-load =
+    pkgs.runCommandLocal "pi-starship-load" { nativeBuildInputs = [ expectedPackage ]; }
+      ''
+        export HOME="$TMPDIR/home"
+        export PI_CODING_AGENT_DIR="$HOME/.pi/agent"
+        export PI_TELEMETRY=0
+        mkdir -p "$PI_CODING_AGENT_DIR"
+        test -f ${expectedStarshipPath}/src/index.ts
+        test -d ${expectedStarshipPath}/node_modules/@narumitw/pi-tui-kit
+        test -d ${expectedStarshipPath}/node_modules/smol-toml
+        test -d ${expectedStarshipPath}/node_modules/yaml
+        pi --offline --no-extensions --no-skills --no-prompt-templates --no-context-files \
+          -e ${expectedStarshipPath} \
           --list-models > pi.log 2>&1
         ! grep -E 'Extension issues|Failed to load extension|Cannot find module|Error:' pi.log
         touch $out
@@ -1253,6 +1276,8 @@ in
         test -d ${expectedSupiExtrasPath}/node_modules/@mrclrchtr/supi-core
         test ! -e ${expectedSupiExtrasPath}/node_modules/clipboardy
         grep -F 'spawn("osc-copy"' ${expectedSupiExtrasPath}/src/clipboard.ts
+        ! grep -F 'import supiFooter' ${expectedSupiExtrasPath}/src/index.ts
+        ! grep -F 'supiFooter(pi)' ${expectedSupiExtrasPath}/src/index.ts
         command -v osc-copy
         pi --offline --no-extensions --no-skills --no-prompt-templates --no-context-files \
           -e ${expectedSupiExtrasPath} \

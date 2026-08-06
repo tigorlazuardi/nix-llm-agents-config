@@ -1,4 +1,15 @@
 {
+  "pi-starship": {
+    "strategy": "npm",
+    "package": "@narumitw/pi-starship",
+    "version": "0.49.4",
+    "src": "https://registry.npmjs.org/@narumitw/pi-starship/-/pi-starship-0.49.4.tgz",
+    "hash": "sha256-HG0SidW5YQUqYQbUFTaWN20TavVOdifoOb6KGpbT5oU=",
+    "npmDepsHash": "sha256-4ejCCLX25yGN6ZUmweCkq1UNoePLpBHmF6SAIuDVET8=",
+    "packageFile": "packages/pi-starship.nix",
+    "lockFile": "packages/pi-starship-package-lock.json",
+    "check": "pi-starship"
+  },
   "pi-rules": {
     "strategy": "npm",
     "package": "@tigorhutasuhut/pi-rules",
