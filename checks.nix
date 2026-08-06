@@ -409,6 +409,14 @@ in
     assert default.config.programs.mcp.enable;
     assert !(default.config.programs.mcp.servers ? open-design);
     assert
+      default.config.programs.pi-coding-agent.extensions.artifact-preview
+      == ./config/extensions/artifact-preview;
+    assert
+      default.config.home.file."${default.config.programs.pi-coding-agent.configDir}/extensions/artifact-preview".source
+      == ./config/extensions/artifact-preview;
+    assert
+      default.config.home.file."${default.config.programs.pi-coding-agent.configDir}/extensions/artifact-preview".force;
+    assert
       default.config.programs.pi-coding-agent.extensions.dev-journal == ./config/extensions/dev-journal;
     assert
       default.config.home.file."${default.config.programs.pi-coding-agent.configDir}/extensions/dev-journal".source
@@ -515,6 +523,11 @@ in
     assert
       !(
         disabled.config.home.file
+        ? "${disabled.config.programs.pi-coding-agent.configDir}/extensions/artifact-preview"
+      );
+    assert
+      !(
+        disabled.config.home.file
         ? "${disabled.config.programs.pi-coding-agent.configDir}/extensions/dev-journal"
       );
     assert
@@ -599,6 +612,28 @@ in
         "tui.editor.cursorLeft" = "left";
       };
     pkgs.runCommandLocal "pi-home-manager-module-evaluation" { } "touch $out";
+
+  artifact-preview =
+    pkgs.runCommandLocal "pi-artifact-preview"
+      {
+        nativeBuildInputs = [
+          expectedPackage
+          pkgs.nodejs_22
+        ];
+      }
+      ''
+        export HOME="$TMPDIR/home"
+        export PI_CODING_AGENT_DIR="$HOME/.pi/agent"
+        export PI_TELEMETRY=0
+        mkdir -p "$PI_CODING_AGENT_DIR"
+        test ! -e ${./config/extensions/artifact-preview}/node_modules
+        node --experimental-strip-types ${./config/extensions/artifact-preview}/artifact-preview.self-check.ts
+        pi --offline --no-extensions --no-skills --no-prompt-templates --no-context-files \
+          -e ${./config/extensions/artifact-preview}/index.ts \
+          --list-models > pi.log 2>&1
+        ! grep -E 'Extension issues|Failed to load extension|Cannot find module|Error:' pi.log
+        touch $out
+      '';
 
   dev-journal =
     pkgs.runCommandLocal "pi-dev-journal"
