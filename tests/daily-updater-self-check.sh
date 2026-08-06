@@ -4,6 +4,7 @@ set -euo pipefail
 workflow=${WORKFLOW:-.github/workflows/daily-update.yml}
 updater=${UPDATER:-scripts/daily-update.sh}
 registry=${REGISTRY:-pi-plugins.json}
+checks=${CHECKS:-checks.nix}
 
 test -x "$updater"
 grep -F 'cron: "0 3 * * *"' "$workflow"
@@ -17,6 +18,7 @@ grep -F 'chore(pi-plugins): update $alias to $version' "$updater"
 grep -F 'git rebase origin/main' "$updater"
 grep -F 'git push origin HEAD:main' "$updater"
 grep -F 'nix flake check' "$updater"
+! grep -F 'builtins.length (builtins.attrNames default.config.programs.pi-coding-agent.skills)' "$checks"
 grep -F 'git commit -m '\''chore(deps): update nixpkgs and home-manager'\'' || return 1' "$updater"
 grep -F 'push_inputs_checked || return 1' "$updater"
 grep -F 'tar -xzf "$source_store" --strip-components=1 -C "$source_dir"' "$updater"

@@ -424,7 +424,7 @@ in
     assert builtins.pathExists (
       default.config.programs.pi-coding-agent.skills.writing-great-skills + "/SKILL.md"
     );
-    assert builtins.length (builtins.attrNames default.config.programs.pi-coding-agent.skills) == 47;
+    # ponytail: assert required/excluded skills only; upstream additions must not block input updates.
     assert !(default.config.programs.pi-coding-agent.skills ? tuxedo-todo);
     assert !(default.config.programs.pi-coding-agent.skills ? design-an-interface);
     assert !(default.config.programs.pi-coding-agent.skills ? request-refactor-plan);
@@ -639,8 +639,8 @@ in
         ];
       }
       ''
-        WORKFLOW=${./.github/workflows/daily-update.yml} UPDATER=${./scripts/daily-update.sh} REGISTRY=${./pi-plugins.json} bash ${./tests/daily-updater-self-check.sh}
         nixfmt --check ${./flake.nix} ${./checks.nix} ${./modules/pi-coding-agent.nix} ${./modules/pi-coding-agent/agents.nix} ${./modules/pi-coding-agent/default-agents.nix} ${./modules/pi-coding-agent/pi-subagents.nix} ${./packages/pi-diet-lsp.nix} ${./packages/pi-effort.nix} ${./packages/pi-timestamps.nix} ${./packages/pi-herdr.nix} ${./packages/pi-herdr-sudo-task.nix} ${./packages/pi-ask-herdr.nix} ${./packages/pi-herdr-rename.nix} ${./packages/pi-patty-bg-tasks.nix} ${./packages/pi-intercom.nix} ${./packages/pi-vimmode.nix} ${./packages/pi-usage.nix} ${./packages/pi-starship.nix} ${./packages/pi-mcp-adapter.nix} ${./packages/pi-playwright.nix} ${./packages/pix-optimizer.nix} ${./packages/pix-tools.nix} ${./packages/pi-vcc.nix} ${./packages/pi-prompt-template-model.nix} ${./packages/rpiv-todo.nix} ${./packages/pi-rules.nix} ${./packages/pi-web-access.nix} ${./packages/pi-subagents.nix} ${./packages/supi-context.nix} ${./packages/supi-extras.nix} ${./packages/toon.nix}
+        WORKFLOW=${./.github/workflows/daily-update.yml} UPDATER=${./scripts/daily-update.sh} REGISTRY=${./pi-plugins.json} CHECKS=${./checks.nix} bash ${./tests/daily-updater-self-check.sh}
         touch $out
       '';
 
