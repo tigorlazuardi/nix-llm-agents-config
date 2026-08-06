@@ -485,6 +485,9 @@ in
       "${cfg.configDir}/mcp.json" = lib.mkIf (mcpPlugin.enable && renderedMcpConfig != { }) {
         source = jsonFormat.generate "pi-mcp-adapter.json" renderedMcpConfig;
       };
+      "${cfg.configDir}/pi-starship.toml" = lib.mkIf cfg.plugins.pi-starship.enable {
+        source = ../config/pi-starship.toml;
+      };
       # ponytail: immutable config disables /optimizer persistence; change module options and switch.
       "${cfg.configDir}/optimizer.json" = lib.mkIf optimizerPlugin.enable {
         source = optimizerStateFile;

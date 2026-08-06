@@ -418,6 +418,9 @@ in
     assert
       default.config.home.file."${default.config.programs.pi-coding-agent.configDir}/AGENTS.md".source
       == ./config/AGENTS.md;
+    assert
+      default.config.home.file."${default.config.programs.pi-coding-agent.configDir}/pi-starship.toml".source
+      == ./config/pi-starship.toml;
     assert builtins.pathExists (
       default.config.programs.pi-coding-agent.skills.writing-great-skills + "/SKILL.md"
     );
@@ -814,6 +817,7 @@ in
         export PI_CODING_AGENT_DIR="$HOME/.pi/agent"
         export PI_TELEMETRY=0
         mkdir -p "$PI_CODING_AGENT_DIR"
+        cp ${./config/pi-starship.toml} "$PI_CODING_AGENT_DIR/pi-starship.toml"
         test -f ${expectedStarshipPath}/src/index.ts
         test -d ${expectedStarshipPath}/node_modules/@narumitw/pi-tui-kit
         test -d ${expectedStarshipPath}/node_modules/smol-toml

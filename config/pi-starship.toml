@@ -1,0 +1,12 @@
+format = """
+$brand\
+$model\
+$thinking\
+$directory\
+$git_branch\
+$git_status\
+$context\
+$time"""
+
+[context]
+format = "[$symbol ctx $tokens/$window ]($style)"
