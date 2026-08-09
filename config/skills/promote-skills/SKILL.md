@@ -23,6 +23,8 @@ Auto-memory and `~/.pi/agent/skills/` are **machine-local**. A **project-level s
 
 ## Workflow
 
+Load `writing-for-agents` before drafting or editing any skill.
+
 1. **Identify the concept.** State the durable knowledge in 1–2 sentences. Confirm with the user if fuzzy.
 
 2. **Confirm it is skill-shaped.** Abstract / intent-triggered / no clean path scope? If it is actually path-scopable → suggest `/promote-rules`, stop.

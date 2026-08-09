@@ -5,7 +5,7 @@ description: Promote an approved, concrete convention into narrowly path-scoped 
 
 # Promote rules
 
-1. Confirm guidance is concrete and path-scopable. If it is intent-triggered or cross-cutting, use `promote-skills` instead.
+1. Confirm guidance is concrete and path-scopable. If it is intent-triggered or cross-cutting, use `promote-skills` instead; load `writing-for-agents` before writing the skill.
 2. Read only relevant existing rules. Reuse one when scope and topic match.
 3. Choose narrowest repository-relative `paths` glob covering target files. Different scopes → separate rule files.
 4. Draft few direct, actionable lines. Show full draft and path; write only after explicit approval.
