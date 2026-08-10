@@ -40,11 +40,8 @@ buildNpmPackage {
         'import { truncateToWidth } from "@earendil-works/pi-tui";' \
         'import { wrapTextWithAnsi } from "@earendil-works/pi-tui";' \
       --replace-fail \
-        'const line = `''${modePart}''${loc}''${markersPart}''${ctxPart}''${sep}''${model}''${otherPart}''${tokensPart}''${tpsPart}`;' \
-        'const lines = [`''${modePart}''${loc}''${markersPart}''${ctxPart}''${sep}''${model}`, `''${otherPart}''${tokensPart}''${tpsPart}`.slice(sep.length)];' \
-      --replace-fail \
         'return [truncateToWidth(line, width)];' \
-        'return lines.flatMap((line) => wrapTextWithAnsi(line, width));'
+        'return wrapTextWithAnsi(line, width);'
   '';
 
   npmDepsHash = "sha256-Frc+oO8xFXjFIIke5i4i1bAhNQ66HX4oHUxPfOhvcls=";
