@@ -38,9 +38,9 @@
     "owner": "nicobailon",
     "repo": "pi-prompt-template-model",
     "track": "main",
-    "version": "unstable-2026-08-05",
-    "rev": "d4ed02cd65f4a53be436ad1768612b625b3dd605",
-    "hash": "sha256-7lyl4FCIZ7fklMTsdgWfw40ZAKAAPlLaadO22Nnb26Q=",
+    "version": "unstable-2026-08-10",
+    "rev": "2f495d79084a941fa2a6e47cd923499745863a49",
+    "hash": "sha256-FCHZV6uAogF8N/oPdFSsd4itTHGliYjL3YWoq3ef1o0=",
     "packageFile": "packages/pi-prompt-template-model.nix",
     "check": "prompt-template-model"
   },

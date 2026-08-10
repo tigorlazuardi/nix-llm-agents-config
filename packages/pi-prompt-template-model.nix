@@ -5,13 +5,13 @@
 }:
 buildNpmPackage {
   pname = "pi-prompt-template-model";
-  version = "unstable-2026-08-05";
+  version = "unstable-2026-08-10";
 
   src = fetchFromGitHub {
     owner = "nicobailon";
     repo = "pi-prompt-template-model";
-    rev = "d4ed02cd65f4a53be436ad1768612b625b3dd605";
-    hash = "sha256-7lyl4FCIZ7fklMTsdgWfw40ZAKAAPlLaadO22Nnb26Q=";
+    rev = "2f495d79084a941fa2a6e47cd923499745863a49";
+    hash = "sha256-FCHZV6uAogF8N/oPdFSsd4itTHGliYjL3YWoq3ef1o0=";
   };
 
   # ponytail: this upstream commit omits its lock; drop unused dev deps and remove the
