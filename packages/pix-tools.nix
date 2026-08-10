@@ -34,14 +34,17 @@ buildNpmPackage {
   '';
 
   postInstall = ''
-    # ponytail: pix-footer 0.1.20 has no layout config; drop patch when upstream supports two-line layout.
+    # ponytail: pix-footer 0.1.20 lacks responsive layout; drop patch when upstream wraps footer content.
     substituteInPlace "$out/lib/node_modules/pix-tools/node_modules/@xynogen/pix-footer/src/footer.ts" \
+      --replace-fail \
+        'import { truncateToWidth } from "@earendil-works/pi-tui";' \
+        'import { wrapTextWithAnsi } from "@earendil-works/pi-tui";' \
       --replace-fail \
         'const line = `''${modePart}''${loc}''${markersPart}''${ctxPart}''${sep}''${model}''${otherPart}''${tokensPart}''${tpsPart}`;' \
         'const lines = [`''${modePart}''${loc}''${markersPart}''${ctxPart}''${sep}''${model}`, `''${otherPart}''${tokensPart}''${tpsPart}`.slice(sep.length)];' \
       --replace-fail \
         'return [truncateToWidth(line, width)];' \
-        'return lines.map((line) => truncateToWidth(line, width));'
+        'return lines.flatMap((line) => wrapTextWithAnsi(line, width));'
   '';
 
   npmDepsHash = "sha256-Frc+oO8xFXjFIIke5i4i1bAhNQ66HX4oHUxPfOhvcls=";
