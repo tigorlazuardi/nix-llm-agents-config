@@ -3,10 +3,10 @@
 }:
 fetchzip {
   pname = "pi-vcc";
-  version = "0.5.0";
+  version = "0.6.0";
 
-  url = "https://github.com/sting8k/pi-vcc/archive/90f578f267f630ac50af6ce259b05d1b49c11dff.tar.gz";
-  hash = "sha256-38SCxaWT/cqVfj6A9GdBSA2EmnHoJoBUyN/dg2+MPj0=";
+  url = "https://github.com/sting8k/pi-vcc/archive/09c4a74c070aa5cbe0561adc8f04205dfb093984.tar.gz";
+  hash = "sha256-klwPnZCTMrDF/ZYHG8u+qLwG0br0I8UPO/geirJU8s0=";
   postFetch = ''
     rm "$out/demo.gif"
   '';
