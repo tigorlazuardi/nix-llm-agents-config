@@ -447,7 +447,12 @@ in
       default.config.home.file."${default.config.programs.pi-coding-agent.configDir}/skills".source.entries.agents-load
       == ./config/skills/agents-load;
     assert default.config.home.file."${default.config.programs.pi-coding-agent.configDir}/skills".force;
-    assert builtins.length (builtins.attrNames default.config.programs.pi-coding-agent.agents) == 8;
+    assert builtins.length (builtins.attrNames default.config.programs.pi-coding-agent.agents) == 6;
+    assert !(builtins.hasAttr "frontier-implementer" default.config.programs.pi-coding-agent.agents);
+    assert !(builtins.hasAttr "frontier-reviewer" default.config.programs.pi-coding-agent.agents);
+    assert default.config.programs.pi-coding-agent.agents.implementer.model == "gpt-5.6-sol";
+    assert default.config.programs.pi-coding-agent.agents.reviewer.model == "gpt-5.6-sol";
+    assert default.config.programs.pi-coding-agent.agents.reviewer.effort == "high";
     assert
       default.config.home.file."${default.config.programs.pi-coding-agent.configDir}/agents/orchestrator.md".text
       == expectedOrchestrator;

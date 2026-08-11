@@ -1,35 +1,8 @@
 {
-  frontier-implementer = {
-    description = "Sol implementation for low-tolerance code";
-    prompt = ../../config/agents/frontier-implementer.md;
-    model = "gpt-5.6-sol";
-    effort = "medium";
-    tools.allow = [
-      "read"
-      "bash"
-      "edit"
-      "write"
-      "grep"
-      "find"
-    ];
-  };
-  frontier-reviewer = {
-    description = "Sol reviewer for low-tolerance diffs; standards or spec axis";
-    prompt = ../../config/agents/frontier-reviewer.md;
-    model = "gpt-5.6-sol";
-    effort = "high";
-    tools.allow = [
-      "read"
-      "grep"
-      "find"
-      "bash"
-      "write"
-    ];
-  };
   implementer = {
-    description = "Standard Terra implementation worker";
+    description = "Sol implementation worker";
     prompt = ../../config/agents/implementer.md;
-    model = "gpt-5.6-terra";
+    model = "gpt-5.6-sol";
     effort = "medium";
     tools.allow = [
       "read"
@@ -65,10 +38,10 @@
     ];
   };
   reviewer = {
-    description = "Standard Terra reviewer; standards or spec axis";
+    description = "Sol reviewer; standards or spec axis";
     prompt = ../../config/agents/reviewer.md;
-    model = "gpt-5.6-terra";
-    effort = "medium";
+    model = "gpt-5.6-sol";
+    effort = "high";
     tools.allow = [
       "read"
       "grep"
