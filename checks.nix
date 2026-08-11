@@ -1021,6 +1021,9 @@ in
         test -f ${expectedAskHerdrPath}/index.ts
         test ! -e ${expectedAskHerdrPath}/node_modules
         grep -F 'name: "ask_user"' ${expectedAskHerdrPath}/src/tool.ts
+        grep -F 'Omit for no timeout (default).' ${expectedAskHerdrPath}/src/tool.ts
+        grep -F 'Omit timeout unless the user explicitly requests a deadline; no timeout is the default.' ${expectedAskHerdrPath}/src/tool.ts
+        grep -F 'if (params.timeout && params.timeout > 0)' ${expectedAskHerdrPath}/src/ui.ts
         grep -F 'if (ctx.mode !== "tui")' ${expectedAskHerdrPath}/src/tool.ts
         grep -F 'pane.report_metadata' ${expectedAskHerdrPath}/src/herdr.ts
         pi --offline --no-extensions --no-skills --no-prompt-templates --no-context-files \
