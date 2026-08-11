@@ -449,9 +449,15 @@ in
         ++ lib.optional optimizerPlugin.enable pinnedPkgs.rtk
         ++ lib.optional optimizerPlugin.enable toon
       );
-      sessionVariables = lib.mkIf (cfg.enable && vccPlugin.enable) {
-        PI_VCC_CONFIG_PATH = lib.mkDefault "${cfg.configDir}/pi-vcc-config.json";
-      };
+      sessionVariables = lib.mkIf cfg.enable (
+        {
+          # ponytail: Nix/CI owns Pi and plugin updates; skip redundant startup network checks.
+          PI_OFFLINE = lib.mkDefault "1";
+        }
+        // lib.optionalAttrs vccPlugin.enable {
+          PI_VCC_CONFIG_PATH = lib.mkDefault "${cfg.configDir}/pi-vcc-config.json";
+        }
+      );
     };
 
     programs.pi-coding-agent = {

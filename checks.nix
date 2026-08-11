@@ -344,6 +344,7 @@ in
       default.config.home.file."${default.config.programs.pi-coding-agent.configDir}/intercom/config.json".source
       == expectedIntercomConfig;
     assert !(default.config.home.sessionVariables ? C2C_BIN);
+    assert default.config.home.sessionVariables.PI_OFFLINE == "1";
     assert
       default.config.programs.pi-coding-agent.keybindings == {
         "app.tools.expand" = "ctrl+o";
@@ -512,6 +513,7 @@ in
         disabled.config.home.file ? "${disabled.config.programs.pi-coding-agent.configDir}/optimizer.json"
       );
     assert !(disabled.config.home.sessionVariables ? C2C_BIN);
+    assert !(disabled.config.home.sessionVariables ? PI_OFFLINE);
     assert
       !(
         disabled.config.home.file
