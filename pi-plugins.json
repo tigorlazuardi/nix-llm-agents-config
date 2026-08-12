@@ -80,6 +80,10 @@
     "strategy": "unsupported",
     "reason": "Package-specific lock metadata needs manual review."
   },
+  "remote-pi": {
+    "strategy": "unsupported",
+    "reason": "Extension lock integrity repair and separately pinned patched relay need manual review."
+  },
   "pi-playwright": {
     "strategy": "unsupported",
     "reason": "Browser closure lock update needs manual review."

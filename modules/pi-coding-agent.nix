@@ -79,6 +79,7 @@ let
   herdrRename = pinnedPkgs.callPackage ../packages/pi-herdr-rename.nix { };
   pattyBgTasks = pinnedPkgs.callPackage ../packages/pi-patty-bg-tasks.nix { };
   intercom = pinnedPkgs.callPackage ../packages/pi-intercom.nix { };
+  remotePi = pinnedPkgs.callPackage ../packages/remote-pi.nix { };
   vimMode = pinnedPkgs.callPackage ../packages/pi-vimmode.nix { };
   usage = pinnedPkgs.callPackage ../packages/pi-usage.nix { };
   mcpAdapter = pinnedPkgs.callPackage ../packages/pi-mcp-adapter.nix { };
@@ -160,6 +161,11 @@ let
     {
       name = "pi-intercom";
       package = "${intercom}/lib/node_modules/pi-intercom";
+      default = false;
+    }
+    {
+      name = "remote-pi";
+      package = "${remotePi}/lib/node_modules/remote-pi";
       default = true;
     }
     {
@@ -324,6 +330,7 @@ let
 in
 {
   imports = [
+    (import ./remote-pi-relay.nix { inherit nixpkgs-unstable; })
     ./pi-coding-agent/agents.nix
     ./pi-coding-agent/pi-subagents.nix
   ];

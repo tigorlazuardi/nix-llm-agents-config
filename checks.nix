@@ -29,11 +29,27 @@ let
         home.stateVersion = "26.05";
         home.username = "test";
         home.homeDirectory = "/Users/test";
+        services.remote-pi-relay = {
+          enable = true;
+          port = 8506;
+        };
       }
     ];
   };
   darwinEvaluation = builtins.tryEval darwin.config.home.activationPackage.drvPath;
   disabled = evaluate { programs.pi-coding-agent.enable = false; };
+  relayConfigured = evaluate {
+    services.remote-pi-relay = {
+      enable = true;
+      bindHost = "127.0.0.2";
+      port = 8506;
+      stateDirectory = "${
+        if pkgs.stdenv.hostPlatform.isDarwin then "/Users" else "/home"
+      }/test/remote-pi-relay-state";
+      logLevel = "debug";
+      maxCtMiB = 8;
+    };
+  };
   overridePackage = pkgs.writeShellScriptBin "pi" "exit 0";
   overridden = evaluate { programs.pi-coding-agent.package = overridePackage; };
   settingsOverridden = evaluate {
@@ -91,6 +107,7 @@ let
       pix-optimizer.enable = false;
       pi-vcc.enable = false;
       pi-intercom.enable = false;
+      remote-pi.enable = false;
       pi-subagents = {
         enable = false;
         agents.missing = { };
@@ -188,6 +205,9 @@ let
   expectedPattyBgTasksPath = "${expectedPattyBgTasks}/lib/node_modules/pi-patty-bg-tasks";
   expectedIntercom = pkgs.callPackage ./packages/pi-intercom.nix { };
   expectedIntercomPath = "${expectedIntercom}/lib/node_modules/pi-intercom";
+  expectedRemotePi = pkgs.callPackage ./packages/remote-pi.nix { };
+  expectedRemotePiPath = "${expectedRemotePi}/lib/node_modules/remote-pi";
+  expectedRemotePiRelay = pkgs.callPackage ./packages/remote-pi-relay.nix { };
   expectedIntercomConfig = (pkgs.formats.json { }).generate "pi-intercom-config.json" {
     brokerCommand = "${expectedIntercomPath}/node_modules/.bin/tsx";
     brokerArgs = [ ];
@@ -271,6 +291,8 @@ in
   pi-herdr-rename = expectedHerdrRename;
   pi-patty-bg-tasks = expectedPattyBgTasks;
   pi-intercom = expectedIntercom;
+  remote-pi = expectedRemotePi;
+  remote-pi-relay = expectedRemotePiRelay;
   pi-vimmode = expectedVimMode;
   pi-usage = expectedUsage;
   mcp-adapter = expectedMcpAdapter;
@@ -296,6 +318,28 @@ in
     assert
       darwin.config.programs.pi-coding-agent.plugins.browser-goblin.executablePath
       == "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
+    assert darwin.config.services.remote-pi-relay.enable;
+    assert darwin.config.services.remote-pi-relay.port == 8506;
+    assert
+      darwin.config.launchd.agents.remote-pi-relay.config.EnvironmentVariables.REMOTEPI_RELAY_HOST
+      == "127.0.0.1";
+    assert
+      darwin.config.launchd.agents.remote-pi-relay.config.EnvironmentVariables.REMOTEPI_RELAY_PORT
+      == "8506";
+    assert
+      darwin.config.launchd.agents.remote-pi-relay.config.EnvironmentVariables.REMOTEPI_MESH_DB_PATH
+      == "/Users/test/Library/Application Support/remote-pi-relay/mesh.db";
+    assert relayConfigured.config.services.remote-pi-relay.package == expectedRemotePiRelay;
+    assert relayConfigured.config.services.remote-pi-relay.bindHost == "127.0.0.2";
+    assert relayConfigured.config.services.remote-pi-relay.port == 8506;
+    assert relayConfigured.config.services.remote-pi-relay.logLevel == "debug";
+    assert relayConfigured.config.services.remote-pi-relay.maxCtMiB == 8;
+    assert
+      if pkgs.stdenv.hostPlatform.isLinux then
+        builtins.elem "REMOTEPI_RELAY_HOST=127.0.0.2" relayConfigured.config.systemd.user.services.remote-pi-relay.Service.Environment
+      else
+        relayConfigured.config.launchd.agents.remote-pi-relay.config.EnvironmentVariables.REMOTEPI_RELAY_HOST
+        == "127.0.0.2";
     assert expectedBrowserGoblin.agentBrowserVersion == pkgs.agent-browser.version;
     assert !disabled.config.programs.pi-coding-agent.enable;
     assert default.config.programs.pi-coding-agent.package == expectedPackage;
@@ -323,7 +367,7 @@ in
           expectedAskHerdrPath
           expectedHerdrRenamePath
           expectedPattyBgTasksPath
-          expectedIntercomPath
+          expectedRemotePiPath
           expectedVimModePath
           expectedUsagePath
           expectedMcpAdapterPath
@@ -350,9 +394,13 @@ in
     assert builtins.elem expectedToon default.config.home.packages;
     assert builtins.elem expectedToon optimizerConfigured.config.home.packages;
     assert !(builtins.elem expectedToon pluginsDisabled.config.home.packages);
+    assert !default.config.programs.pi-coding-agent.plugins.pi-intercom.enable;
+    assert default.config.programs.pi-coding-agent.plugins.remote-pi.enable;
     assert
-      default.config.home.file."${default.config.programs.pi-coding-agent.configDir}/intercom/config.json".source
-      == expectedIntercomConfig;
+      !(
+        default.config.home.file
+        ? "${default.config.programs.pi-coding-agent.configDir}/intercom/config.json"
+      );
     assert !(default.config.home.sessionVariables ? C2C_BIN);
     assert default.config.home.sessionVariables.PI_OFFLINE == "1";
     assert
@@ -562,6 +610,8 @@ in
     assert
       !(builtins.elem expectedIntercomPath pluginsDisabled.config.programs.pi-coding-agent.settings.packages);
     assert
+      !(builtins.elem expectedRemotePiPath pluginsDisabled.config.programs.pi-coding-agent.settings.packages);
+    assert
       !(builtins.elem expectedSubagentsPath pluginsDisabled.config.programs.pi-coding-agent.settings.packages);
     assert
       !(builtins.elem expectedRpivTodoPath pluginsDisabled.config.programs.pi-coding-agent.settings.packages);
@@ -605,7 +655,7 @@ in
         expectedAskHerdrPath
         expectedHerdrRenamePath
         expectedPattyBgTasksPath
-        expectedIntercomPath
+        expectedRemotePiPath
         expectedVimModePath
         expectedUsagePath
         expectedMcpAdapterPath
@@ -693,7 +743,7 @@ in
         ];
       }
       ''
-        nixfmt --check ${./flake.nix} ${./checks.nix} ${./modules/pi-coding-agent.nix} ${./modules/pi-coding-agent/agents.nix} ${./modules/pi-coding-agent/default-agents.nix} ${./modules/pi-coding-agent/pi-subagents.nix} ${./packages/pi-diet-lsp.nix} ${./packages/pi-effort.nix} ${./packages/pi-timestamps.nix} ${./packages/pi-herdr.nix} ${./packages/pi-herdr-sudo-task.nix} ${./packages/pi-ask-herdr.nix} ${./packages/pi-herdr-rename.nix} ${./packages/pi-patty-bg-tasks.nix} ${./packages/pi-intercom.nix} ${./packages/pi-vimmode.nix} ${./packages/pi-usage.nix} ${./packages/pi-mcp-adapter.nix} ${./packages/pi-playwright.nix} ${./packages/browser-goblin.nix} ${./packages/pix-optimizer.nix} ${./packages/pix-tools.nix} ${./packages/pi-vcc.nix} ${./packages/pi-prompt-template-model.nix} ${./packages/rpiv-todo.nix} ${./packages/pi-rules.nix} ${./packages/pi-web-access.nix} ${./packages/pi-subagents.nix} ${./packages/supi-context.nix} ${./packages/supi-extras.nix} ${./packages/toon.nix}
+        nixfmt --check ${./flake.nix} ${./checks.nix} ${./modules/pi-coding-agent.nix} ${./modules/remote-pi-relay.nix} ${./modules/pi-coding-agent/agents.nix} ${./modules/pi-coding-agent/default-agents.nix} ${./modules/pi-coding-agent/pi-subagents.nix} ${./packages/pi-diet-lsp.nix} ${./packages/pi-effort.nix} ${./packages/pi-timestamps.nix} ${./packages/pi-herdr.nix} ${./packages/pi-herdr-sudo-task.nix} ${./packages/pi-ask-herdr.nix} ${./packages/pi-herdr-rename.nix} ${./packages/pi-patty-bg-tasks.nix} ${./packages/pi-intercom.nix} ${./packages/remote-pi.nix} ${./packages/remote-pi-relay.nix} ${./packages/pi-vimmode.nix} ${./packages/pi-usage.nix} ${./packages/pi-mcp-adapter.nix} ${./packages/pi-playwright.nix} ${./packages/browser-goblin.nix} ${./packages/pix-optimizer.nix} ${./packages/pix-tools.nix} ${./packages/pi-vcc.nix} ${./packages/pi-prompt-template-model.nix} ${./packages/rpiv-todo.nix} ${./packages/pi-rules.nix} ${./packages/pi-web-access.nix} ${./packages/pi-subagents.nix} ${./packages/supi-context.nix} ${./packages/supi-extras.nix} ${./packages/toon.nix}
         WORKFLOW=${./.github/workflows/daily-update.yml} UPDATER=${./scripts/daily-update.sh} REGISTRY=${./pi-plugins.json} CHECKS=${./checks.nix} bash ${./tests/daily-updater-self-check.sh}
         touch $out
       '';
@@ -812,6 +862,31 @@ in
         EOF
         pi --offline --no-extensions --no-skills --no-prompt-templates --no-context-files \
           -e ${expectedPattyBgTasksPath} \
+          --list-models > pi.log 2>&1
+        ! grep -E 'Extension issues|Failed to load extension|Cannot find module|Error:' pi.log
+        touch $out
+      '';
+
+  remote-pi-load =
+    pkgs.runCommandLocal "remote-pi-load"
+      {
+        nativeBuildInputs = [
+          expectedPackage
+          pkgs.nodejs_22
+        ];
+      }
+      ''
+        export HOME="$TMPDIR/home"
+        export PI_CODING_AGENT_DIR="$HOME/.pi/agent"
+        export PI_TELEMETRY=0
+        mkdir -p "$PI_CODING_AGENT_DIR"
+
+        test -f ${expectedRemotePiPath}/dist/index.js
+        test -x ${expectedRemotePi}/bin/remote-pi
+        test -x ${expectedRemotePi}/bin/pi-supervisord
+        node -e 'import("${expectedRemotePiPath}/dist/index.js")'
+        pi --offline --no-extensions --no-skills --no-prompt-templates --no-context-files \
+          -e ${expectedRemotePiPath} \
           --list-models > pi.log 2>&1
         ! grep -E 'Extension issues|Failed to load extension|Cannot find module|Error:' pi.log
         touch $out
