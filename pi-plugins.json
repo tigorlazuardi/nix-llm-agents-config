@@ -84,6 +84,10 @@
     "strategy": "unsupported",
     "reason": "Browser closure lock update needs manual review."
   },
+  "browser-goblin": {
+    "strategy": "unsupported",
+    "reason": "Pinned agent-browser compatibility patch needs manual review."
+  },
   "pix-optimizer": {
     "strategy": "unsupported",
     "reason": "Contains separately pinned runtime source."

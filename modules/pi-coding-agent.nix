@@ -85,6 +85,9 @@ let
   playwright = pinnedPkgs.callPackage ../packages/pi-playwright.nix {
     browserExecutable = cfg.plugins.pi-playwright.executablePath;
   };
+  browserGoblin = pinnedPkgs.callPackage ../packages/browser-goblin.nix {
+    browserExecutable = cfg.plugins.browser-goblin.executablePath;
+  };
   pixOptimizer = pinnedPkgs.callPackage ../packages/pix-optimizer.nix { };
   toon = pinnedPkgs.callPackage ../packages/toon.nix { };
   pixTools = pinnedPkgs.callPackage ../packages/pix-tools.nix { };
@@ -177,6 +180,11 @@ let
     {
       name = "pi-playwright";
       package = "${playwright}/lib/node_modules/pi-playwright";
+      default = true;
+    }
+    {
+      name = "browser-goblin";
+      package = "${browserGoblin}/lib/node_modules/browser-goblin";
       default = true;
     }
     {
@@ -346,6 +354,17 @@ in
             else
               "${pinnedPkgs.chromium}/bin/chromium";
           description = "Chromium-compatible browser executable used by Playwright.";
+        };
+
+        browser-goblin.executablePath = lib.mkOption {
+          type = lib.types.str;
+          # ponytail: reuse system browser instead of agent-browser downloads; override for other Chromium builds.
+          default =
+            if pinnedPkgs.stdenv.hostPlatform.isDarwin then
+              "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+            else
+              "${pinnedPkgs.chromium}/bin/chromium";
+          description = "Chromium-compatible browser executable used by browser-goblin.";
         };
 
         pi-web-access = {

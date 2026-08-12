@@ -210,6 +210,10 @@ let
     browserExecutable = expectedBrowserExecutable;
   };
   expectedPlaywrightPath = "${expectedPlaywright}/lib/node_modules/pi-playwright";
+  expectedBrowserGoblin = pkgs.callPackage ./packages/browser-goblin.nix {
+    browserExecutable = expectedBrowserExecutable;
+  };
+  expectedBrowserGoblinPath = "${expectedBrowserGoblin}/lib/node_modules/browser-goblin";
   expectedPixOptimizer = pkgs.callPackage ./packages/pix-optimizer.nix { };
   expectedPixOptimizerPath = "${expectedPixOptimizer}/lib/node_modules/@xynogen/pix-optimizer";
   expectedPixTools = pkgs.callPackage ./packages/pix-tools.nix { };
@@ -271,6 +275,7 @@ in
   pi-usage = expectedUsage;
   mcp-adapter = expectedMcpAdapter;
   playwright = expectedPlaywright;
+  browser-goblin = expectedBrowserGoblin;
   pix-optimizer = expectedPixOptimizer;
   pix-tools = expectedPixTools;
   pi-vcc = expectedPiVcc;
@@ -288,6 +293,10 @@ in
     assert
       darwin.config.programs.pi-coding-agent.plugins.pi-playwright.executablePath
       == "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
+    assert
+      darwin.config.programs.pi-coding-agent.plugins.browser-goblin.executablePath
+      == "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
+    assert expectedBrowserGoblin.agentBrowserVersion == pkgs.agent-browser.version;
     assert !disabled.config.programs.pi-coding-agent.enable;
     assert default.config.programs.pi-coding-agent.package == expectedPackage;
     assert
@@ -319,6 +328,7 @@ in
           expectedUsagePath
           expectedMcpAdapterPath
           expectedPlaywrightPath
+          expectedBrowserGoblinPath
           expectedPixOptimizerPath
         ]
         ++ [
@@ -600,6 +610,7 @@ in
         expectedUsagePath
         expectedMcpAdapterPath
         expectedPlaywrightPath
+        expectedBrowserGoblinPath
         expectedPixOptimizerPath
       ]
       ++ [
@@ -682,7 +693,7 @@ in
         ];
       }
       ''
-        nixfmt --check ${./flake.nix} ${./checks.nix} ${./modules/pi-coding-agent.nix} ${./modules/pi-coding-agent/agents.nix} ${./modules/pi-coding-agent/default-agents.nix} ${./modules/pi-coding-agent/pi-subagents.nix} ${./packages/pi-diet-lsp.nix} ${./packages/pi-effort.nix} ${./packages/pi-timestamps.nix} ${./packages/pi-herdr.nix} ${./packages/pi-herdr-sudo-task.nix} ${./packages/pi-ask-herdr.nix} ${./packages/pi-herdr-rename.nix} ${./packages/pi-patty-bg-tasks.nix} ${./packages/pi-intercom.nix} ${./packages/pi-vimmode.nix} ${./packages/pi-usage.nix} ${./packages/pi-mcp-adapter.nix} ${./packages/pi-playwright.nix} ${./packages/pix-optimizer.nix} ${./packages/pix-tools.nix} ${./packages/pi-vcc.nix} ${./packages/pi-prompt-template-model.nix} ${./packages/rpiv-todo.nix} ${./packages/pi-rules.nix} ${./packages/pi-web-access.nix} ${./packages/pi-subagents.nix} ${./packages/supi-context.nix} ${./packages/supi-extras.nix} ${./packages/toon.nix}
+        nixfmt --check ${./flake.nix} ${./checks.nix} ${./modules/pi-coding-agent.nix} ${./modules/pi-coding-agent/agents.nix} ${./modules/pi-coding-agent/default-agents.nix} ${./modules/pi-coding-agent/pi-subagents.nix} ${./packages/pi-diet-lsp.nix} ${./packages/pi-effort.nix} ${./packages/pi-timestamps.nix} ${./packages/pi-herdr.nix} ${./packages/pi-herdr-sudo-task.nix} ${./packages/pi-ask-herdr.nix} ${./packages/pi-herdr-rename.nix} ${./packages/pi-patty-bg-tasks.nix} ${./packages/pi-intercom.nix} ${./packages/pi-vimmode.nix} ${./packages/pi-usage.nix} ${./packages/pi-mcp-adapter.nix} ${./packages/pi-playwright.nix} ${./packages/browser-goblin.nix} ${./packages/pix-optimizer.nix} ${./packages/pix-tools.nix} ${./packages/pi-vcc.nix} ${./packages/pi-prompt-template-model.nix} ${./packages/rpiv-todo.nix} ${./packages/pi-rules.nix} ${./packages/pi-web-access.nix} ${./packages/pi-subagents.nix} ${./packages/supi-context.nix} ${./packages/supi-extras.nix} ${./packages/toon.nix}
         WORKFLOW=${./.github/workflows/daily-update.yml} UPDATER=${./scripts/daily-update.sh} REGISTRY=${./pi-plugins.json} CHECKS=${./checks.nix} bash ${./tests/daily-updater-self-check.sh}
         touch $out
       '';
@@ -1122,6 +1133,32 @@ in
 
         pi --offline --no-extensions --no-skills --no-prompt-templates --no-context-files \
           --skill "$skill" \
+          --list-models > pi.log 2>&1
+        ! grep -E 'Extension issues|Failed to load extension|Cannot find module|Error:' pi.log
+        touch $out
+      '';
+
+  browser-goblin-load =
+    pkgs.runCommandLocal "browser-goblin-load"
+      {
+        nativeBuildInputs = [
+          expectedBrowserGoblin
+          expectedPackage
+        ];
+      }
+      ''
+        export HOME="$TMPDIR/home"
+        export PI_CODING_AGENT_DIR="$HOME/.pi/agent"
+        export PI_BROWSER_ARTIFACT_DIR="$TMPDIR/artifacts"
+        export PI_TELEMETRY=0
+        mkdir -p "$PI_CODING_AGENT_DIR"
+
+        browser-goblin-agent-browser --version | grep -F ${pkgs.agent-browser.version}
+        grep -F 'args.push("--session-name", session)' ${expectedBrowserGoblinPath}/extensions/pi-browser/index.ts
+        grep -F '${expectedBrowserGoblin}/bin/browser-goblin-agent-browser' ${expectedBrowserGoblinPath}/extensions/pi-browser/index.ts
+
+        pi --offline --no-extensions --no-skills --no-prompt-templates --no-context-files \
+          -e ${expectedBrowserGoblinPath} \
           --list-models > pi.log 2>&1
         ! grep -E 'Extension issues|Failed to load extension|Cannot find module|Error:' pi.log
         touch $out
