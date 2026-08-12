@@ -38,6 +38,15 @@ let
   };
   darwinEvaluation = builtins.tryEval darwin.config.home.activationPackage.drvPath;
   disabled = evaluate { programs.pi-coding-agent.enable = false; };
+  remotePiConfigured = evaluate {
+    programs.pi-coding-agent.plugins.remote-pi.relayUrl = "https://relay.consumer.example";
+  };
+  invalidRemotePiRelayUrl = evaluate {
+    programs.pi-coding-agent.plugins.remote-pi.relayUrl = "https://?";
+  };
+  invalidRemotePiRelayUrlEvaluation = builtins.tryEval (
+    builtins.deepSeq invalidRemotePiRelayUrl.config.home.activationPackage true
+  );
   relayConfigured = evaluate {
     services.remote-pi-relay = {
       enable = true;
@@ -207,6 +216,7 @@ let
   expectedIntercomPath = "${expectedIntercom}/lib/node_modules/pi-intercom";
   expectedRemotePi = pkgs.callPackage ./packages/remote-pi.nix { };
   expectedRemotePiPath = "${expectedRemotePi}/lib/node_modules/remote-pi";
+  expectedRemotePiConfigUpdater = pkgs.callPackage ./packages/remote-pi-config-updater.nix { };
   expectedRemotePiRelay = pkgs.callPackage ./packages/remote-pi-relay.nix { };
   expectedIntercomConfig = (pkgs.formats.json { }).generate "pi-intercom-config.json" {
     brokerCommand = "${expectedIntercomPath}/node_modules/.bin/tsx";
@@ -292,6 +302,7 @@ in
   pi-patty-bg-tasks = expectedPattyBgTasks;
   pi-intercom = expectedIntercom;
   remote-pi = expectedRemotePi;
+  remote-pi-config-updater = expectedRemotePiConfigUpdater;
   remote-pi-relay = expectedRemotePiRelay;
   pi-vimmode = expectedVimMode;
   pi-usage = expectedUsage;
@@ -396,6 +407,17 @@ in
     assert !(builtins.elem expectedToon pluginsDisabled.config.home.packages);
     assert !default.config.programs.pi-coding-agent.plugins.pi-intercom.enable;
     assert default.config.programs.pi-coding-agent.plugins.remote-pi.enable;
+    assert
+      default.config.programs.pi-coding-agent.plugins.remote-pi.relayUrl
+      == "https://remote-pi.tigor.web.id";
+    assert
+      remotePiConfigured.config.programs.pi-coding-agent.plugins.remote-pi.relayUrl
+      == "https://relay.consumer.example";
+    assert !invalidRemotePiRelayUrlEvaluation.success;
+    assert !(default.config.home.sessionVariables ? REMOTE_PI_RELAY);
+    assert default.config.home.activation ? remotePiConfig;
+    assert remotePiConfigured.config.home.activation ? remotePiConfig;
+    assert !(pluginsDisabled.config.home.activation ? remotePiConfig);
     assert
       !(
         default.config.home.file
@@ -743,7 +765,7 @@ in
         ];
       }
       ''
-        nixfmt --check ${./flake.nix} ${./checks.nix} ${./modules/pi-coding-agent.nix} ${./modules/remote-pi-relay.nix} ${./modules/pi-coding-agent/agents.nix} ${./modules/pi-coding-agent/default-agents.nix} ${./modules/pi-coding-agent/pi-subagents.nix} ${./packages/pi-diet-lsp.nix} ${./packages/pi-effort.nix} ${./packages/pi-timestamps.nix} ${./packages/pi-herdr.nix} ${./packages/pi-herdr-sudo-task.nix} ${./packages/pi-ask-herdr.nix} ${./packages/pi-herdr-rename.nix} ${./packages/pi-patty-bg-tasks.nix} ${./packages/pi-intercom.nix} ${./packages/remote-pi.nix} ${./packages/remote-pi-relay.nix} ${./packages/pi-vimmode.nix} ${./packages/pi-usage.nix} ${./packages/pi-mcp-adapter.nix} ${./packages/pi-playwright.nix} ${./packages/browser-goblin.nix} ${./packages/pix-optimizer.nix} ${./packages/pix-tools.nix} ${./packages/pi-vcc.nix} ${./packages/pi-prompt-template-model.nix} ${./packages/rpiv-todo.nix} ${./packages/pi-rules.nix} ${./packages/pi-web-access.nix} ${./packages/pi-subagents.nix} ${./packages/supi-context.nix} ${./packages/supi-extras.nix} ${./packages/toon.nix}
+        nixfmt --check ${./flake.nix} ${./checks.nix} ${./modules/pi-coding-agent.nix} ${./modules/remote-pi-relay.nix} ${./modules/pi-coding-agent/agents.nix} ${./modules/pi-coding-agent/default-agents.nix} ${./modules/pi-coding-agent/pi-subagents.nix} ${./packages/pi-diet-lsp.nix} ${./packages/pi-effort.nix} ${./packages/pi-timestamps.nix} ${./packages/pi-herdr.nix} ${./packages/pi-herdr-sudo-task.nix} ${./packages/pi-ask-herdr.nix} ${./packages/pi-herdr-rename.nix} ${./packages/pi-patty-bg-tasks.nix} ${./packages/pi-intercom.nix} ${./packages/remote-pi.nix} ${./packages/remote-pi-config-updater.nix} ${./packages/remote-pi-relay.nix} ${./packages/pi-vimmode.nix} ${./packages/pi-usage.nix} ${./packages/pi-mcp-adapter.nix} ${./packages/pi-playwright.nix} ${./packages/browser-goblin.nix} ${./packages/pix-optimizer.nix} ${./packages/pix-tools.nix} ${./packages/pi-vcc.nix} ${./packages/pi-prompt-template-model.nix} ${./packages/rpiv-todo.nix} ${./packages/pi-rules.nix} ${./packages/pi-web-access.nix} ${./packages/pi-subagents.nix} ${./packages/supi-context.nix} ${./packages/supi-extras.nix} ${./packages/toon.nix}
         WORKFLOW=${./.github/workflows/daily-update.yml} UPDATER=${./scripts/daily-update.sh} REGISTRY=${./pi-plugins.json} CHECKS=${./checks.nix} bash ${./tests/daily-updater-self-check.sh}
         touch $out
       '';
@@ -864,6 +886,45 @@ in
           -e ${expectedPattyBgTasksPath} \
           --list-models > pi.log 2>&1
         ! grep -E 'Extension issues|Failed to load extension|Cannot find module|Error:' pi.log
+        touch $out
+      '';
+
+  remote-pi-config =
+    pkgs.runCommandLocal "remote-pi-config"
+      {
+        nativeBuildInputs = [
+          expectedRemotePiConfigUpdater
+          pkgs.jq
+        ];
+      }
+      ''
+        config="$TMPDIR/remote/config.json"
+        mkdir -p "$(dirname "$config")"
+        printf '%s\n' '{"relay":"https://old.example","paired":true,"nested":{"keep":1}}' > "$config"
+        chmod 0644 "$config"
+        before=$(stat -c %i "$config")
+
+        remote-pi-config-update "$config" https://relay.consumer.example
+        jq -e '.relay == "https://relay.consumer.example/" and .paired == true and .nested.keep == 1' "$config"
+        test "$(stat -c %a "$config")" = 600
+        test "$(stat -c %i "$config")" != "$before"
+
+        unchanged=$(stat -c %i "$config")
+        remote-pi-config-update "$config" https://relay.consumer.example
+        test "$(stat -c %i "$config")" = "$unchanged"
+
+        cp "$config" valid.json
+        printf '%s\n' 'not-json' > "$config"
+        if remote-pi-config-update "$config" https://relay.consumer.example; then exit 1; fi
+        grep -Fx not-json "$config"
+        cp valid.json "$config"
+        if remote-pi-config-update "$config" 'https://?'; then exit 1; fi
+        cmp valid.json "$config"
+
+        new="$TMPDIR/new/config.json"
+        remote-pi-config-update "$new" http://127.0.0.1:8506
+        jq -e '. == {"relay":"http://127.0.0.1:8506/"}' "$new"
+        test "$(stat -c %a "$new")" = 600
         touch $out
       '';
 

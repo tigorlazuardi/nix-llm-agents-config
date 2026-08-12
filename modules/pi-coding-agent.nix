@@ -61,6 +61,7 @@ let
   optimizerPlugin = cfg.plugins.pix-optimizer;
   vccPlugin = cfg.plugins.pi-vcc;
   webAccessPlugin = cfg.plugins.pi-web-access;
+  remotePiPlugin = cfg.plugins.remote-pi;
   mkPluginOptions =
     default:
     lib.mkOption {
@@ -80,6 +81,7 @@ let
   pattyBgTasks = pinnedPkgs.callPackage ../packages/pi-patty-bg-tasks.nix { };
   intercom = pinnedPkgs.callPackage ../packages/pi-intercom.nix { };
   remotePi = pinnedPkgs.callPackage ../packages/remote-pi.nix { };
+  remotePiConfigUpdater = pinnedPkgs.callPackage ../packages/remote-pi-config-updater.nix { };
   vimMode = pinnedPkgs.callPackage ../packages/pi-vimmode.nix { };
   usage = pinnedPkgs.callPackage ../packages/pi-usage.nix { };
   mcpAdapter = pinnedPkgs.callPackage ../packages/pi-mcp-adapter.nix { };
@@ -352,6 +354,12 @@ in
           };
         };
 
+        remote-pi.relayUrl = lib.mkOption {
+          type = lib.types.strMatching "https?://[^/?#[:space:]]+[^[:space:]]*";
+          default = "https://remote-pi.tigor.web.id";
+          description = "Canonical HTTP(S) relay URL merged into mutable ~/.pi/remote/config.json. Consumers may override this for another relay.";
+        };
+
         pi-playwright.executablePath = lib.mkOption {
           type = lib.types.str;
           # ponytail: use conventional macOS Chrome path; override this option for another browser location.
@@ -468,6 +476,15 @@ in
     ];
 
     programs.mcp.enable = lib.mkIf (cfg.enable && mcpPlugin.enable) (lib.mkDefault true);
+
+    # ponytail: merge only relay key so Remote Pi can keep mutating pairing and user config.
+    home.activation.remotePiConfig = lib.mkIf (cfg.enable && remotePiPlugin.enable) (
+      lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+        run ${lib.getExe remotePiConfigUpdater} \
+          ${lib.escapeShellArg "${config.home.homeDirectory}/.pi/remote/config.json"} \
+          ${lib.escapeShellArg remotePiPlugin.relayUrl}
+      ''
+    );
 
     home = {
       packages = lib.mkIf cfg.enable (
