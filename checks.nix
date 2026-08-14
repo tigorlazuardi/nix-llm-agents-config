@@ -116,7 +116,6 @@ let
       pi-mcp-adapter.enable = false;
       pix-optimizer.enable = false;
       pi-vcc.enable = false;
-      pi-intercom.enable = false;
       remote-pi.enable = false;
       pi-subagents = {
         enable = false;
@@ -215,19 +214,10 @@ let
   expectedHerdrRenamePath = "${expectedHerdrRename}/lib/node_modules/pi-herdr-rename";
   expectedPattyBgTasks = pkgs.callPackage ./packages/pi-patty-bg-tasks.nix { };
   expectedPattyBgTasksPath = "${expectedPattyBgTasks}/lib/node_modules/pi-patty-bg-tasks";
-  expectedIntercom = pkgs.callPackage ./packages/pi-intercom.nix { };
-  expectedIntercomPath = "${expectedIntercom}/lib/node_modules/pi-intercom";
   expectedRemotePi = pkgs.callPackage ./packages/remote-pi.nix { };
   expectedRemotePiPath = "${expectedRemotePi}/lib/node_modules/remote-pi";
   expectedRemotePiConfigUpdater = pkgs.callPackage ./packages/remote-pi-config-updater.nix { };
   expectedRemotePiRelay = pkgs.callPackage ./packages/remote-pi-relay.nix { };
-  expectedIntercomConfig = (pkgs.formats.json { }).generate "pi-intercom-config.json" {
-    brokerCommand = "${expectedIntercomPath}/node_modules/.bin/tsx";
-    brokerArgs = [ ];
-    confirmSend = false;
-    enabled = true;
-    replyHint = true;
-  };
   expectedVimMode = pkgs.callPackage ./packages/pi-vimmode.nix { };
   expectedVimModePath = "${expectedVimMode}/lib/node_modules/pi-vimmode";
   expectedUsage = pkgs.callPackage ./packages/pi-usage.nix { };
@@ -304,7 +294,6 @@ in
   pi-ask-herdr = expectedAskHerdr;
   pi-herdr-rename = expectedHerdrRename;
   pi-patty-bg-tasks = expectedPattyBgTasks;
-  pi-intercom = expectedIntercom;
   remote-pi = expectedRemotePi;
   remote-pi-config-updater = expectedRemotePiConfigUpdater;
   remote-pi-relay = expectedRemotePiRelay;
@@ -411,7 +400,6 @@ in
     assert !(builtins.elem expectedToon pluginsDisabled.config.home.packages);
     assert !default.config.programs.pi-coding-agent.plugins.diet-lsp.enable;
     assert default.config.programs.pi-coding-agent.plugins.command-code.enable;
-    assert !default.config.programs.pi-coding-agent.plugins.pi-intercom.enable;
     assert default.config.programs.pi-coding-agent.plugins.remote-pi.enable;
     assert
       default.config.programs.pi-coding-agent.plugins.remote-pi.relayUrl
@@ -424,11 +412,6 @@ in
     assert default.config.home.activation ? remotePiConfig;
     assert remotePiConfigured.config.home.activation ? remotePiConfig;
     assert !(pluginsDisabled.config.home.activation ? remotePiConfig);
-    assert
-      !(
-        default.config.home.file
-        ? "${default.config.programs.pi-coding-agent.configDir}/intercom/config.json"
-      );
     assert !(default.config.home.sessionVariables ? C2C_BIN);
     assert default.config.home.sessionVariables.PI_OFFLINE == "1";
     assert
@@ -605,11 +588,6 @@ in
       );
     assert !(disabled.config.home.sessionVariables ? C2C_BIN);
     assert !(disabled.config.home.sessionVariables ? PI_OFFLINE);
-    assert
-      !(
-        disabled.config.home.file
-        ? "${disabled.config.programs.pi-coding-agent.configDir}/intercom/config.json"
-      );
     assert !(disabled.config.home.sessionVariables ? PI_VCC_CONFIG_PATH);
     assert
       !(disabled.config.home.file ? "${disabled.config.programs.pi-coding-agent.configDir}/skills");
@@ -638,8 +616,6 @@ in
     assert
       !(builtins.elem expectedPiVccPath pluginsDisabled.config.programs.pi-coding-agent.settings.packages);
     assert
-      !(builtins.elem expectedIntercomPath pluginsDisabled.config.programs.pi-coding-agent.settings.packages);
-    assert
       !(builtins.elem expectedRemotePiPath pluginsDisabled.config.programs.pi-coding-agent.settings.packages);
     assert
       !(builtins.elem expectedSubagentsPath pluginsDisabled.config.programs.pi-coding-agent.settings.packages);
@@ -660,11 +636,6 @@ in
       !(
         pluginsDisabled.config.home.file
         ? "${pluginsDisabled.config.programs.pi-coding-agent.configDir}/pi-vcc-config.json"
-      );
-    assert
-      !(
-        pluginsDisabled.config.home.file
-        ? "${pluginsDisabled.config.programs.pi-coding-agent.configDir}/intercom/config.json"
       );
     assert
       !(
@@ -773,7 +744,7 @@ in
         ];
       }
       ''
-        nixfmt --check ${./flake.nix} ${./checks.nix} ${./modules/pi-coding-agent.nix} ${./modules/remote-pi-relay.nix} ${./modules/pi-coding-agent/agents.nix} ${./modules/pi-coding-agent/default-agents.nix} ${./modules/pi-coding-agent/pi-subagents.nix} ${./packages/pi-diet-lsp.nix} ${./packages/pi-commandcode-provider.nix} ${./packages/pi-effort.nix} ${./packages/pi-timestamps.nix} ${./packages/pi-herdr.nix} ${./packages/pi-herdr-sudo-task.nix} ${./packages/pi-ask-herdr.nix} ${./packages/pi-herdr-rename.nix} ${./packages/pi-patty-bg-tasks.nix} ${./packages/pi-intercom.nix} ${./packages/remote-pi.nix} ${./packages/remote-pi-config-updater.nix} ${./packages/remote-pi-relay.nix} ${./packages/pi-vimmode.nix} ${./packages/pi-usage.nix} ${./packages/pi-mcp-adapter.nix} ${./packages/pi-playwright.nix} ${./packages/browser-goblin.nix} ${./packages/pix-optimizer.nix} ${./packages/pix-tools.nix} ${./packages/pi-vcc.nix} ${./packages/pi-prompt-template-model.nix} ${./packages/rpiv-todo.nix} ${./packages/pi-rules.nix} ${./packages/pi-web-access.nix} ${./packages/pi-subagents.nix} ${./packages/supi-context.nix} ${./packages/supi-extras.nix} ${./packages/toon.nix}
+        nixfmt --check ${./flake.nix} ${./checks.nix} ${./modules/pi-coding-agent.nix} ${./modules/remote-pi-relay.nix} ${./modules/pi-coding-agent/agents.nix} ${./modules/pi-coding-agent/default-agents.nix} ${./modules/pi-coding-agent/pi-subagents.nix} ${./packages/pi-diet-lsp.nix} ${./packages/pi-commandcode-provider.nix} ${./packages/pi-effort.nix} ${./packages/pi-timestamps.nix} ${./packages/pi-herdr.nix} ${./packages/pi-herdr-sudo-task.nix} ${./packages/pi-ask-herdr.nix} ${./packages/pi-herdr-rename.nix} ${./packages/pi-patty-bg-tasks.nix} ${./packages/remote-pi.nix} ${./packages/remote-pi-config-updater.nix} ${./packages/remote-pi-relay.nix} ${./packages/pi-vimmode.nix} ${./packages/pi-usage.nix} ${./packages/pi-mcp-adapter.nix} ${./packages/pi-playwright.nix} ${./packages/browser-goblin.nix} ${./packages/pix-optimizer.nix} ${./packages/pix-tools.nix} ${./packages/pi-vcc.nix} ${./packages/pi-prompt-template-model.nix} ${./packages/rpiv-todo.nix} ${./packages/pi-rules.nix} ${./packages/pi-web-access.nix} ${./packages/pi-subagents.nix} ${./packages/supi-context.nix} ${./packages/supi-extras.nix} ${./packages/toon.nix}
         WORKFLOW=${./.github/workflows/daily-update.yml} UPDATER=${./scripts/daily-update.sh} REGISTRY=${./pi-plugins.json} CHECKS=${./checks.nix} bash ${./tests/daily-updater-self-check.sh}
         touch $out
       '';
@@ -977,34 +948,6 @@ in
         node -e 'import("${expectedRemotePiPath}/dist/index.js")'
         pi --offline --no-extensions --no-skills --no-prompt-templates --no-context-files \
           -e ${expectedRemotePiPath} \
-          --list-models > pi.log 2>&1
-        ! grep -E 'Extension issues|Failed to load extension|Cannot find module|Error:' pi.log
-        touch $out
-      '';
-
-  pi-intercom-load =
-    pkgs.runCommandLocal "pi-intercom-load"
-      {
-        nativeBuildInputs = [
-          expectedPackage
-          pkgs.jq
-        ];
-      }
-      ''
-        export HOME="$TMPDIR/home"
-        export PI_CODING_AGENT_DIR="$HOME/.pi/agent"
-        export PI_TELEMETRY=0
-        mkdir -p "$PI_CODING_AGENT_DIR/intercom"
-        test -f ${expectedIntercomPath}/index.ts
-        test -f ${expectedIntercomPath}/broker/broker.ts
-        test -x ${expectedIntercomPath}/node_modules/.bin/tsx
-        test -d ${expectedIntercomPath}/node_modules/typebox
-        test ! -e ${expectedIntercomPath}/node_modules/@mariozechner
-        jq -e '.enabled == true and .replyHint == true and .confirmSend == false and .brokerArgs == [] and has("status") | not' ${expectedIntercomConfig}
-        jq -e '.brokerCommand == "${expectedIntercomPath}/node_modules/.bin/tsx"' ${expectedIntercomConfig}
-        cp ${expectedIntercomConfig} "$PI_CODING_AGENT_DIR/intercom/config.json"
-        pi --offline --no-extensions --no-skills --no-prompt-templates --no-context-files \
-          -e ${expectedIntercomPath} \
           --list-models > pi.log 2>&1
         ! grep -E 'Extension issues|Failed to load extension|Cannot find module|Error:' pi.log
         touch $out

@@ -146,21 +146,6 @@
     "hash": "sha256-KFXFMqXgZE5em9hvJLyVNtn04whp9TYESKTKB5QWf3E=",
     "check": "pi-patty-bg-tasks-load"
   },
-  "pi-intercom": {
-    "strategy": "npm",
-    "package": "pi-intercom",
-    "version": "0.6.0",
-    "src": "https://registry.npmjs.org/pi-intercom/-/pi-intercom-0.6.0.tgz",
-    "hash": "sha256-dsDVKEZhqsQ3JIu2x6Moef6GMpa9FctTN1GyfK/ESBg=",
-    "npmDepsHash": "sha256-zhw4TSMs+JnSoaBU/ZBXba7+fdmnQe9YM6+QLOzSKZk=",
-    "manifestTransform": {
-      "delete": [
-        "peerDependencies"
-      ]
-    },
-    "lockFile": "packages/pi-intercom-package-lock.json",
-    "check": "pi-intercom-load"
-  },
   "remote-pi": {
     "strategy": "npm",
     "package": "remote-pi",

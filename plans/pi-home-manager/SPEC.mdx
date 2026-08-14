@@ -520,7 +520,7 @@ This inventory mirrors the active `settings.packages` allowlist as of 2026-07-26
 | `npm:pi-herdr-sudo-task` | `0.1.3` | Replaces git revision `c2c17cf`; exact npm artifact matches tagged source build and has no npm closure |
 | `npm:pi-ask-herdr` | `0.2.2` | Replaces `0.2.1`; exact npm tarball, no npm closure, no persistent plugin configuration |
 | `npm:pi-patty-bg-tasks` | `1.1.6` | Exact npm tarball, zero npm closure, no persistent plugin configuration; locally hardened private runtime artifacts |
-| `npm:pi-intercom` | `0.6.0` | Exact npm extension closure with `tsx` and `typebox`; package-local TSX launcher and granular same-machine broker configuration |
+| `npm:pi-intercom` | `0.6.0` | Superseded by `remote-pi`; package, module option, managed configuration, and updater entry removed |
 | `npm:pi-vimmode` | `0.9.0` | Exact npm bundle; managed Pi peers; no current JSON or trusted-JS config to migrate |
 | `npm:@narumitw/pi-usage` | `0.34.0` | Exact provenance-attested npm tarball, zero npm closure; automatic official-provider usage calls and runtime credential boundary accepted; no configuration or persistence |
 | `npm:@nehlis/pi-effort` | `0.1.0` | Exact npm tarball matching `gitHead` `0be4dd0614ca2959ead7e0f435748221ed5e06d2`, zero npm closure, sole Pi peer; registers only `/effort` and calls native `getThinkingLevel`/`setThinkingLevel`, with no network, subprocess, config, or persistence; no module options. ponytail: release predates Pi `max`, so `/effort max` aliases `xhigh`; native `max` remains unavailable through this command until upstream adds support. |
@@ -634,16 +634,11 @@ Typed Home Manager options under `programs.pi-coding-agent.plugins.pi-vcc.settin
 
 ### `pi-intercom` same-machine boundary
 
-<Decision title="Use pi-intercom for same-machine Pi session communication" status="accepted">
+<Decision title="Use pi-intercom for same-machine Pi session communication" status="superseded">
 
-`pi-intercom@0.6.0` replaces `pi-c2c` and native `c2c`. Its immutable npm closure contains declared `tsx` and `typebox`; Pi peers remain supplied by managed Pi. Home Manager links only `${configDir}/intercom/config.json` with `enabled: true`, `replyHint: true`, `confirmSend: false`, empty `brokerArgs`, no `status`, and an absolute package-local TSX broker launcher. This prevents ambient `npx`, Bun, global TSX, or user npm state from entering broker startup.
+Superseded by `remote-pi`. `pi-intercom@0.6.0` previously replaced `pi-c2c` and native `c2c`; its package, Home Manager plugin option, managed `${configDir}/intercom/config.json`, updater entry, and dedicated checks are removed.
 
 </Decision>
-
-The extension uses local IPC for same-machine direct session communication. Broker socket, PID, lock, and Pi session history remain runtime-owned. This module creates no daemon, network relay, history migration, C2C environment variables, or configuration options. It does not read, move, delete, or declaratively own historical C2C runtime data.
-
-- Source: `npm:pi-intercom@0.6.0`, hash `sha256-dsDVKEZhqsQ3JIu2x6Moef6GMpa9FctTN1GyfK/ESBg=`.
-- Validation: package contents and declared closure, granular managed JSON, enabled/disabled module output, no C2C environment wiring, and isolated offline/headless Pi loading without extension loader errors.
 
 ### `pi-vimmode` editor boundary
 

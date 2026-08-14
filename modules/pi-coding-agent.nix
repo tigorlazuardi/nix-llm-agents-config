@@ -80,7 +80,6 @@ let
   askHerdr = pinnedPkgs.callPackage ../packages/pi-ask-herdr.nix { };
   herdrRename = pinnedPkgs.callPackage ../packages/pi-herdr-rename.nix { };
   pattyBgTasks = pinnedPkgs.callPackage ../packages/pi-patty-bg-tasks.nix { };
-  intercom = pinnedPkgs.callPackage ../packages/pi-intercom.nix { };
   remotePi = pinnedPkgs.callPackage ../packages/remote-pi.nix { };
   remotePiConfigUpdater = pinnedPkgs.callPackage ../packages/remote-pi-config-updater.nix { };
   vimMode = pinnedPkgs.callPackage ../packages/pi-vimmode.nix { };
@@ -166,11 +165,6 @@ let
       name = "pi-patty-bg-tasks";
       package = "${pattyBgTasks}/lib/node_modules/pi-patty-bg-tasks";
       default = true;
-    }
-    {
-      name = "pi-intercom";
-      package = "${intercom}/lib/node_modules/pi-intercom";
-      default = false;
     }
     {
       name = "remote-pi";
@@ -557,15 +551,6 @@ in
       # ponytail: immutable config disables /curator persistence; change module options and switch.
       "${cfg.configDir}/web-search.json" = lib.mkIf (webAccessPlugin.enable && webAccessConfig != { }) {
         source = webAccessConfigFile;
-      };
-      "${cfg.configDir}/intercom/config.json" = lib.mkIf cfg.plugins.pi-intercom.enable {
-        source = jsonFormat.generate "pi-intercom-config.json" {
-          brokerCommand = "${intercom}/lib/node_modules/pi-intercom/node_modules/.bin/tsx";
-          brokerArgs = [ ];
-          confirmSend = false;
-          enabled = true;
-          replyHint = true;
-        };
       };
     };
   };
