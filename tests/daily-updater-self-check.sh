@@ -29,6 +29,8 @@ grep -F 'git ls-remote --tags' "$updater"
 grep -F 'nix store prefetch-file --json --unpack "$source_url"' "$updater"
 grep -F 'hash=$(nix hash path "$tmp")' "$updater"
 jq -e '[.[] | .strategy] | index("npm") and index("github") and index("unsupported")' "$registry" >/dev/null
+jq -e 'all(.[]; has("reason") | not)' "$registry" >/dev/null
+jq -e 'all(.[]; (.notes? // []) | all(.[]; (.issue | type == "string") and (.resolveStrategy | type == "string")))' "$registry" >/dev/null
 jq -e '."pi-vcc".tagPrefix == "v" and ."pi-vcc".removePaths == ["demo.gif"]' "$registry" >/dev/null
 ! grep -F 'git push --force' "$updater"
 ! grep -F 'git reset --hard origin/main' "$updater"

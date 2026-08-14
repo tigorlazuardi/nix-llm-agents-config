@@ -72,6 +72,7 @@ let
   jsonFormat = pkgs.formats.json { };
   pinnedPkgs = nixpkgs-unstable.legacyPackages.${pkgs.stdenv.hostPlatform.system};
   dietLsp = pinnedPkgs.callPackage ../packages/pi-diet-lsp.nix { };
+  commandCodeProvider = pinnedPkgs.callPackage ../packages/pi-commandcode-provider.nix { };
   effort = pinnedPkgs.callPackage ../packages/pi-effort.nix { };
   timestamps = pinnedPkgs.callPackage ../packages/pi-timestamps.nix { };
   piHerdr = pinnedPkgs.callPackage ../packages/pi-herdr.nix { };
@@ -123,6 +124,12 @@ let
     {
       name = "diet-lsp";
       package = "${dietLsp}";
+      # ponytail: rarely used; consumer can re-enable without restoring package wiring.
+      default = false;
+    }
+    {
+      name = "command-code";
+      package = "${commandCodeProvider}/lib/node_modules/pi-commandcode-provider";
       default = true;
     }
     {

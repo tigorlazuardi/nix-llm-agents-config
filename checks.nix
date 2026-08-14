@@ -112,6 +112,7 @@ let
     vccConfigured.config.home.file."${vccConfigured.config.programs.pi-coding-agent.configDir}/pi-vcc-config.json".source;
   pluginsDisabled = evaluate {
     programs.pi-coding-agent.plugins = {
+      command-code.enable = false;
       pi-mcp-adapter.enable = false;
       pix-optimizer.enable = false;
       pi-vcc.enable = false;
@@ -198,6 +199,8 @@ let
   expectedPackage = pkgs.pi-coding-agent;
   expectedDietLsp = pkgs.callPackage ./packages/pi-diet-lsp.nix { };
   expectedDietLspPath = "${expectedDietLsp}";
+  expectedCommandCodeProvider = pkgs.callPackage ./packages/pi-commandcode-provider.nix { };
+  expectedCommandCodeProviderPath = "${expectedCommandCodeProvider}/lib/node_modules/pi-commandcode-provider";
   expectedEffort = pkgs.callPackage ./packages/pi-effort.nix { };
   expectedEffortPath = "${expectedEffort}/lib/node_modules/@nehlis/pi-effort";
   expectedTimestamps = pkgs.callPackage ./packages/pi-timestamps.nix { };
@@ -293,6 +296,7 @@ let
 in
 {
   diet-lsp = expectedDietLsp;
+  command-code = expectedCommandCodeProvider;
   pi-effort = expectedEffort;
   pi-timestamps = expectedTimestamps;
   pi-herdr = expectedPiHerdr;
@@ -370,7 +374,7 @@ in
         };
         subagents.disableBuiltins = true;
         packages = [
-          expectedDietLspPath
+          expectedCommandCodeProviderPath
           expectedEffortPath
           expectedTimestampsPath
           expectedPiHerdrPath
@@ -405,6 +409,8 @@ in
     assert builtins.elem expectedToon default.config.home.packages;
     assert builtins.elem expectedToon optimizerConfigured.config.home.packages;
     assert !(builtins.elem expectedToon pluginsDisabled.config.home.packages);
+    assert !default.config.programs.pi-coding-agent.plugins.diet-lsp.enable;
+    assert default.config.programs.pi-coding-agent.plugins.command-code.enable;
     assert !default.config.programs.pi-coding-agent.plugins.pi-intercom.enable;
     assert default.config.programs.pi-coding-agent.plugins.remote-pi.enable;
     assert
@@ -624,6 +630,8 @@ in
         disabled.config.home.file ? "${disabled.config.programs.pi-coding-agent.configDir}/templates/drain"
       );
     assert
+      !(builtins.elem expectedCommandCodeProviderPath pluginsDisabled.config.programs.pi-coding-agent.settings.packages);
+    assert
       !(builtins.elem expectedMcpAdapterPath pluginsDisabled.config.programs.pi-coding-agent.settings.packages);
     assert
       !(builtins.elem expectedPixOptimizerPath pluginsDisabled.config.programs.pi-coding-agent.settings.packages);
@@ -669,7 +677,7 @@ in
     assert settingsOverridden.config.programs.pi-coding-agent.settings.retry.maxRetries == 3;
     assert
       settingsOverridden.config.programs.pi-coding-agent.settings.packages == [
-        expectedDietLspPath
+        expectedCommandCodeProviderPath
         expectedEffortPath
         expectedTimestampsPath
         expectedPiHerdrPath
@@ -765,7 +773,7 @@ in
         ];
       }
       ''
-        nixfmt --check ${./flake.nix} ${./checks.nix} ${./modules/pi-coding-agent.nix} ${./modules/remote-pi-relay.nix} ${./modules/pi-coding-agent/agents.nix} ${./modules/pi-coding-agent/default-agents.nix} ${./modules/pi-coding-agent/pi-subagents.nix} ${./packages/pi-diet-lsp.nix} ${./packages/pi-effort.nix} ${./packages/pi-timestamps.nix} ${./packages/pi-herdr.nix} ${./packages/pi-herdr-sudo-task.nix} ${./packages/pi-ask-herdr.nix} ${./packages/pi-herdr-rename.nix} ${./packages/pi-patty-bg-tasks.nix} ${./packages/pi-intercom.nix} ${./packages/remote-pi.nix} ${./packages/remote-pi-config-updater.nix} ${./packages/remote-pi-relay.nix} ${./packages/pi-vimmode.nix} ${./packages/pi-usage.nix} ${./packages/pi-mcp-adapter.nix} ${./packages/pi-playwright.nix} ${./packages/browser-goblin.nix} ${./packages/pix-optimizer.nix} ${./packages/pix-tools.nix} ${./packages/pi-vcc.nix} ${./packages/pi-prompt-template-model.nix} ${./packages/rpiv-todo.nix} ${./packages/pi-rules.nix} ${./packages/pi-web-access.nix} ${./packages/pi-subagents.nix} ${./packages/supi-context.nix} ${./packages/supi-extras.nix} ${./packages/toon.nix}
+        nixfmt --check ${./flake.nix} ${./checks.nix} ${./modules/pi-coding-agent.nix} ${./modules/remote-pi-relay.nix} ${./modules/pi-coding-agent/agents.nix} ${./modules/pi-coding-agent/default-agents.nix} ${./modules/pi-coding-agent/pi-subagents.nix} ${./packages/pi-diet-lsp.nix} ${./packages/pi-commandcode-provider.nix} ${./packages/pi-effort.nix} ${./packages/pi-timestamps.nix} ${./packages/pi-herdr.nix} ${./packages/pi-herdr-sudo-task.nix} ${./packages/pi-ask-herdr.nix} ${./packages/pi-herdr-rename.nix} ${./packages/pi-patty-bg-tasks.nix} ${./packages/pi-intercom.nix} ${./packages/remote-pi.nix} ${./packages/remote-pi-config-updater.nix} ${./packages/remote-pi-relay.nix} ${./packages/pi-vimmode.nix} ${./packages/pi-usage.nix} ${./packages/pi-mcp-adapter.nix} ${./packages/pi-playwright.nix} ${./packages/browser-goblin.nix} ${./packages/pix-optimizer.nix} ${./packages/pix-tools.nix} ${./packages/pi-vcc.nix} ${./packages/pi-prompt-template-model.nix} ${./packages/rpiv-todo.nix} ${./packages/pi-rules.nix} ${./packages/pi-web-access.nix} ${./packages/pi-subagents.nix} ${./packages/supi-context.nix} ${./packages/supi-extras.nix} ${./packages/toon.nix}
         WORKFLOW=${./.github/workflows/daily-update.yml} UPDATER=${./scripts/daily-update.sh} REGISTRY=${./pi-plugins.json} CHECKS=${./checks.nix} bash ${./tests/daily-updater-self-check.sh}
         touch $out
       '';
@@ -781,6 +789,27 @@ in
         test ! -e ${expectedDietLsp}/node_modules
         pi --offline --no-extensions --no-skills --no-prompt-templates --no-context-files \
           -e ${expectedDietLsp} \
+          --list-models > pi.log 2>&1
+        ! grep -E 'Extension issues|Failed to load extension|Cannot find module|Error:' pi.log
+        touch $out
+      '';
+
+  command-code-load =
+    pkgs.runCommandLocal "pi-command-code-provider-load" { nativeBuildInputs = [ expectedPackage ]; }
+      ''
+        export HOME="$TMPDIR/home"
+        export PI_CODING_AGENT_DIR="$HOME/.pi/agent"
+        export PI_TELEMETRY=0
+        export COMMANDCODE_MODELS_URL="http://127.0.0.1:1/models"
+        export COMMANDCODE_MODELS_TIMEOUT_MS=1
+        mkdir -p "$PI_CODING_AGENT_DIR"
+        provider=${expectedCommandCodeProviderPath}
+        test -f "$provider/package.json"
+        test -f "$provider/index.ts"
+        test ! -e "$provider/node_modules"
+        grep -F '"name": "pi-commandcode-provider"' "$provider/package.json"
+        pi --offline --no-extensions --no-skills --no-prompt-templates --no-context-files \
+          -e "$provider" \
           --list-models > pi.log 2>&1
         ! grep -E 'Extension issues|Failed to load extension|Cannot find module|Error:' pi.log
         touch $out

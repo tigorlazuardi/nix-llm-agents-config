@@ -45,119 +45,99 @@
     "check": "prompt-template-model"
   },
   "pi-mcp-adapter": {
-    "strategy": "unsupported",
-    "reason": "Source checkout has package-specific lock patch; manual update required."
+    "strategy": "unsupported"
   },
   "pi-diet-lsp": {
-    "strategy": "unsupported",
-    "reason": "Zero-closure source package has no concrete updater mapping yet."
+    "strategy": "unsupported"
+  },
+  "pi-commandcode-provider": {
+    "strategy": "npm",
+    "package": "pi-commandcode-provider",
+    "version": "0.5.1",
+    "src": "https://registry.npmjs.org/pi-commandcode-provider/-/pi-commandcode-provider-0.5.1.tgz",
+    "hash": "sha256-KjEOIFPJSY+vSrxWzlM2J/jkIvhok8vnFlSXrdqABgQ=",
+    "packageFile": "packages/pi-commandcode-provider.nix",
+    "check": "command-code-load"
   },
   "pi-effort": {
-    "strategy": "unsupported",
-    "reason": "Package metadata omits version binding; manual update required."
+    "strategy": "unsupported"
   },
   "pi-herdr": {
-    "strategy": "unsupported",
-    "reason": "Not yet mapped to updater package definition."
+    "strategy": "unsupported"
   },
   "pi-herdr-rename": {
-    "strategy": "unsupported",
-    "reason": "Not yet mapped to updater package definition."
+    "strategy": "unsupported"
   },
   "pi-herdr-sudo-task": {
-    "strategy": "unsupported",
-    "reason": "Not yet mapped to updater package definition."
+    "strategy": "unsupported"
   },
   "pi-ask-herdr": {
-    "strategy": "unsupported",
-    "reason": "Not yet mapped to updater package definition."
+    "strategy": "unsupported"
   },
   "pi-patty-bg-tasks": {
-    "strategy": "unsupported",
-    "reason": "Local hardening patch needs manual review."
+    "strategy": "unsupported"
   },
   "pi-intercom": {
-    "strategy": "unsupported",
-    "reason": "Package-specific lock metadata needs manual review."
+    "strategy": "unsupported"
   },
   "remote-pi": {
-    "strategy": "unsupported",
-    "reason": "Extension lock integrity repair and separately pinned patched relay need manual review."
+    "strategy": "unsupported"
   },
   "pi-playwright": {
-    "strategy": "unsupported",
-    "reason": "Browser closure lock update needs manual review."
+    "strategy": "unsupported"
   },
   "browser-goblin": {
-    "strategy": "unsupported",
-    "reason": "Pinned agent-browser compatibility patch needs manual review."
+    "strategy": "unsupported"
   },
   "pix-optimizer": {
-    "strategy": "unsupported",
-    "reason": "Contains separately pinned runtime source."
+    "strategy": "unsupported"
   },
   "pix-data": {
-    "strategy": "unsupported",
-    "reason": "Shared Pix package lock needs manual review."
+    "strategy": "unsupported"
   },
   "pix-footer": {
-    "strategy": "unsupported",
-    "reason": "Shared Pix package lock needs manual review."
+    "strategy": "unsupported"
   },
   "pix-pretty": {
-    "strategy": "unsupported",
-    "reason": "Shared Pix package lock needs manual review."
+    "strategy": "unsupported"
   },
   "pix-read": {
-    "strategy": "unsupported",
-    "reason": "Shared Pix package lock needs manual review."
+    "strategy": "unsupported"
   },
   "pix-write": {
-    "strategy": "unsupported",
-    "reason": "Shared Pix package lock needs manual review."
+    "strategy": "unsupported"
   },
   "pix-edit": {
-    "strategy": "unsupported",
-    "reason": "Shared Pix package lock needs manual review."
+    "strategy": "unsupported"
   },
   "pix-ls": {
-    "strategy": "unsupported",
-    "reason": "Shared Pix package lock needs manual review."
+    "strategy": "unsupported"
   },
   "pix-find": {
-    "strategy": "unsupported",
-    "reason": "Shared Pix package lock needs manual review."
+    "strategy": "unsupported"
   },
   "pix-grep": {
-    "strategy": "unsupported",
-    "reason": "Shared Pix package lock needs manual review."
+    "strategy": "unsupported"
   },
   "rpiv-todo": {
-    "strategy": "unsupported",
-    "reason": "Package-specific lock metadata needs manual review."
+    "strategy": "unsupported"
   },
   "pi-web-access": {
-    "strategy": "unsupported",
-    "reason": "Package-specific lock metadata needs manual review."
+    "strategy": "unsupported"
   },
   "pi-subagents": {
-    "strategy": "unsupported",
-    "reason": "Package-specific lock metadata needs manual review."
+    "strategy": "unsupported"
   },
   "supi-context": {
-    "strategy": "unsupported",
-    "reason": "Package-specific lock metadata needs manual review."
+    "strategy": "unsupported"
   },
   "supi-extras": {
-    "strategy": "unsupported",
-    "reason": "Package-specific lock metadata needs manual review."
+    "strategy": "unsupported"
   },
   "pi-usage": {
-    "strategy": "unsupported",
-    "reason": "Provenance-attested source needs manual review."
+    "strategy": "unsupported"
   },
   "pi-timestamps": {
-    "strategy": "unsupported",
-    "reason": "Package metadata omits version binding; manual update required."
+    "strategy": "unsupported"
   }
 }

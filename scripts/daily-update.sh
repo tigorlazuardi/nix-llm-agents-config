@@ -204,7 +204,7 @@ update_plugins() {
     case "$strategy" in
       npm) npm_update "$alias" "$entry" || { failures=1; git reset --hard HEAD; error "$alias failed"; } ;;
       github) github_update "$alias" "$entry" || { failures=1; git reset --hard HEAD; error "$alias failed"; } ;;
-      unsupported) say "- $alias: skipped ($(jq -r '.reason' <<<"$entry"))" ;;
+      unsupported) say "- $alias: skipped (no automated updater)" ;;
       *) failures=1; error "$alias has unknown strategy" ;;
     esac
   done < <(jq -r 'keys[]' pi-plugins.json)
