@@ -2,25 +2,34 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { StringEnum } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
 
-const GROUP_MARKERS = {
-  browser: "browser-goblin",
-  subagents: "subagents",
-} as const;
-type Group = keyof typeof GROUP_MARKERS;
+const GROUP_NAMES = ["browser", "subagents", "research", "herdr", "background", "mesh", "journal", "artifact", "todo"] as const;
+type Group = typeof GROUP_NAMES[number];
+const GROUP_MARKERS: Record<Group, readonly string[]> = {
+  browser: ["browser-goblin"],
+  subagents: ["pi-subagents"],
+  research: ["pi-web-access", "pi-mcp-adapter"],
+  herdr: ["pi-herdr"],
+  background: ["pi-patty-bg-tasks"],
+  mesh: ["remote-pi"],
+  journal: ["dev-journal"],
+  artifact: ["artifact-preview"],
+  todo: ["rpiv-todo"],
+};
+const ALWAYS_ACTIVE = new Set(["bash", "ask_user", "rename_herdr_tab", "load_tools"]);
 
 export default function (pi: ExtensionAPI) {
   const groupTools = (group: Group) => pi.getAllTools()
-    .filter((tool) => tool.name !== "load_tools" && tool.sourceInfo.path.includes(GROUP_MARKERS[group]))
+    .filter((tool) => !ALWAYS_ACTIVE.has(tool.name) && GROUP_MARKERS[group].some((marker) => tool.sourceInfo.path.includes(marker)))
     .map((tool) => tool.name);
 
   pi.registerTool({
     name: "load_tools",
     label: "Load Tools",
-    description: "Enable an installed tool group for this session. Use browser for browser automation; use subagents only for /supervise, delegation, or explicit subagent work.",
-    promptSnippet: "Enable browser or subagent tools when needed",
-    promptGuidelines: ["Use load_tools before browser automation or explicit subagent delegation when those tools are unavailable."],
+    description: "Enable an installed tool group for this session. Groups: browser, subagents, research/web/MCP, Herdr/elevation, background jobs, mesh peers, journal, artifact hosting, todo.",
+    promptSnippet: "Enable deferred tool groups when needed",
+    promptGuidelines: ["Use load_tools before browser automation; /supervise or delegation; web/current-source/MCP research; explicit Herdr or elevated work; background/streaming work; mesh coordination; journal access; artifact preview; or todo tracking for 3+ steps."],
     parameters: Type.Object({
-      group: StringEnum(["browser", "subagents"] as const),
+      group: StringEnum(GROUP_NAMES),
     }),
     async execute(_id, { group }) {
       const matches = groupTools(group);
@@ -42,7 +51,7 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.on("session_start", () => {
-    const deferred = new Set((Object.keys(GROUP_MARKERS) as Group[]).flatMap(groupTools));
+    const deferred = new Set(GROUP_NAMES.flatMap(groupTools));
     pi.setActiveTools([...new Set([
       ...pi.getActiveTools().filter((name) => !deferred.has(name)),
       "load_tools",

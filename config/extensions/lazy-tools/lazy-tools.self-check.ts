@@ -1,14 +1,40 @@
 import assert from "node:assert/strict";
 import lazyTools from "./index.ts";
 
-let active = ["read", "browser_open", "subagent"];
-let loader: { execute: (_id: string, params: { group: "browser" | "subagents" }) => Promise<unknown> } | undefined;
+type Group = "browser" | "subagents" | "research" | "herdr" | "background" | "mesh" | "journal" | "artifact" | "todo";
+const core = ["read", "bash", "ask_user", "rename_herdr_tab"];
+const grouped: Record<Group, string[]> = {
+  browser: ["browser_open"],
+  subagents: ["subagent"],
+  research: ["web_search", "mcp"],
+  herdr: ["herdr_layout", "sudo_task"],
+  background: ["jobs"],
+  mesh: ["agent_send"],
+  journal: ["dev_journal"],
+  artifact: ["host_artifact"],
+  todo: ["todo"],
+};
+const paths: Record<string, string> = {
+  read: "<builtin:read>",
+  bash: "/nix/store/pi-patty-bg-tasks/index.ts",
+  ask_user: "/nix/store/pi-ask-herdr/index.ts",
+  rename_herdr_tab: "/nix/store/pi-herdr-rename/index.ts",
+  browser_open: "/nix/store/browser-goblin/index.ts",
+  subagent: "/nix/store/pi-subagents/index.ts",
+  web_search: "/nix/store/pi-web-access/index.ts",
+  mcp: "/nix/store/pi-mcp-adapter/index.ts",
+  herdr_layout: "/nix/store/pi-herdr/index.ts",
+  sudo_task: "/nix/store/pi-herdr-sudo-task/index.ts",
+  jobs: "/nix/store/pi-patty-bg-tasks/index.ts",
+  agent_send: "/nix/store/remote-pi/index.ts",
+  dev_journal: "/config/extensions/dev-journal/index.ts",
+  host_artifact: "/config/extensions/artifact-preview/index.ts",
+  todo: "/nix/store/rpiv-todo/index.ts",
+};
+let active = [...core, ...Object.values(grouped).flat()];
+let loader: { execute: (_id: string, params: { group: Group }) => Promise<unknown> } | undefined;
 let sessionStart: (() => void) | undefined;
-const tools = [
-  { name: "read", description: "", sourceInfo: { path: "<builtin:read>" } },
-  { name: "browser_open", description: "", sourceInfo: { path: "/nix/store/browser-goblin/extensions/pi-browser/index.ts" } },
-  { name: "subagent", description: "", sourceInfo: { path: "/nix/store/pi-subagents/src/index.ts" } },
-];
+const tools = Object.entries(paths).map(([name, path]) => ({ name, description: "", sourceInfo: { path } }));
 
 lazyTools({
   registerTool(definition: typeof loader) {
@@ -27,8 +53,9 @@ lazyTools({
 
 assert(loader && sessionStart);
 sessionStart();
-assert.deepEqual(active, ["read", "load_tools"]);
-await loader.execute("browser", { group: "browser" });
-assert.deepEqual(active, ["read", "load_tools", "browser_open"]);
-await loader.execute("subagents", { group: "subagents" });
-assert.deepEqual(active, ["read", "load_tools", "browser_open", "subagent"]);
+assert.deepEqual(active, [...core, "load_tools"]);
+for (const group of Object.keys(grouped) as Group[]) {
+  await loader.execute(group, { group });
+  for (const tool of grouped[group]) assert(active.includes(tool));
+  for (const tool of core) assert(active.includes(tool));
+}
