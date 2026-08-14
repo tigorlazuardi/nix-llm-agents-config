@@ -1,13 +1,8 @@
----
-name: ui-color-theming
-description: Practical UI color palette workflow — HSL/OKLCH shade math, neutral-first palettes, dark/light mode flipping, gradient + highlight + shadow depth, Tailwind v4 token setup. Use whenever picking colors for a UI, building a theme or design tokens, implementing dark/light mode, defining CSS color variables, or when a UI looks flat/boring and needs polish. Also when choosing between hex, RGB, HSL, and OKLCH.
----
-
-# UI Color Theming
+# UI color theming
 
 Colors = shades. Three roles cover everything: neutrals (background, text, borders), one brand/primary (main actions, character), few semantic (states). Source: Sajid (tool linked in video description).
 
-Policy (per `frontend-guidelines`, wins on conflict): SHIP light mode as the default theme, but design BOTH modes from the start — the dark-first authoring order below is just a workflow for deriving shades, not the shipping default. Both token sets defined before shipping; manual toggle defaults to light.
+Parent policy wins: ship light mode by default, design both modes from start. Dark-first authoring below only derives shades. Both token sets defined before shipping; manual toggle defaults to light.
 
 ## Color format: HSL minimum, OKLCH preferred
 

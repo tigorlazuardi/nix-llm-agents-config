@@ -1,9 +1,4 @@
----
-name: ui-responsive-layout
-description: Build responsive layouts that work from smartphone to 4K — box/parent-child thinking, rows-and-columns decomposition, flexbox vs grid decision rule, flex-grow/shrink/basis mechanics, media queries, position property, Tailwind responsive utilities. Use whenever building or fixing page layout, making a UI responsive, choosing between flexbox and grid, debugging wrapping/overflow/empty-space issues, or handling sidebars/headers across breakpoints.
----
-
-# Responsive Layout
+# Responsive layout
 
 Everything on a page is a box; responsive design = dynamically moving boxes into rows and columns as width changes. Source: Sajid.
 

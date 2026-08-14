@@ -1,11 +1,20 @@
 ---
 name: frontend-guidelines
-description: General, stack-agnostic guidelines for building any frontend UI for this user. Use whenever building web components, pages, dashboards, forms, or any UI, regardless of framework. Enforces durable principles that hold even when the concrete stack changes — (1) light mode is the default theme (dark-by-default looks bad in demos), (2) library-first over rolling your own, (3) animation intensity tuned to context (user-facing exaggerate, backoffice-facing subtle), (4) every action gives feedback even when stubbed, (5) everything that can error has a visible error path even if it's only "not implemented", (6) testing is part of done. For the user's concrete React stack and exact tools, see the `frontend-stack` skill.
+description: Frontend UI rules and reference router. Use for any web component, page, dashboard, form, styling, responsive layout, visual review, or conversion UX work.
 ---
 
-# Frontend guidelines (stack-agnostic)
+# Frontend guidelines
 
-Durable principles for any frontend this user builds. These hold regardless of framework. The concrete React stack lives in the `frontend-stack` skill; when that applies it maps each principle below to a specific tool. When it conflicts with the generic `frontend-design` skill, THESE win (notably: default theme stays light).
+Read `references/frontend-design.md` for every frontend task. Then read only matching context:
+
+- React stack → `references/frontend-stack.md`
+- Colors, themes, tokens, dark mode → `references/ui-color-theming.md`
+- Flat UI, shadows, elevation → `references/ui-depth.md`
+- Responsive layout, wrapping, overflow, breakpoints → `references/ui-responsive-layout.md`
+- Padding, margins, gaps, density → `references/ui-spacing.md`
+- Onboarding, signup, pricing, paywall, conversion → `references/ux-psychology.md`
+
+Rules below always win over references.
 
 ## 1. Light mode default, dark mode designed in
 
@@ -13,7 +22,7 @@ Dark-by-default looks bad in demos. Ship light as the default, always — but da
 
 - Do not apply a dark class/theme on first render.
 - If a theme system exists: default to light, and disable "follow system" — a dark-set laptop will otherwise force dark mid-demo.
-- Define color tokens for BOTH modes from the start (see `ui-color-theming` for the flip workflow) — retrofitting dark onto hardcoded light values is a rewrite.
+- Define color tokens for BOTH modes from start; read `references/ui-color-theming.md` for flip workflow.
 - Include a manual dark toggle; its default state stays light.
 
 ## 2. Library-first

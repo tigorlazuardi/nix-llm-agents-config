@@ -1,6 +1,6 @@
 ---
 name: report-authoring
-description: Author repo-level lesson-learnt reports (errors, vendor quirks, perf gotchas, ops incidents, breaking changes) as published Starlight MDX under docs/src/content/docs/reports/. Trigger after fixing a nontrivial bug, hitting a vendor/dependency quirk or breaking change, resolving an incident, or when a previously-reported symptom recurs. Monthly cadence split per topic; recurrences append to the month's report. Each report gets a customSets entry so it ships as its own llms txt subset. Dialect rules come from astro-docs-authoring; site scaffold from astro-docs-setup.
+description: Author Starlight MDX lesson reports for nontrivial bugs, incidents, vendor quirks, performance issues, breaking changes, or recurring symptoms. Monthly topic files; recurrences append. Use astro-docs-setup only when site scaffold is missing.
 ---
 
 # Report authoring — crystallized lessons at repo level
@@ -122,7 +122,7 @@ Concrete steps / diff. Use ```diff fences.
   - Monthly cadence unchanged: filename stays `<yyyy-mm>-<topic>.mdx` and recurrences still append to it. The date in `sidebar.label`/`order` is the **first hit** and does NOT change on recurrence (the Recurrence log carries later dates). New-month chain file → its own `sidebar.label`/`order` with the new date.
 - **Symptom quoted verbatim in a code fence** — non-negotiable. It is the RAG/grep key: paste the error → find the report.
 - **Telemetry — MANDATORY when a trace existed during debugging**, omit the section entirely otherwise. Record the trace ID verbatim (grep/Tempo/Grafana lookup key later) and DRAW the spans as a mermaid `gantt` waterfall: `section` per service, one bar per span with duration, `:crit` on the failing/slow span. **Relevant spans only** — the 3–8 that tell the story, never the full trace dump. Span attributes follow telemetry redaction tiers (secrets never; account handles OK).
-- **Offending code — MANDATORY when the culprit was identified**, omit otherwise. Extract the actual snippet as it was WHEN THE BUG HIT (pre-fix — the Fix section shows the after). This is real repo source, so it MUST carry line numbers per the astro-docs-authoring codebase rule: `title="<repo-relative path>"` + `showLineNumbers startLineNumber=<first line>`, plus `{n}` highlight on the guilty line(s) and an inline comment stating what's wrong. Snippet only — the function/block that matters, not the whole file. If you must elide middle lines (`// ...`), drop `showLineNumbers` and put `path:line` in the `title` instead (the gutter can't stay honest across a gap). Redaction tiers apply.
+- **Offending code — MANDATORY when the culprit was identified**, omit otherwise. Extract the actual snippet as it was WHEN THE BUG HIT (pre-fix — the Fix section shows the after). This is real repo source, so it MUST carry `title="<repo-relative path>"` + `showLineNumbers startLineNumber=<first line>`, plus `{n}` highlight on the guilty line(s) and an inline comment stating what's wrong. Snippet only — the function/block that matters, not the whole file. If you must elide middle lines (`// ...`), drop `showLineNumbers` and put `path:line` in the `title` instead (the gutter can't stay honest across a gap). Redaction tiers apply.
 - **Follow-ups** — actionable next steps NOT covered by the fix itself (prevention work, missing alert/telemetry, regression test to backfill, /promote-rules promotion, ticket links). Checkbox list; tick items on later visits (recurrence handling includes re-checking open follow-ups — an open box on a recurring report is a signal the prevention never landed). Omit the section when there is genuinely nothing left to do.
 - Keep the headings literally `## Symptom`, `## Telemetry`, `## Offending code`, `## Root cause`, `## Fix`, `## Lesson`, `## Follow-ups`, `## Recurrence log`.
 - Redaction rules apply (secrets never appear, `<REDACTED>` placeholders — per telemetry tiers).
@@ -130,7 +130,7 @@ Concrete steps / diff. Use ```diff fences.
   - **Never `<Tabs>`** — a tab hides content; only the open tab lands in the PDF. For "A vs B" (e.g. current payload vs expected payload) use **`<Grid>`** — side-by-side when it fits, stacks vertical when narrow or printing.
   - **Mermaid `flowchart TD`** (vertical) by default so long chains fit the page width; `LR` only for a genuinely short (2–4 node) diagram.
   - No content that needs horizontal scrolling to read (print has no scrollbar): keep tables narrow and code lines short. Rich/wide/interactive material belongs in a **design doc**, not a report.
-- Dialect (frontmatter, components, fences) → `astro-docs-authoring` (incl. the print-friendly-vs-expressive split). Reports rarely need components; `<Aside>` for danger notes and `<Grid>` for comparisons are the common ones.
+- Follow existing docs-site Starlight MDX dialect. Reports rarely need components; `<Aside>` for danger notes and `<Grid>` for comparisons are common.
 
 ## Index of Reports — update EVERY write
 

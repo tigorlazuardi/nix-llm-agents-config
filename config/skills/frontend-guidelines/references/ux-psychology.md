@@ -1,9 +1,4 @@
----
-name: ux-psychology
-description: Six psychology principles for designing high-converting UX — smart defaults, goal gradient, reciprocity, IKEA effect, loss aversion, contrast effect. Use whenever designing or reviewing onboarding flows, signup pages, forms, pricing pages, upgrade/paywall screens, empty states, or any UI where the user must make a decision or take an action. Also when asked why users drop off or don't convert.
----
-
-# UX Psychology Principles
+# UX psychology principles
 
 Users don't make logical decisions. Design for how they actually think. Source: UX Peak, https://www.youtube.com/watch?v=2TlIg3VokY8
 

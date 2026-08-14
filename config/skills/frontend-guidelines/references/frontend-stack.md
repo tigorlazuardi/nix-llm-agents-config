@@ -1,11 +1,6 @@
----
-name: frontend-stack
-description: This user's concrete React frontend stack — React + Tailwind + shadcn/ui + Radix + Framer Motion, with TanStack Start for SSR, and Vitest + React Testing Library + MSW + Playwright for testing. Use when building React UI for this user and this stack is in play. This is the tool layer only; the durable principles (light-mode default, library-first, animation by context, mandatory feedback + error paths, testing-is-done) live in the `frontend-guidelines` skill — follow that too. The stack here may not apply to every project; the guidelines always do.
----
+# Frontend stack
 
-# Frontend stack (concrete tools)
-
-This is the user's preferred React stack. It is the concrete tool layer; the principles behind it live in `frontend-guidelines` — read that for the "why" and the rules. This file just maps each principle to a specific tool. If a project uses a different stack, drop this file and keep the guidelines.
+Preferred React tool layer. Parent guidelines hold; if project uses another stack, ignore this reference.
 
 ## Stack
 

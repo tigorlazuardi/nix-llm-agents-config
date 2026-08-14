@@ -1,11 +1,6 @@
----
-name: ui-depth
-description: Turn flat/boring UI into professional-looking via depth and layering — stacked lightness shades, two-part shadows (light top glow + dark bottom), inset shadows for recessed elements, elevation hierarchy, Tailwind shadow recipes. Use whenever a UI looks flat, boring, or lacks hierarchy; when styling cards, navs, dropdowns, radio groups, progress bars, or dashboards; when deciding shadows/elevation; or when everything blends together with no focus.
----
+# UI depth and layering
 
-# UI Depth & Layering
-
-Average → good design mostly = depth. Two-step process: (1) 3–4 shades of one base color, (2) shadows. Source: Sajid. Companion: ui-color-theming skill for the shade/variable system.
+Average → good design mostly = depth: 3–4 shades of one base color, then shadows. Read `ui-color-theming.md` for shade and variable system.
 
 ## Step 1: layer with lightness
 
@@ -35,7 +30,7 @@ Use color + shadow VARIABLES so the whole system flips with dark/light mode.
 
 ## Tailwind usage
 
-- Shades: theme tokens from ui-color-theming (`bg-bg-dark`, `bg-bg`, `bg-bg-light`); interactive elements `bg-bg-light`, page `bg-bg-dark`.
+- Shades: theme tokens from `ui-color-theming.md` (`bg-bg-dark`, `bg-bg`, `bg-bg-light`); interactive elements `bg-bg-light`, page `bg-bg-dark`.
 - Two-part shadow as one custom token in v4 `@theme` (box-shadow accepts comma list, inset first = top glow):
 
   ```css

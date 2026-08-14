@@ -1,28 +1,27 @@
 ---
 name: astro-docs-authoring
-description: How to author plan/design/spec docs in the Astro + Starlight MDX dialect. Trigger when writing ANY plan/design/spec doc — SPEC.mdx, docs design docs (docs/src/content/docs/design/<yyyy-mm-dd>-<topic>.mdx), ADRs, slice docs (SCOPE/IMPLEMENTATION/TASKS/RESUME) — or when a planning skill (feature planning, workflow sweep, or grill-me output) writes its artifacts. Covers the MDX dialect (Aside, Tabs, Decision), the frontmatter schema with draft exclusion, code blocks, mermaid, and tables. Replaces the retired plandeck-authoring skill. For scaffolding the docs site itself, use astro-docs-setup.
+disable-model-invocation: true
+description: Astro/Starlight MDX authoring reference, loaded by path-scoped user rule.
 ---
 
 # Authoring docs — Astro/Starlight MDX dialect
 
-One dialect everywhere. Published design docs live in the repo's Starlight site (`docs/src/content/docs/design/`); working plans (`plans/**` — SPEC/TASKS/RESUME/slice docs) use the **same dialect** but are never published. Promoting a decision from a plan into `docs/` is copy-paste, no translation. Everything degrades gracefully to readable markdown on GitHub and in editors.
+Published design docs live in the repo's Starlight site. Everything degrades gracefully to readable Markdown on GitHub and in editors.
 
 You write for a *human reader* (and, once published, for external RAG via llms.txt). Optimize for reading, not for re-parsing your own output.
 
 ## Locations
 
-| Doc | Path | Published? |
-|---|---|---|
-| FASE-1 spec | `plans/<scope>/SPEC.mdx` | no |
-| Slice docs (SCOPE/IMPLEMENTATION/TASKS/RESUME) | `plans/<scope>/<nnn>-<slice>/` | no |
-| Design decision that outlives a scope / ADR | `docs/src/content/docs/design/<yyyy-mm-dd>-<topic>.mdx` | yes |
-| Lesson-learnt report (error/quirk/incident) | `docs/src/content/docs/reports/<yyyy-mm>-<topic>.mdx` | yes — see `report-authoring` skill (structure, index, customSets) |
+| Doc | Path |
+|---|---|
+| Design decision / ADR | `docs/src/content/docs/design/<yyyy-mm-dd>-<topic>.mdx` |
+| Lesson report | `docs/src/content/docs/reports/<yyyy-mm>-<topic>.mdx` — see `report-authoring` for structure |
 
-No docs site in the repo yet and a design doc needs a home → offer `astro-docs-setup` first; meanwhile the doc can start life in `plans/` and be promoted later.
+No docs site yet → offer `astro-docs-setup` first.
 
-## Plans and decision docs MUST be `.mdx`
+## Docs use `.mdx`
 
-Any document that captures decisions, warnings, or architecture defaults to `.mdx`. Plain `.md` only for prose notes with no decisions/callouts to record. An `.mdx` file with component tags still reads fine as plain text outside the site — the tags show literally, which is acceptable degradation, so never withhold `.mdx` out of viewer fear.
+Documents with decisions, warnings, or architecture defaults use `.mdx`. Plain `.md` remains for prose without components.
 
 ## Frontmatter schema
 
@@ -39,8 +38,7 @@ draft: true        # ONLY while status: draft — excludes page from build AND l
 - `title` + `description` required. `description` is what external RAG sees in the index — write it as the answer to "why would I open this doc".
 - While drafting: `status: draft` **and** `draft: true` (Starlight-native — page drops out of the build and every `llms*.txt`; external RAG only ever sees final decisions).
 - Finalize: `status: accepted`, **remove `draft: true`**.
-- Overtaken: flip to `status: superseded`, keep it published (history preserved), link the successor in the first line.
-- `plans/**` files carry the same frontmatter even though nothing builds them — promotion stays copy-paste.
+- Overtaken: flip to `status: superseded`, keep it published (history preserved), link successor in first line.
 
 ## Components
 
@@ -50,8 +48,6 @@ Published docs import from `@astrojs/starlight/components`; `Decision` is local 
 import { Aside, Tabs, TabItem, Steps, FileTree, Badge } from '@astrojs/starlight/components';
 import Decision from '../../../components/Decision.astro';
 ```
-
-In `plans/**` (never built) the imports are optional — tags degrade to literal text either way; skip imports there.
 
 | Component | Props | Use for |
 |---|---|---|
@@ -144,9 +140,9 @@ Spec touches UI → include an HTML mock inside `<UiMock>` (local component from
 </UiMock>
 ```
 
-- Keep mocks self-contained: inline styles or a `<style>` block inside the slot; no external assets (the site is static, and plans degrade to plain text).
-- Preview workflow: a UI-bearing doc can live in the docs site with `draft: true` — renders in `astro dev`, excluded from publish until accepted. `plans/**` is never built, so promote (or temporarily draft-place) a spec when a rendered preview is needed for review.
-- Rules of the frontend-design skill do NOT apply to mocks — a mock communicates layout/intent, not production styling.
+- Keep mocks self-contained: inline styles or a `<style>` block inside slot; no external assets.
+- Preview workflow: use `draft: true` so docs render in `astro dev` but stay excluded from publish until accepted.
+- Production frontend styling rules do not apply to mocks; mocks communicate layout and intent.
 
 ## Code blocks
 
@@ -190,7 +186,7 @@ const x = compute()
 
 ## Tables
 
-GFM tables for structured comparisons (task/slice tables, risk tiers, option matrices) instead of nested bullet lists.
+Use GFM tables for structured comparisons instead of nested bullet lists.
 
 ## Review gate (L-tier)
 

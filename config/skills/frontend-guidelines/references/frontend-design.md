@@ -1,23 +1,8 @@
----
-name: frontend-design
-description: Single entry point for all frontend design work — structure (design as little as possible, Gestalt grouping, hierarchy, design-system tokens, white space) fused with distinctive production-grade aesthetics (bold direction, typography, motion, anti-generic styling), plus routing to the specialized UI skills. Use whenever building, styling, or reviewing web components, pages, dashboards, landing pages, or any UI; when designing a section from scratch; when a design feels cluttered, unscannable, flat, or generic.
----
+# Frontend design
 
-# Frontend Design
+Structure first: scannability, hierarchy, restraint. Then visual character: distinctive, anti-generic. Creativity = connecting existing ideas, not blank-slate invention.
 
-One door for frontend work. Two halves fused: STRUCTURE first (scannability, hierarchy, restraint), then VISUAL CHARACTER (distinctive, anti-generic). Creativity = process, not moment — connecting existing ideas beats blank-slate invention.
-
-## Routing — load specialized skills as the task demands
-
-- `frontend-guidelines` — user's durable rules (light-mode default, library-first, feedback + error paths, testing-is-done). ALWAYS load; on any conflict with this skill, guidelines WIN (notably: default theme stays light regardless of aesthetic direction).
-- `frontend-stack` — concrete React stack (Tailwind + shadcn/ui + Radix + Framer Motion). Load when building React UI.
-- `ui-color-theming` — palettes, tokens, dark/light mode, HSL/OKLCH, CSS variables.
-- `ui-spacing` — padding/margins/gaps, cramped layouts, button padding.
-- `ui-depth` — flat UI, shadows, elevation, layering.
-- `ui-responsive-layout` — flexbox vs grid, breakpoints, sidebars/headers.
-- `ux-psychology` — onboarding, signup, forms, pricing, paywalls, drop-off.
-
-Framework stance (user preference): USE established UI systems (shadcn/ui, Radix, Tailwind, etc.) — they cover a11y and edge cases hand-rolled CSS misses. Distinctiveness comes from tokens and polish on top, never from rebuilding primitives.
+Use established UI systems: they cover a11y and edge cases hand-rolled CSS misses. Distinctiveness comes from tokens and polish, not rebuilding primitives.
 
 ## Part 1 — Structure
 

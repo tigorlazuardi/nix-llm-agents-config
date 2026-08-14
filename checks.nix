@@ -507,6 +507,16 @@ in
     assert !(default.config.programs.pi-coding-agent.skills ? design-an-interface);
     assert !(default.config.programs.pi-coding-agent.skills ? request-refactor-plan);
     assert !(default.config.programs.pi-coding-agent.skills ? edit-article);
+    assert !(default.config.programs.pi-coding-agent.skills ? dynamic-workflow);
+    assert !(default.config.programs.pi-coding-agent.skills ? codebase-pattern-preview);
+    assert !(default.config.programs.pi-coding-agent.skills ? feature-contract-preview);
+    assert
+      default.config.home.file."${default.config.programs.pi-coding-agent.configDir}/rules".source
+      == ./config/rules;
+    assert builtins.pathExists (
+      default.config.home.file."${default.config.programs.pi-coding-agent.configDir}/rules".source
+      + "/astro-docs-authoring.md"
+    );
     assert
       default.config.home.file."${default.config.programs.pi-coding-agent.configDir}/skills".source.entries.writing-for-agents
       == default.config.programs.pi-coding-agent.skills.writing-for-agents;

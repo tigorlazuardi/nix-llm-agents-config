@@ -1,9 +1,4 @@
----
-name: ui-spacing
-description: Systematic UI spacing — rem-based 0.25 increments, group-vs-separate hierarchy, start-big rule, optical weight for button padding, Tailwind spacing-scale mapping. Use whenever setting padding, margins, gaps, or layout spacing in a UI; when a design looks cluttered, cramped, or unbalanced; when picking button padding or icon-text gaps; or when reviewing a layout for spacing consistency.
----
-
-# UI Spacing System
+# UI spacing system
 
 Spacing's job: group related elements, separate distinct ones. Users navigate by gaps, not borders. Source: Sajid.
 

@@ -522,6 +522,10 @@ in
         source = ../config/prompts;
         force = true;
       };
+      "${cfg.configDir}/rules" = {
+        source = ../config/rules;
+        force = true;
+      };
       "${cfg.configDir}/templates/drain" = {
         source = ../config/templates/drain;
         force = true;
