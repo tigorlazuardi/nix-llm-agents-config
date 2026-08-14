@@ -85,9 +85,6 @@ let
   vimMode = pinnedPkgs.callPackage ../packages/pi-vimmode.nix { };
   usage = pinnedPkgs.callPackage ../packages/pi-usage.nix { };
   mcpAdapter = pinnedPkgs.callPackage ../packages/pi-mcp-adapter.nix { };
-  playwright = pinnedPkgs.callPackage ../packages/pi-playwright.nix {
-    browserExecutable = cfg.plugins.pi-playwright.executablePath;
-  };
   browserGoblin = pinnedPkgs.callPackage ../packages/browser-goblin.nix {
     browserExecutable = cfg.plugins.browser-goblin.executablePath;
   };
@@ -184,11 +181,6 @@ let
     {
       name = "pi-mcp-adapter";
       package = "${mcpAdapter}/lib/node_modules/pi-mcp-adapter";
-      default = true;
-    }
-    {
-      name = "pi-playwright";
-      package = "${playwright}/lib/node_modules/pi-playwright";
       default = true;
     }
     {
@@ -361,17 +353,6 @@ in
           description = "Canonical HTTP(S) relay URL merged into mutable ~/.pi/remote/config.json. Consumers may override this for another relay.";
         };
 
-        pi-playwright.executablePath = lib.mkOption {
-          type = lib.types.str;
-          # ponytail: use conventional macOS Chrome path; override this option for another browser location.
-          default =
-            if pinnedPkgs.stdenv.hostPlatform.isDarwin then
-              "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
-            else
-              "${pinnedPkgs.chromium}/bin/chromium";
-          description = "Chromium-compatible browser executable used by Playwright.";
-        };
-
         browser-goblin.executablePath = lib.mkOption {
           type = lib.types.str;
           # ponytail: reuse system browser instead of agent-browser downloads; override for other Chromium builds.
@@ -519,6 +500,7 @@ in
       extensions = {
         artifact-preview = lib.mkDefault ../config/extensions/artifact-preview;
         dev-journal = lib.mkDefault ../config/extensions/dev-journal;
+        lazy-tools = lib.mkDefault ../config/extensions/lazy-tools;
       };
       skills = lib.mapAttrs (_: lib.mkDefault) (repoSkills // patchedMattSkills);
     };
@@ -530,6 +512,10 @@ in
       };
       "${cfg.configDir}/extensions/dev-journal" = {
         source = cfg.extensions.dev-journal;
+        force = true;
+      };
+      "${cfg.configDir}/extensions/lazy-tools" = {
+        source = cfg.extensions.lazy-tools;
         force = true;
       };
       "${cfg.configDir}/prompts" = {

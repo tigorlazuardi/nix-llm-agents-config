@@ -156,16 +156,6 @@
     "lockFile": "packages/remote-pi-package-lock.json",
     "check": "remote-pi-load"
   },
-  "pi-playwright": {
-    "strategy": "npm",
-    "package": "pi-playwright",
-    "version": "0.1.1",
-    "src": "https://registry.npmjs.org/pi-playwright/-/pi-playwright-0.1.1.tgz",
-    "hash": "sha256-lnpyJk49fxSNBSTJAflPFFvGRpVPu9U4DaTTDlnzwP4=",
-    "npmDepsHash": "sha256-6prPdkhNL+NtFKtd0gjLtfXyV8GCNshxhZlGskQHIvI=",
-    "lockFile": "packages/pi-playwright-package-lock.json",
-    "check": "playwright-load"
-  },
   "browser-goblin": {
     "strategy": "npm",
     "package": "browser-goblin",

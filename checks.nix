@@ -229,10 +229,6 @@ let
       "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
     else
       "${pkgs.chromium}/bin/chromium";
-  expectedPlaywright = pkgs.callPackage ./packages/pi-playwright.nix {
-    browserExecutable = expectedBrowserExecutable;
-  };
-  expectedPlaywrightPath = "${expectedPlaywright}/lib/node_modules/pi-playwright";
   expectedBrowserGoblin = pkgs.callPackage ./packages/browser-goblin.nix {
     browserExecutable = expectedBrowserExecutable;
   };
@@ -300,7 +296,6 @@ in
   pi-vimmode = expectedVimMode;
   pi-usage = expectedUsage;
   mcp-adapter = expectedMcpAdapter;
-  playwright = expectedPlaywright;
   browser-goblin = expectedBrowserGoblin;
   pix-optimizer = expectedPixOptimizer;
   pix-tools = expectedPixTools;
@@ -316,9 +311,6 @@ in
   module-evaluation =
     assert default.config.programs.pi-coding-agent.enable;
     assert darwinEvaluation.success;
-    assert
-      darwin.config.programs.pi-coding-agent.plugins.pi-playwright.executablePath
-      == "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
     assert
       darwin.config.programs.pi-coding-agent.plugins.browser-goblin.executablePath
       == "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
@@ -375,7 +367,6 @@ in
           expectedVimModePath
           expectedUsagePath
           expectedMcpAdapterPath
-          expectedPlaywrightPath
           expectedBrowserGoblinPath
           expectedPixOptimizerPath
         ]
@@ -493,6 +484,13 @@ in
       == ./config/extensions/dev-journal;
     assert
       default.config.home.file."${default.config.programs.pi-coding-agent.configDir}/extensions/dev-journal".force;
+    assert
+      default.config.programs.pi-coding-agent.extensions.lazy-tools == ./config/extensions/lazy-tools;
+    assert
+      default.config.home.file."${default.config.programs.pi-coding-agent.configDir}/extensions/lazy-tools".source
+      == ./config/extensions/lazy-tools;
+    assert
+      default.config.home.file."${default.config.programs.pi-coding-agent.configDir}/extensions/lazy-tools".force;
     assert
       default.config.home.file."${default.config.programs.pi-coding-agent.configDir}/AGENTS.md".source
       == ./config/AGENTS.md;
@@ -660,7 +658,6 @@ in
         expectedVimModePath
         expectedUsagePath
         expectedMcpAdapterPath
-        expectedPlaywrightPath
         expectedBrowserGoblinPath
         expectedPixOptimizerPath
       ]
@@ -733,6 +730,34 @@ in
         touch $out
       '';
 
+  lazy-tools =
+    pkgs.runCommandLocal "pi-lazy-tools"
+      {
+        nativeBuildInputs = [
+          expectedPackage
+          pkgs.nodejs_22
+        ];
+      }
+      ''
+        cp -R ${./config/extensions/lazy-tools} lazy-tools
+        chmod -R u+w lazy-tools
+        mkdir -p lazy-tools/node_modules/@earendil-works
+        piRuntime=${expectedPackage}/lib/node_modules/pi-monorepo
+        ln -s "$piRuntime/node_modules/@earendil-works/pi-ai" lazy-tools/node_modules/@earendil-works/pi-ai
+        ln -s "$piRuntime/node_modules/typebox" lazy-tools/node_modules/typebox
+        node --experimental-strip-types lazy-tools/lazy-tools.self-check.ts
+
+        export HOME="$TMPDIR/home"
+        export PI_CODING_AGENT_DIR="$HOME/.pi/agent"
+        export PI_TELEMETRY=0
+        mkdir -p "$PI_CODING_AGENT_DIR"
+        pi --offline --no-extensions --no-skills --no-prompt-templates --no-context-files \
+          -e ${./config/extensions/lazy-tools}/index.ts \
+          --list-models > pi.log 2>&1
+        ! grep -E 'Extension issues|Failed to load extension|Cannot find module|Error:' pi.log
+        touch $out
+      '';
+
   formatting =
     pkgs.runCommandLocal "pi-home-manager-formatting"
       {
@@ -744,7 +769,7 @@ in
         ];
       }
       ''
-        nixfmt --check ${./flake.nix} ${./checks.nix} ${./modules/pi-coding-agent.nix} ${./modules/remote-pi-relay.nix} ${./modules/pi-coding-agent/agents.nix} ${./modules/pi-coding-agent/default-agents.nix} ${./modules/pi-coding-agent/pi-subagents.nix} ${./packages/pi-diet-lsp.nix} ${./packages/pi-commandcode-provider.nix} ${./packages/pi-effort.nix} ${./packages/pi-timestamps.nix} ${./packages/pi-herdr.nix} ${./packages/pi-herdr-sudo-task.nix} ${./packages/pi-ask-herdr.nix} ${./packages/pi-herdr-rename.nix} ${./packages/pi-patty-bg-tasks.nix} ${./packages/remote-pi.nix} ${./packages/remote-pi-config-updater.nix} ${./packages/remote-pi-relay.nix} ${./packages/pi-vimmode.nix} ${./packages/pi-usage.nix} ${./packages/pi-mcp-adapter.nix} ${./packages/pi-playwright.nix} ${./packages/browser-goblin.nix} ${./packages/pix-optimizer.nix} ${./packages/pix-tools.nix} ${./packages/pi-vcc.nix} ${./packages/pi-prompt-template-model.nix} ${./packages/rpiv-todo.nix} ${./packages/pi-rules.nix} ${./packages/pi-web-access.nix} ${./packages/pi-subagents.nix} ${./packages/supi-context.nix} ${./packages/supi-extras.nix} ${./packages/toon.nix}
+        nixfmt --check ${./flake.nix} ${./checks.nix} ${./modules/pi-coding-agent.nix} ${./modules/remote-pi-relay.nix} ${./modules/pi-coding-agent/agents.nix} ${./modules/pi-coding-agent/default-agents.nix} ${./modules/pi-coding-agent/pi-subagents.nix} ${./packages/pi-diet-lsp.nix} ${./packages/pi-commandcode-provider.nix} ${./packages/pi-effort.nix} ${./packages/pi-timestamps.nix} ${./packages/pi-herdr.nix} ${./packages/pi-herdr-sudo-task.nix} ${./packages/pi-ask-herdr.nix} ${./packages/pi-herdr-rename.nix} ${./packages/pi-patty-bg-tasks.nix} ${./packages/remote-pi.nix} ${./packages/remote-pi-config-updater.nix} ${./packages/remote-pi-relay.nix} ${./packages/pi-vimmode.nix} ${./packages/pi-usage.nix} ${./packages/pi-mcp-adapter.nix} ${./packages/browser-goblin.nix} ${./packages/pix-optimizer.nix} ${./packages/pix-tools.nix} ${./packages/pi-vcc.nix} ${./packages/pi-prompt-template-model.nix} ${./packages/rpiv-todo.nix} ${./packages/pi-rules.nix} ${./packages/pi-web-access.nix} ${./packages/pi-subagents.nix} ${./packages/supi-context.nix} ${./packages/supi-extras.nix} ${./packages/toon.nix}
         WORKFLOW=${./.github/workflows/daily-update.yml} UPDATER=${./scripts/daily-update.sh} REGISTRY=${./pi-plugins.json} CHECKS=${./checks.nix} bash ${./tests/daily-updater-self-check.sh}
         touch $out
       '';
@@ -1214,38 +1239,6 @@ in
         touch $out
       '';
 
-  playwright-load =
-    pkgs.runCommandLocal "pi-playwright-load"
-      {
-        nativeBuildInputs = [
-          expectedPackage
-          pkgs.nodejs
-        ];
-      }
-      ''
-        export HOME="$TMPDIR/home"
-        export PI_CODING_AGENT_DIR="$HOME/.pi/agent"
-        export PI_PLAYWRIGHT_ARTIFACTS="$TMPDIR/artifacts"
-        export PI_TELEMETRY=0
-        export PLAYWRIGHT_CLI_SESSION=nix-check
-        export PLAYWRIGHT_MCP_HEADLESS=true
-        mkdir -p "$PI_CODING_AGENT_DIR"
-        cat > "$TMPDIR/playwright-config.json" <<'EOF'
-        {"browser":{"launchOptions":{"chromiumSandbox":false}}}
-        EOF
-
-        skill=${expectedPlaywrightPath}/skills/playwright-browser
-        test "$(node "$skill/scripts/artifact-dir.js")" = "$PI_PLAYWRIGHT_ARTIFACTS"
-        node "$skill/scripts/pw.js" open about:blank --config "$TMPDIR/playwright-config.json"
-        node "$skill/scripts/pw.js" close
-
-        pi --offline --no-extensions --no-skills --no-prompt-templates --no-context-files \
-          --skill "$skill" \
-          --list-models > pi.log 2>&1
-        ! grep -E 'Extension issues|Failed to load extension|Cannot find module|Error:' pi.log
-        touch $out
-      '';
-
   browser-goblin-load =
     pkgs.runCommandLocal "browser-goblin-load"
       {
@@ -1483,8 +1476,10 @@ in
         test ! -e ${./config/prompts}/setup-drain-agents.md
         grep -F 'do not load `~/.pi/agent/templates/drain/AGENTS.md` unless' \
           ${./config/prompts}/drain-wizard.md
+        grep -F 'load_tools({ group: "subagents" })' ${./config/prompts}/drain-wizard.md
         grep -F '## Conditional materialization procedure' ${./config/templates/drain/AGENTS.md}
         grep -F 'continuous-bounded-rounds' ${./config/templates/drain/DRAIN-PROMPT.template.md}
+        grep -F 'load_tools({ group: "subagents" })' ${./config/templates/drain/DRAIN-PROMPT.template.md}
         grep -F 'Notification failure is audited' ${./config/templates/drain/REFERENCE.md}
         test ! -e ${./config/skills}/grilling
         grep -F '**Small or short-lived app:** useful logs are enough.' \

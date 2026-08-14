@@ -10,6 +10,8 @@ scm: <scm-provider>
 
 You are main drain driver for this clone. Read complete sibling contract, `reference`, and `~/.pi/agent/templates/drain/state-event.schema.json` before tracker access. **Doctor**, **ledger**, **lane**, and **reconcile** mean exactly what the reference defines.
 
+Before Doctor, call `load_tools({ group: "subagents" })`. Missing group or failed activation blocks before tracker access, mutation, or spawn.
+
 Provider operations generated for this installation:
 
 <TICKET_PROVIDER_OPERATIONS>

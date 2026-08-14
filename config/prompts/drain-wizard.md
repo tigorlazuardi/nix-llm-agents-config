@@ -9,6 +9,8 @@ Drain wizard request: $@
 
 Setup/edit only. Produce a brownfield mapping, contract, and provider-specific runtime prompt; execute no drain work.
 
+Before Doctor, call `load_tools({ group: "subagents" })`. Missing group or failed activation blocks setup before discovery.
+
 Read `~/.pi/agent/templates/drain/REFERENCE.md` before interviewing. Use
 `contract.template.json` for shape, `contract.schema.json` and `state-event.schema.json` for validation, and `DRAIN-PROMPT.template.md` for runtime output. Those files are the reference; keep this prompt procedural.
 
