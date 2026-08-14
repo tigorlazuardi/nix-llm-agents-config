@@ -4,13 +4,16 @@
   lib,
   nodejs,
 }:
+let
+  lock = (import ./pi-plugin-lock.nix)."pi-rules";
+in
 buildNpmPackage {
   pname = "pi-rules";
-  version = "0.5.4";
+  version = lock.version;
 
   src = fetchurl {
-    url = "https://registry.npmjs.org/@tigorhutasuhut/pi-rules/-/pi-rules-0.5.4.tgz";
-    hash = "sha256-vBfv9Zh08xnOJAxVWnjSWWGqPF84Hk10ViOHIxovF5E=";
+    url = lock.src;
+    hash = lock.hash;
   };
 
   # ponytail: omit build-only and host Pi packages; offline load check proves peer resolution.
@@ -19,7 +22,7 @@ buildNpmPackage {
     ${nodejs}/bin/node -e 'const fs = require("fs"); const p = require("./package.json"); delete p.devDependencies; delete p.peerDependencies; fs.writeFileSync("package.json", JSON.stringify(p, null, 2) + "\n")'
   '';
 
-  npmDepsHash = "sha256-umptz1C77AHcLJCtT0fCVKsbu1tiiLL0fZ22MWSrVIk=";
+  npmDepsHash = lock.npmDepsHash;
   npmInstallFlags = [
     "--omit=dev"
     "--omit=peer"

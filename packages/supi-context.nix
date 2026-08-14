@@ -4,13 +4,16 @@
   lib,
   nodejs,
 }:
+let
+  lock = (import ./pi-plugin-lock.nix)."supi-context";
+in
 buildNpmPackage {
   pname = "supi-context";
-  version = "2.6.1";
+  version = lock.version;
 
   src = fetchurl {
-    url = "https://registry.npmjs.org/@mrclrchtr/supi-context/-/supi-context-2.6.1.tgz";
-    hash = "sha256-AKKWvDaxx6rEVRAlSKPA9BkpHBXeEO2citXNzLm/csQ=";
+    url = lock.src;
+    hash = lock.hash;
   };
 
   # ponytail: lock runtime deps only; managed Pi supplies optional peer packages.
@@ -19,7 +22,7 @@ buildNpmPackage {
     ${nodejs}/bin/node -e 'const fs = require("fs"); const p = require("./package.json"); delete p.peerDependencies; delete p.peerDependenciesMeta; fs.writeFileSync("package.json", JSON.stringify(p, null, 2) + "\n")'
   '';
 
-  npmDepsHash = "sha256-I6NmyT/zpHoK7zCWau51ym+Y6sUqQq5CIVvj2IlIMXk=";
+  npmDepsHash = lock.npmDepsHash;
   npmInstallFlags = [ "--omit=dev" ];
   dontNpmBuild = true;
 

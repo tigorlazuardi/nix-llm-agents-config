@@ -3,13 +3,16 @@
   lib,
   stdenvNoCC,
 }:
+let
+  lock = (import ./pi-plugin-lock.nix)."pi-patty-bg-tasks";
+in
 stdenvNoCC.mkDerivation {
   pname = "pi-patty-bg-tasks";
-  version = "1.1.6";
+  version = lock.version;
 
   src = fetchurl {
-    url = "https://registry.npmjs.org/pi-patty-bg-tasks/-/pi-patty-bg-tasks-1.1.6.tgz";
-    hash = "sha256-KFXFMqXgZE5em9hvJLyVNtn04whp9TYESKTKB5QWf3E=";
+    url = lock.src;
+    hash = lock.hash;
   };
 
   patches = [ ./pi-patty-bg-tasks-hardening.patch ];

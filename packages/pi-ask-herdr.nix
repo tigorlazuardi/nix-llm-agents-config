@@ -3,13 +3,16 @@
   lib,
   stdenvNoCC,
 }:
+let
+  lock = (import ./pi-plugin-lock.nix)."pi-ask-herdr";
+in
 stdenvNoCC.mkDerivation {
   pname = "pi-ask-herdr";
-  version = "0.2.2";
+  version = lock.version;
 
   src = fetchurl {
-    url = "https://registry.npmjs.org/pi-ask-herdr/-/pi-ask-herdr-0.2.2.tgz";
-    hash = "sha256-kJG33jskQGWP6MH+OizscjKGgqt8TQQ3CsgyL9gPeww=";
+    url = lock.src;
+    hash = lock.hash;
   };
 
   # ponytail: patch prompt metadata only; drop when upstream documents no-timeout default.

@@ -4,13 +4,16 @@
   lib,
   nodejs,
 }:
+let
+  lock = (import ./pi-plugin-lock.nix)."pi-web-access";
+in
 buildNpmPackage {
   pname = "pi-web-access";
-  version = "0.18.0";
+  version = lock.version;
 
   src = fetchurl {
-    url = "https://registry.npmjs.org/pi-web-access/-/pi-web-access-0.18.0.tgz";
-    hash = "sha256-Zli4WFssK92+0qgGPXW7Kg5SK7fxgrhzweVNvui0L20=";
+    url = lock.src;
+    hash = lock.hash;
   };
 
   # ponytail: omit build-only and host Pi packages; offline load check proves peer resolution.
@@ -19,7 +22,7 @@ buildNpmPackage {
     ${nodejs}/bin/node -e 'const fs = require("fs"); const p = require("./package.json"); delete p.devDependencies; delete p.peerDependencies; fs.writeFileSync("package.json", JSON.stringify(p, null, 2) + "\n")'
   '';
 
-  npmDepsHash = "sha256-WONkigK8jxWThjbgwqCF2J25Zn5+y1p07gaF0EMvhyI=";
+  npmDepsHash = lock.npmDepsHash;
   npmInstallFlags = [
     "--omit=dev"
     "--omit=peer"

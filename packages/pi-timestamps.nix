@@ -4,12 +4,13 @@
   runCommand,
 }:
 let
+  lock = (import ./pi-plugin-lock.nix)."pi-timestamps";
   src = fetchurl {
-    url = "https://registry.npmjs.org/pi-timestamps/-/pi-timestamps-0.1.0.tgz";
-    hash = "sha256-ZKKKEBvLSij2vHJ9zJa4CwUkQYjYUMXh3hiPhl7sKlI=";
+    url = lock.src;
+    hash = lock.hash;
   };
 in
-runCommand "pi-timestamps-0.1.0"
+runCommand "pi-timestamps-${lock.version}"
   {
     meta = {
       description = "Message timing widget and timeline browser for Pi";

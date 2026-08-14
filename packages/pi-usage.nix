@@ -4,12 +4,13 @@
   runCommand,
 }:
 let
+  lock = (import ./pi-plugin-lock.nix)."pi-usage";
   src = fetchurl {
-    url = "https://registry.npmjs.org/@narumitw/pi-usage/-/pi-usage-0.34.0.tgz";
-    hash = "sha256-WclnloM/u3ka1q2oD+Xp2jXrEIoiaLSGYUhDNxc43a4=";
+    url = lock.src;
+    hash = lock.hash;
   };
 in
-runCommand "pi-usage-0.34.0"
+runCommand "pi-usage-${lock.version}"
   {
     meta = {
       description = "Provider usage status for Pi";

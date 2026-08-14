@@ -3,20 +3,23 @@
   fetchurl,
   lib,
 }:
+let
+  lock = (import ./pi-plugin-lock.nix)."remote-pi";
+in
 buildNpmPackage {
   pname = "remote-pi";
-  version = "0.7.0";
+  version = lock.version;
 
   src = fetchurl {
-    url = "https://registry.npmjs.org/remote-pi/-/remote-pi-0.7.0.tgz";
-    hash = "sha256-YhImMDS77zPxcDpkpaFPhHDyAxqI2VjADmIjSm7EIKM=";
+    url = lock.src;
+    hash = lock.hash;
   };
 
   postPatch = ''
     cp ${./remote-pi-package-lock.json} package-lock.json
   '';
 
-  npmDepsHash = "sha256-cDhgcLZd7urYouDPhlS6E8ZRP29GHChCu78BEgPm5Sk=";
+  npmDepsHash = lock.npmDepsHash;
   npmDepsFetcherVersion = 2;
   npmInstallFlags = [ "--omit=dev" ];
   dontNpmBuild = true;

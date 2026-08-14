@@ -2,12 +2,15 @@
   fetchzip,
   lib,
 }:
+let
+  lock = (import ./pi-plugin-lock.nix)."pi-diet-lsp";
+in
 fetchzip {
   pname = "pi-diet-lsp";
-  version = "0.1.6";
+  version = lock.version;
 
-  url = "https://registry.npmjs.org/pi-diet-lsp/-/pi-diet-lsp-0.1.6.tgz";
-  hash = "sha256-xTYJUhKRcTu8nPT0RLAHqK494hjVreDGcF35Mx7MBWo=";
+  url = lock.src;
+  hash = lock.hash;
 
   meta = {
     description = "On-demand LSP code-intelligence tools for Pi";

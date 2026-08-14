@@ -4,13 +4,16 @@
   lib,
   nodejs,
 }:
+let
+  lock = (import ./pi-plugin-lock.nix)."pi-subagents";
+in
 buildNpmPackage {
   pname = "pi-subagents";
-  version = "0.35.1";
+  version = lock.version;
 
   src = fetchurl {
-    url = "https://registry.npmjs.org/pi-subagents/-/pi-subagents-0.35.1.tgz";
-    hash = "sha256-R8+/NJunyEGUPam3fF27sEOaxf1vTKQp0ErzVM9O8/g=";
+    url = lock.src;
+    hash = lock.hash;
   };
 
   # ponytail: omit test-only Pi copies; keep runner-loaded typebox in this package's closure.
@@ -19,7 +22,7 @@ buildNpmPackage {
     ${nodejs}/bin/node -e 'const fs = require("fs"); const p = require("./package.json"); delete p.devDependencies; p.dependencies.typebox = "1.3.8"; fs.writeFileSync("package.json", JSON.stringify(p, null, 2) + "\n")'
   '';
 
-  npmDepsHash = "sha256-ZXvyRRXIO2mtpOoBuyKPpQtKGo2Sd55cRF3nijNJXVw=";
+  npmDepsHash = lock.npmDepsHash;
   npmInstallFlags = [
     "--omit=dev"
     "--omit=peer"

@@ -3,15 +3,18 @@
   fetchFromGitHub,
   lib,
 }:
+let
+  lock = (import ./pi-plugin-lock.nix)."pi-prompt-template-model";
+in
 buildNpmPackage {
   pname = "pi-prompt-template-model";
-  version = "unstable-2026-08-10";
+  version = lock.version;
 
   src = fetchFromGitHub {
-    owner = "nicobailon";
-    repo = "pi-prompt-template-model";
-    rev = "2f495d79084a941fa2a6e47cd923499745863a49";
-    hash = "sha256-FCHZV6uAogF8N/oPdFSsd4itTHGliYjL3YWoq3ef1o0=";
+    owner = lock.owner;
+    repo = lock.repo;
+    rev = lock.rev;
+    hash = lock.hash;
   };
 
   # ponytail: this upstream commit omits its lock; drop unused dev deps and remove the
@@ -43,7 +46,7 @@ buildNpmPackage {
         cp ${./pi-prompt-template-model-package-lock.json} package-lock.json
   '';
 
-  npmDepsHash = "sha256-NckIvBs/w0HcHF6znNxcdGbSKONsTo33BXXeb3C5h7E=";
+  npmDepsHash = lock.npmDepsHash;
   npmInstallFlags = [
     "--omit=dev"
     "--legacy-peer-deps"

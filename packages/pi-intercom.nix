@@ -3,13 +3,16 @@
   fetchurl,
   lib,
 }:
+let
+  lock = (import ./pi-plugin-lock.nix)."pi-intercom";
+in
 buildNpmPackage {
   pname = "pi-intercom";
-  version = "0.6.0";
+  version = lock.version;
 
   src = fetchurl {
-    url = "https://registry.npmjs.org/pi-intercom/-/pi-intercom-0.6.0.tgz";
-    hash = "sha256-dsDVKEZhqsQ3JIu2x6Moef6GMpa9FctTN1GyfK/ESBg=";
+    url = lock.src;
+    hash = lock.hash;
   };
 
   postPatch = ''
@@ -23,7 +26,7 @@ buildNpmPackage {
         cp ${./pi-intercom-package-lock.json} package-lock.json
   '';
 
-  npmDepsHash = "sha256-zhw4TSMs+JnSoaBU/ZBXba7+fdmnQe9YM6+QLOzSKZk=";
+  npmDepsHash = lock.npmDepsHash;
   npmInstallFlags = [
     "--omit=dev"
     "--omit=peer"

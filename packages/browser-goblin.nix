@@ -7,13 +7,16 @@
   runtimeShell,
   stdenvNoCC,
 }:
+let
+  lock = (import ./pi-plugin-lock.nix)."browser-goblin";
+in
 stdenvNoCC.mkDerivation {
   pname = "browser-goblin";
-  version = "0.4.8";
+  version = lock.version;
 
   src = fetchurl {
-    url = "https://registry.npmjs.org/browser-goblin/-/browser-goblin-0.4.8.tgz";
-    hash = "sha256-i2bH0zwNskO7dVQfdCnevzN9qFH0L7I9EQQTCYzYLyo=";
+    url = lock.src;
+    hash = lock.hash;
   };
   sourceRoot = "package";
 

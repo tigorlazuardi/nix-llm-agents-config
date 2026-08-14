@@ -3,6 +3,9 @@
   lib,
   runCommand,
 }:
+let
+  locks = import ./pi-plugin-lock.nix;
+in
 buildNpmPackage {
   pname = "pix-tools";
   version = "1.0.0";
@@ -15,15 +18,15 @@ buildNpmPackage {
       "version": "1.0.0",
       "private": true,
       "dependencies": {
-        "@xynogen/pix-data": "0.4.1",
-        "@xynogen/pix-footer": "0.1.20",
-        "@xynogen/pix-pretty": "1.8.1",
-        "@xynogen/pix-read": "0.1.20",
-        "@xynogen/pix-write": "0.1.19",
-        "@xynogen/pix-edit": "0.1.21",
-        "@xynogen/pix-ls": "0.1.20",
-        "@xynogen/pix-find": "0.1.20",
-        "@xynogen/pix-grep": "0.1.20"
+        "@xynogen/pix-data": "${locks."pix-data".version}",
+        "@xynogen/pix-footer": "${locks."pix-footer".version}",
+        "@xynogen/pix-pretty": "${locks."pix-pretty".version}",
+        "@xynogen/pix-read": "${locks."pix-read".version}",
+        "@xynogen/pix-write": "${locks."pix-write".version}",
+        "@xynogen/pix-edit": "${locks."pix-edit".version}",
+        "@xynogen/pix-ls": "${locks."pix-ls".version}",
+        "@xynogen/pix-find": "${locks."pix-find".version}",
+        "@xynogen/pix-grep": "${locks."pix-grep".version}"
       }
     }
     EOF
@@ -44,7 +47,7 @@ buildNpmPackage {
         'return wrapTextWithAnsi(line, width);'
   '';
 
-  npmDepsHash = "sha256-Frc+oO8xFXjFIIke5i4i1bAhNQ66HX4oHUxPfOhvcls=";
+  npmDepsHash = locks."pix-data".npmDepsHash;
   npmInstallFlags = [
     "--omit=dev"
     "--legacy-peer-deps"

@@ -3,13 +3,16 @@
   lib,
   stdenvNoCC,
 }:
+let
+  lock = (import ./pi-plugin-lock.nix)."pi-herdr";
+in
 stdenvNoCC.mkDerivation {
   pname = "pi-herdr";
-  version = "0.4.0";
+  version = lock.version;
 
   src = fetchurl {
-    url = "https://registry.npmjs.org/@ogulcancelik/pi-herdr/-/pi-herdr-0.4.0.tgz";
-    hash = "sha256-B9xw6mLpOwaEvSZPADJI5SbTlBJCfasUxXTURTXVnLQ=";
+    url = lock.src;
+    hash = lock.hash;
   };
 
   installPhase = ''

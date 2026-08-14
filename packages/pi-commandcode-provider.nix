@@ -4,12 +4,13 @@
   runCommand,
 }:
 let
+  lock = (import ./pi-plugin-lock.nix)."pi-commandcode-provider";
   src = fetchurl {
-    url = "https://registry.npmjs.org/pi-commandcode-provider/-/pi-commandcode-provider-0.5.1.tgz";
-    hash = "sha256-KjEOIFPJSY+vSrxWzlM2J/jkIvhok8vnFlSXrdqABgQ=";
+    url = lock.src;
+    hash = lock.hash;
   };
 in
-runCommand "pi-commandcode-provider-0.5.1"
+runCommand "pi-commandcode-provider-${lock.version}"
   {
     meta = {
       description = "Command Code model provider for Pi";

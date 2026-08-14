@@ -3,13 +3,16 @@
   lib,
   stdenvNoCC,
 }:
+let
+  lock = (import ./pi-plugin-lock.nix)."supi-extras";
+in
 stdenvNoCC.mkDerivation {
   pname = "supi-extras";
-  version = "2.7.0";
+  version = lock.version;
 
   src = fetchurl {
-    url = "https://registry.npmjs.org/@mrclrchtr/supi-extras/-/supi-extras-2.7.0.tgz";
-    hash = "sha256-BX4RSXfxTWv2oDOe3Ztaqrc0yVXgMReDlCo1fsHBCzo=";
+    url = lock.src;
+    hash = lock.hash;
   };
 
   postPatch = ''

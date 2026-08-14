@@ -3,13 +3,16 @@
   lib,
   stdenvNoCC,
 }:
+let
+  lock = (import ./pi-plugin-lock.nix)."pi-herdr-rename";
+in
 stdenvNoCC.mkDerivation {
   pname = "pi-herdr-rename";
-  version = "0.1.0";
+  version = lock.version;
 
   src = fetchurl {
-    url = "https://registry.npmjs.org/pi-herdr-rename/-/pi-herdr-rename-0.1.0.tgz";
-    hash = "sha256-k5Zw9eH8+IeoLPmMneGRUbUKWOPAinvu8YCOZCw18ns=";
+    url = lock.src;
+    hash = lock.hash;
   };
 
   installPhase = ''

@@ -5,13 +5,16 @@
   fetchurl,
   lib,
 }:
+let
+  lock = (import ./pi-plugin-lock.nix)."pi-playwright";
+in
 buildNpmPackage {
   pname = "pi-playwright";
-  version = "0.1.1";
+  version = lock.version;
 
   src = fetchurl {
-    url = "https://registry.npmjs.org/pi-playwright/-/pi-playwright-0.1.1.tgz";
-    hash = "sha256-lnpyJk49fxSNBSTJAflPFFvGRpVPu9U4DaTTDlnzwP4=";
+    url = lock.src;
+    hash = lock.hash;
   };
 
   # ponytail: use configured browser executable; switch to Playwright-pinned browsers if path support breaks.
@@ -23,7 +26,7 @@ buildNpmPackage {
         'env: { PLAYWRIGHT_MCP_EXECUTABLE_PATH: ${builtins.toJSON browserExecutable}, ...process.env, ...(options.env || {}) },'
   '';
 
-  npmDepsHash = "sha256-6prPdkhNL+NtFKtd0gjLtfXyV8GCNshxhZlGskQHIvI=";
+  npmDepsHash = lock.npmDepsHash;
   npmInstallFlags = [ "--omit=dev" ];
   dontNpmBuild = true;
 

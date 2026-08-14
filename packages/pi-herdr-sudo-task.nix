@@ -3,13 +3,16 @@
   lib,
   stdenvNoCC,
 }:
+let
+  lock = (import ./pi-plugin-lock.nix)."pi-herdr-sudo-task";
+in
 stdenvNoCC.mkDerivation {
   pname = "pi-herdr-sudo-task";
-  version = "0.1.4";
+  version = lock.version;
 
   src = fetchurl {
-    url = "https://registry.npmjs.org/pi-herdr-sudo-task/-/pi-herdr-sudo-task-0.1.4.tgz";
-    hash = "sha256-aAChwZRsJs2jB3bY0jwES33wQscoYn/wHCkYIqP4UFo=";
+    url = lock.src;
+    hash = lock.hash;
   };
 
   installPhase = ''

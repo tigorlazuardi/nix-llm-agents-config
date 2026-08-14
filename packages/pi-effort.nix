@@ -4,12 +4,13 @@
   runCommand,
 }:
 let
+  lock = (import ./pi-plugin-lock.nix)."pi-effort";
   src = fetchurl {
-    url = "https://registry.npmjs.org/@nehlis/pi-effort/-/pi-effort-0.1.0.tgz";
-    hash = "sha256-m4AssLpv+/u3J0cFtCC8OXx836/AH4yyab0Y2mD6/iE=";
+    url = lock.src;
+    hash = lock.hash;
   };
 in
-runCommand "pi-effort-0.1.0"
+runCommand "pi-effort-${lock.version}"
   {
     meta = {
       description = "Reasoning effort command for Pi";

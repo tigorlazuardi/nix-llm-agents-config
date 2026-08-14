@@ -4,16 +4,17 @@
   runCommand,
 }:
 let
+  lock = (import ./pi-plugin-lock.nix)."pix-optimizer";
   optimizer = fetchurl {
-    url = "https://registry.npmjs.org/@xynogen/pix-optimizer/-/pix-optimizer-1.1.19.tgz";
-    hash = "sha256-SXLKA/MzuuUplQGGGInu8Xypo8kJ5ol6HcZhNyMmkoU=";
+    url = lock.src;
+    hash = lock.hash;
   };
   pretty = fetchurl {
-    url = "https://registry.npmjs.org/@xynogen/pix-pretty/-/pix-pretty-1.7.24.tgz";
-    hash = "sha256-iQjFGgoQsjhBDFnyUO38+hdqGZbyX6h/eS0ksber4i8=";
+    url = lock.bundledSources."pix-pretty".src;
+    hash = lock.bundledSources."pix-pretty".hash;
   };
 in
-runCommand "pix-optimizer-1.1.19"
+runCommand "pix-optimizer-${lock.version}"
   {
     meta = {
       description = "Token optimization suite for Pi";

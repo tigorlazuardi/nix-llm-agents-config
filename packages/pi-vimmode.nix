@@ -4,12 +4,13 @@
   runCommand,
 }:
 let
+  lock = (import ./pi-plugin-lock.nix)."pi-vimmode";
   src = fetchurl {
-    url = "https://registry.npmjs.org/pi-vimmode/-/pi-vimmode-0.9.0.tgz";
-    hash = "sha256-plzzkhCcFVHxZ3wpUE4MiUn3YkhMfDxK//HMawF3I6U=";
+    url = lock.src;
+    hash = lock.hash;
   };
 in
-runCommand "pi-vimmode-0.9.0"
+runCommand "pi-vimmode-${lock.version}"
   {
     meta = {
       description = "Vim-style prompt editing for Pi";

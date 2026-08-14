@@ -3,15 +3,18 @@
   fetchFromGitHub,
   lib,
 }:
+let
+  lock = (import ./pi-plugin-lock.nix)."pi-mcp-adapter";
+in
 buildNpmPackage {
   pname = "pi-mcp-adapter";
-  version = "2.11.0";
+  version = lock.version;
 
   src = fetchFromGitHub {
-    owner = "nicobailon";
-    repo = "pi-mcp-adapter";
-    rev = "82724dccc13a49310530898f922bafff12b7f3fe";
-    hash = "sha256-JjYS9tPSoVuubdmHTqTNNYfDJOc9CBPvVbIxvdJWi7M=";
+    owner = lock.owner;
+    repo = lock.repo;
+    rev = lock.rev;
+    hash = lock.hash;
   };
 
   # Upstream lock omits integrity for three nested dev dependencies; fetchNpmDeps validates every entry.
@@ -22,7 +25,7 @@ buildNpmPackage {
       --replace-fail '"resolved": "https://registry.npmjs.org/@earendil-works/pi-tui/-/pi-tui-0.79.10.tgz"' '"resolved": "https://registry.npmjs.org/@earendil-works/pi-tui/-/pi-tui-0.79.10.tgz", "integrity": "sha512-FUVOjDn1DVwM1uHD5MNYboXQrXjIDbSt+BQ3py7nQWCY62tKfxgiM1OBMxTcwRWLfSdZHUPpV0hm1loIdUJnPw=="'
   '';
 
-  npmDepsHash = "sha256-n41ZuieorANy40W6pL/RL5k1X4Qb0yRkJeWeY2YYXCw=";
+  npmDepsHash = lock.npmDepsHash;
   npmInstallFlags = [
     "--omit=dev"
     "--omit=peer"

@@ -4,13 +4,16 @@
   lib,
   nodejs,
 }:
+let
+  lock = (import ./pi-plugin-lock.nix)."rpiv-todo";
+in
 buildNpmPackage {
   pname = "rpiv-todo";
-  version = "2.1.0";
+  version = lock.version;
 
   src = fetchurl {
-    url = "https://registry.npmjs.org/@juicesharp/rpiv-todo/-/rpiv-todo-2.1.0.tgz";
-    hash = "sha256-PSK2aNmyWArxg7K0HSIosTLwKgOD3w9G4l7WtBCTmgg=";
+    url = lock.src;
+    hash = lock.hash;
   };
 
   # ponytail: keep only runtime deps; host Pi supplies peers and optional i18n falls back to English.
@@ -19,7 +22,7 @@ buildNpmPackage {
     ${nodejs}/bin/node -e 'const fs = require("fs"); const p = require("./package.json"); delete p.peerDependencies; delete p.peerDependenciesMeta; fs.writeFileSync("package.json", JSON.stringify(p, null, 2) + "\n")'
   '';
 
-  npmDepsHash = "sha256-9MI9RUVefTcaO2yZ+zizi9yi0WK7Kbiz7XFtfQVK1uk=";
+  npmDepsHash = lock.npmDepsHash;
   npmInstallFlags = [ "--omit=dev" ];
   dontNpmBuild = true;
 
