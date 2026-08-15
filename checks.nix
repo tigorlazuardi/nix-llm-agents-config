@@ -128,10 +128,7 @@ let
       pix-optimizer.enable = false;
       pi-vcc.enable = false;
       remote-pi.enable = false;
-      pi-herdr-subagents = {
-        enable = false;
-        agents.missing = { };
-      };
+      pi-herdr-subagents.enable = false;
       pi-vision-handoff.enable = false;
       rpiv-todo.enable = false;
     };
@@ -154,15 +151,8 @@ let
       agents.custom = {
         description = "Resolver check";
         prompt = "Custom prompt.";
-        tools = {
-          allow = [
-            "read"
-            "custom-tool"
-          ];
-          noBuiltins = true;
-        };
+        tools.allow = [ "read" ];
         skills = [ "demo" ];
-        extensions = [ "demo" ];
       };
       plugins.pi-herdr-subagents.agents.custom = { };
     };
@@ -175,8 +165,8 @@ let
         prompt = "Special prompt.";
         tools = {
           allow = [
-            "tool: special # []"
-            "line\ntool"
+            "read"
+            "bash"
           ];
           exclude = [ ];
         };
@@ -184,9 +174,9 @@ let
       plugins.pi-herdr-subagents.agents.${yamlSafeAgentName} = { };
     };
   };
-  yamlSafeAgentHomeFile = yamlSafeAgent.config.home.file.".pi/agents/${yamlSafeAgentName}.md";
+  yamlSafeAgentHomeFile =
+    yamlSafeAgent.config.home.file."${yamlSafeAgent.config.programs.pi-coding-agent.configDir}/agents/${yamlSafeAgentName}.md";
   yamlSafeAgentText = yamlSafeAgentHomeFile.text;
-  yamlSafeAgentSource = yamlSafeAgentHomeFile.source;
   invalidPlugin = evaluate {
     programs.pi-coding-agent.plugins.pi-herdr-subagents.agents.missing = { };
   };
@@ -213,10 +203,13 @@ let
     ---
     name: "orchestrator"
     description: "Deterministic black-box one-shot state machine"
-    tools:
-      - "read"
-      - "bash"
-      - "subagent"
+    model: "openai-codex/gpt-5.6-terra"
+    thinking: "medium"
+    tools: "read, bash"
+    system-prompt: replace
+    session-mode: standalone
+    spawning: true
+    auto-exit: true
     ---
     ${builtins.readFile ./config/agents/orchestrator.md}'';
 
@@ -286,7 +279,7 @@ let
   expectedWebAccess = pkgs.callPackage ./packages/pi-web-access.nix { };
   expectedWebAccessPath = "${expectedWebAccess}/lib/node_modules/pi-web-access";
   expectedHerdrSubagents = pkgs.callPackage ./packages/pi-herdr-subagents.nix { };
-  expectedHerdrSubagentsPath = "${expectedHerdrSubagents}/lib/node_modules/@asermax/pi-herdr-subagents";
+  expectedHerdrSubagentsPath = "${expectedHerdrSubagents}/lib/node_modules/pi-herdr-subagents";
   expectedVisionHandoff = pkgs.callPackage ./packages/pi-vision-handoff.nix { };
   expectedVisionHandoffPath = "${expectedVisionHandoff}/lib/node_modules/pi-vision-handoff";
   expectedVisionHandoffConfigUpdater =
@@ -575,14 +568,21 @@ in
     assert default.config.programs.pi-coding-agent.agents.implementer.model == "gpt-5.6-sol";
     assert default.config.programs.pi-coding-agent.agents.reviewer.model == "gpt-5.6-sol";
     assert default.config.programs.pi-coding-agent.agents.reviewer.effort == "high";
-    assert default.config.home.file.".pi/agents/orchestrator.md".text == expectedOrchestrator;
     assert
-      resolvedAgent.config.home.file.".pi/agents/custom.md".text == ''
+      default.config.home.file."${default.config.programs.pi-coding-agent.configDir}/agents/orchestrator.md".text
+      == expectedOrchestrator;
+    assert
+      resolvedAgent.config.home.file."${resolvedAgent.config.programs.pi-coding-agent.configDir}/agents/custom.md".text
+      == ''
         ---
         name: "custom"
         description: "Resolver check"
-        tools:
-          - "custom-tool"
+        tools: "read"
+        system-prompt: replace
+        session-mode: standalone
+        spawning: false
+        auto-exit: true
+        skills: "demo"
         ---
         Custom prompt.'';
     assert
@@ -590,9 +590,11 @@ in
         ---
         name: "edge: # [] {}"
         description: "line one:\nline two # []"
-        tools:
-          - "tool: special # []"
-          - "line\ntool"
+        tools: "read, bash"
+        system-prompt: replace
+        session-mode: standalone
+        spawning: false
+        auto-exit: true
         ---
         Special prompt.'';
     assert
@@ -694,7 +696,11 @@ in
         pluginsDisabled.config.home.file
         ? "${pluginsDisabled.config.programs.pi-coding-agent.configDir}/pi-vcc-config.json"
       );
-    assert !(pluginsDisabled.config.home.file ? ".pi/agents/orchestrator.md");
+    assert
+      !(
+        pluginsDisabled.config.home.file
+        ? "${pluginsDisabled.config.programs.pi-coding-agent.configDir}/agents/orchestrator.md"
+      );
     assert overridden.config.programs.pi-coding-agent.package == overridePackage;
     assert builtins.elem overridePackage overridden.config.home.packages;
     assert settingsOverridden.config.programs.pi-coding-agent.settings.theme == "light";
@@ -1510,36 +1516,31 @@ in
         export HOME="$TMPDIR/home"
         export PI_CODING_AGENT_DIR="$HOME/.pi/agent"
         export PI_TELEMETRY=0
+        export HERDR_ENV=1
         mkdir -p "$PI_CODING_AGENT_DIR"
-        test -f ${expectedHerdrSubagentsPath}/extension/index.ts
-        test -x ${expectedHerdrSubagentsPath}/herdr-helper
-        test ! -e ${expectedHerdrSubagentsPath}/node_modules
-        grep -F 'const COMMANDS = ["spawn", "prompt", "wait", "collect", "list", "close"]' \
-          ${expectedHerdrSubagentsPath}/extension/tool.ts
-        cp -R ${expectedHerdrSubagentsPath} "$TMPDIR/package"
+        package=${expectedHerdrSubagentsPath}
+        entry="$package/pi-extension/subagents/index.ts"
+        test -f "$entry"
+        test -f "$package/README.md"
+        test -d "$package/node_modules/@sinclair/typebox"
+        grep -F 'name: "subagent"' "$entry"
+        grep -F 'name: "subagent_interrupt"' "$entry"
+        grep -F 'name: "subagents_list"' "$entry"
+        grep -F 'name: "subagent_resume"' "$entry"
+        grep -F 'fire-and-forget async tool' "$entry"
+        cp -R "$package" "$TMPDIR/package"
         chmod -R u+w "$TMPDIR/package"
-        mkdir -p "$TMPDIR/package/node_modules/@earendil-works/pi-coding-agent"
-        ln -s ${expectedPackage}/lib/node_modules/pi-monorepo/node_modules/typebox \
-          "$TMPDIR/package/node_modules/typebox"
-        printf '{"type":"commonjs"}\n' \
-          > "$TMPDIR/package/node_modules/@earendil-works/pi-coding-agent/package.json"
-        printf 'exports.defineTool = (definition) => definition;\n' \
-          > "$TMPDIR/package/node_modules/@earendil-works/pi-coding-agent/index.js"
-        printf '#!%s\nexit 0\n' ${pkgs.runtimeShell} > "$TMPDIR/herdr-helper"
-        chmod +x "$TMPDIR/herdr-helper"
-        managedHome="$TMPDIR/managed-home"
-        projectRoot="$TMPDIR/project"
-        mkdir -p "$managedHome/.pi/agents" "$projectRoot"
-        ln -s ${yamlSafeAgentSource} "$managedHome/.pi/agents/${yamlSafeAgentName}.md"
-        test -L "$managedHome/.pi/agents/${yamlSafeAgentName}.md"
-        node ${./tests/pi-herdr-subagents-hardening-self-check.cjs} \
-          "$TMPDIR/package" \
-          ${expectedPackage}/lib/node_modules/pi-monorepo/node_modules \
-          "$managedHome" \
-          "$projectRoot" \
-          "$TMPDIR/herdr-helper"
+        mkdir -p "$TMPDIR/package/node_modules/@earendil-works"
+        ln -s ${expectedPackage}/lib/node_modules/pi-monorepo \
+          "$TMPDIR/package/node_modules/@earendil-works/pi-coding-agent"
+        ln -s ${expectedPackage}/lib/node_modules/pi-monorepo/node_modules/@earendil-works/pi-ai \
+          "$TMPDIR/package/node_modules/@earendil-works/pi-ai"
+        ln -s ${expectedPackage}/lib/node_modules/pi-monorepo/node_modules/@earendil-works/pi-tui \
+          "$TMPDIR/package/node_modules/@earendil-works/pi-tui"
+        node --experimental-strip-types ${./tests/pi-herdr-subagents-policy-self-check.mjs} \
+          "$TMPDIR/package" "$TMPDIR/policy"
         pi --offline --no-extensions --no-skills --no-prompt-templates --no-context-files \
-          -e ${expectedHerdrSubagentsPath}/extension/index.ts \
+          -e "$package" \
           --list-models > pi.log 2>&1
         ! grep -E 'Extension issues|Failed to load extension|Cannot find module|Error:' pi.log
         touch $out

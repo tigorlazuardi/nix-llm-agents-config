@@ -227,7 +227,7 @@ let
     }
     {
       name = "pi-herdr-subagents";
-      package = "${herdrSubagents}/lib/node_modules/@asermax/pi-herdr-subagents";
+      package = "${herdrSubagents}/lib/node_modules/pi-herdr-subagents";
       default = true;
     }
     {

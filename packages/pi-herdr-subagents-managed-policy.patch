@@ -1,0 +1,36 @@
+--- a/pi-extension/subagents/index.ts
++++ b/pi-extension/subagents/index.ts
+@@ -449,11 +449,29 @@
+   return !resolveEffectiveAutoExit(params, agentDefs);
+ }
+
+-function loadAgentDefaults(agentName: string): AgentDefaults | null {
+-  // Resolve through the same name-keyed map discoverAgentDefinitions() builds
+-  // for the tool-guidance catalog, so a name advertised there always resolves
+-  // to the same definition here — even when an agent's frontmatter `name`
+-  // differs from its filename.
++const MANAGED_AGENT_NAMES = new Set([
++  "implementer",
++  "orchestrator",
++  "planner",
++  "reviewer",
++  "scout",
++  "support",
++]);
++
++export function loadAgentDefaults(agentName: string): AgentDefaults | null {
++  if (MANAGED_AGENT_NAMES.has(agentName)) {
++    try {
++      const managed = parseAgentDefinition(
++        readFileSync(join(getAgentConfigDir(), "agents", `${agentName}.md`), "utf8"),
++        agentName,
++      );
++      return managed?.name === agentName ? { ...managed, source: "global" } : null;
++    } catch {
++      return null;
++    }
++  }
++
++  // Resolve all other names through normal project-over-global precedence.
+   return discoverAgentDefinitions().find((agent) => agent.name === agentName) ?? null;
+ }

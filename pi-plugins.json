@@ -335,10 +335,21 @@
   },
   "pi-herdr-subagents": {
     "strategy": "npm",
-    "package": "@asermax/pi-herdr-subagents",
-    "version": "0.4.0",
-    "src": "https://registry.npmjs.org/@asermax/pi-herdr-subagents/-/pi-herdr-subagents-0.4.0.tgz",
-    "hash": "sha256-LGoM+LBW+viUtxtjpw4bc3VzEkLwETUapVPkmFiWi8A=",
+    "package": "pi-herdr-subagents",
+    "version": "0.1.7",
+    "src": "https://registry.npmjs.org/pi-herdr-subagents/-/pi-herdr-subagents-0.1.7.tgz",
+    "hash": "sha256-xY/Wvp3NQQPSkdynYGomQULzkMVbwb2hCvrX4Xjc8IY=",
+    "npmDepsHash": "sha256-QZXQvxUNT/ylPssfowvQ6gLS4+7ti80QOIYtVVL+dD0=",
+    "manifestTransform": {
+      "delete": [
+        "devDependencies",
+        "peerDependencies"
+      ],
+      "dependencyOverrides": {
+        "@sinclair/typebox": "0.34.52"
+      }
+    },
+    "lockFile": "packages/pi-herdr-subagents-package-lock.json",
     "check": "herdr-subagents-load"
   },
   "pi-vision-handoff": {

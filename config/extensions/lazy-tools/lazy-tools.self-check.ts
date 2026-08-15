@@ -5,7 +5,7 @@ type Group = "browser" | "subagents" | "research" | "herdr" | "background" | "me
 const core = ["read", "bash", "ask_user", "rename_herdr_tab"];
 const grouped: Record<Group, string[]> = {
   browser: ["browser_open"],
-  subagents: ["subagent"],
+  subagents: ["subagent", "subagent_interrupt", "subagents_list", "subagent_resume"],
   research: ["web_search", "mcp"],
   herdr: ["herdr_layout", "sudo_task"],
   background: ["jobs"],
@@ -20,7 +20,10 @@ const paths: Record<string, string> = {
   ask_user: "/nix/store/pi-ask-herdr/index.ts",
   rename_herdr_tab: "/nix/store/pi-herdr-rename/index.ts",
   browser_open: "/nix/store/browser-goblin/index.ts",
-  subagent: "/nix/store/pi-herdr-subagents/extension/index.ts",
+  subagent: "/nix/store/pi-herdr-subagents/pi-extension/subagents/index.ts",
+  subagent_interrupt: "/nix/store/pi-herdr-subagents/pi-extension/subagents/index.ts",
+  subagents_list: "/nix/store/pi-herdr-subagents/pi-extension/subagents/index.ts",
+  subagent_resume: "/nix/store/pi-herdr-subagents/pi-extension/subagents/index.ts",
   web_search: "/nix/store/pi-web-access/index.ts",
   mcp: "/nix/store/pi-mcp-adapter/index.ts",
   herdr_layout: "/nix/store/pi-herdr/index.ts",
