@@ -488,7 +488,7 @@ in
     home.activation.visionHandoffConfig = lib.mkIf (cfg.enable && visionHandoffPlugin.enable) (
       lib.hm.dag.entryAfter [ "writeBoundary" ] ''
         run ${lib.getExe visionHandoffConfigUpdater} \
-          ${lib.escapeShellArg "${config.home.homeDirectory}/${cfg.configDir}/extensions/pi-vision-handoff.json"} \
+          ${lib.escapeShellArg "${cfg.configDir}/extensions/pi-vision-handoff.json"} \
           ${lib.escapeShellArg visionHandoffPlugin.visionModel}
       ''
     );

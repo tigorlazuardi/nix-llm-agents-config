@@ -50,6 +50,8 @@ let
   invalidVisionHandoffModelEvaluation = builtins.tryEval (
     builtins.deepSeq invalidVisionHandoffModel.config.home.activationPackage true
   );
+  visionHandoffActivation = default.config.home.activation.visionHandoffConfig.data;
+  expectedVisionHandoffConfigPath = "${default.config.programs.pi-coding-agent.configDir}/extensions/pi-vision-handoff.json";
   invalidRemotePiRelayUrl = evaluate {
     programs.pi-coding-agent.plugins.remote-pi.relayUrl = "https://?";
   };
@@ -443,6 +445,9 @@ in
     assert default.config.home.activation ? visionHandoffConfig;
     assert visionHandoffConfigured.config.home.activation ? visionHandoffConfig;
     assert !(pluginsDisabled.config.home.activation ? visionHandoffConfig);
+    assert pkgs.lib.hasInfix expectedVisionHandoffConfigPath visionHandoffActivation;
+    assert
+      !(pkgs.lib.hasInfix "${default.config.home.homeDirectory}/${expectedVisionHandoffConfigPath}" visionHandoffActivation);
     assert !(default.config.home.sessionVariables ? C2C_BIN);
     assert default.config.home.sessionVariables.PI_OFFLINE == "1";
     assert
