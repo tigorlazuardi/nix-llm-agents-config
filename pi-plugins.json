@@ -167,9 +167,9 @@
   "pix-optimizer": {
     "strategy": "npm",
     "package": "@xynogen/pix-optimizer",
-    "version": "1.1.19",
-    "src": "https://registry.npmjs.org/@xynogen/pix-optimizer/-/pix-optimizer-1.1.19.tgz",
-    "hash": "sha256-SXLKA/MzuuUplQGGGInu8Xypo8kJ5ol6HcZhNyMmkoU=",
+    "version": "1.1.24",
+    "src": "https://registry.npmjs.org/@xynogen/pix-optimizer/-/pix-optimizer-1.1.24.tgz",
+    "hash": "sha256-dxyFWC9J9QsFxAmN7tqoc5jRei3xVxM8MAPIlBDquUg=",
     "check": "pix-optimizer-load",
     "bundledSources": {
       "pix-pretty": {
