@@ -6,7 +6,7 @@ const GROUP_NAMES = ["browser", "subagents", "research", "herdr", "background", 
 type Group = typeof GROUP_NAMES[number];
 const GROUP_MARKERS: Record<Group, readonly string[]> = {
   browser: ["browser-goblin"],
-  subagents: ["pi-subagents"],
+  subagents: ["pi-herdr-subagents"],
   research: ["pi-web-access", "pi-mcp-adapter"],
   herdr: ["pi-herdr"],
   background: ["pi-patty-bg-tasks"],

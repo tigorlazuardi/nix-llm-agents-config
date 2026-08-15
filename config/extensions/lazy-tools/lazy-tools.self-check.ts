@@ -20,7 +20,7 @@ const paths: Record<string, string> = {
   ask_user: "/nix/store/pi-ask-herdr/index.ts",
   rename_herdr_tab: "/nix/store/pi-herdr-rename/index.ts",
   browser_open: "/nix/store/browser-goblin/index.ts",
-  subagent: "/nix/store/pi-subagents/index.ts",
+  subagent: "/nix/store/pi-herdr-subagents/extension/index.ts",
   web_search: "/nix/store/pi-web-access/index.ts",
   mcp: "/nix/store/pi-mcp-adapter/index.ts",
   herdr_layout: "/nix/store/pi-herdr/index.ts",

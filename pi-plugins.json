@@ -293,24 +293,6 @@
     "lockFile": "packages/pi-web-access-package-lock.json",
     "check": "web-access-load"
   },
-  "pi-subagents": {
-    "strategy": "npm",
-    "package": "pi-subagents",
-    "version": "0.35.1",
-    "src": "https://registry.npmjs.org/pi-subagents/-/pi-subagents-0.35.1.tgz",
-    "hash": "sha256-R8+/NJunyEGUPam3fF27sEOaxf1vTKQp0ErzVM9O8/g=",
-    "npmDepsHash": "sha256-ZXvyRRXIO2mtpOoBuyKPpQtKGo2Sd55cRF3nijNJXVw=",
-    "manifestTransform": {
-      "delete": [
-        "devDependencies"
-      ],
-      "dependencyOverrides": {
-        "typebox": "1.3.8"
-      }
-    },
-    "lockFile": "packages/pi-subagents-package-lock.json",
-    "check": "subagents-load"
-  },
   "supi-context": {
     "strategy": "npm",
     "package": "@mrclrchtr/supi-context",
@@ -350,5 +332,21 @@
     "src": "https://registry.npmjs.org/pi-timestamps/-/pi-timestamps-0.1.0.tgz",
     "hash": "sha256-ZKKKEBvLSij2vHJ9zJa4CwUkQYjYUMXh3hiPhl7sKlI=",
     "check": "pi-timestamps-load"
+  },
+  "pi-herdr-subagents": {
+    "strategy": "npm",
+    "package": "@asermax/pi-herdr-subagents",
+    "version": "0.4.0",
+    "src": "https://registry.npmjs.org/@asermax/pi-herdr-subagents/-/pi-herdr-subagents-0.4.0.tgz",
+    "hash": "sha256-LGoM+LBW+viUtxtjpw4bc3VzEkLwETUapVPkmFiWi8A=",
+    "check": "herdr-subagents-load"
+  },
+  "pi-vision-handoff": {
+    "strategy": "npm",
+    "package": "pi-vision-handoff",
+    "version": "0.9.5",
+    "src": "https://registry.npmjs.org/pi-vision-handoff/-/pi-vision-handoff-0.9.5.tgz",
+    "hash": "sha256-0mGKCM5AKY3rXnIvbwnYvRJNTZ/IGESJH+8ijPfzMj0=",
+    "check": "vision-handoff-load"
   }
 }

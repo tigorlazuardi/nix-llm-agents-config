@@ -507,7 +507,7 @@ This inventory mirrors the active `settings.packages` allowlist as of 2026-07-26
 | `npm:pi-prompt-template-model` | `0.10.0` | Packaged from exact upstream commit and loaded by immutable local path; drain authoring prompts inject `writing-great-skills` |
 | `npm:@koltmcbride/pi-loop` | `0.2.0` | Excluded from managed active allowlist: `readOnly` is advisory prompt-only; project-local prompt persistence is symlink/permissions/atomicity unsafe; an accepted negative cron step can hang Pi; the `loop:fire` event source recurses; first-session state leaks across in-process session switches. Exact npm tarball matches `gitHead` `ce82dfda599d0bca98464cf3150c5723920806f1` (`sha256-3uD9Zu2uQGHWLwBLMJSG8tVeRBzpHZakERuwpFfd+vE=`). Re-evaluate only after an upstream release resolves these blockers with tests, or after separately approved hardening scope. |
 | `npm:pi-web-access` | `0.18.0` | Replaces `pi-searxng`; exact npm tarball with locked runtime dependencies and host Pi peers; provider credential files resolve through request-time `!cat` commands so secret contents stay outside the Nix store; network search, remote extraction, local-file/video reads, GitHub cloning, and optional browser-cookie risks explicitly accepted |
-| `npm:pi-subagents` | `0.35.1` | Packaged from exact npm tarball with locked runtime dependencies; subprocess, worktree, artifact-write, scheduling, and delegated model/tool risks explicitly accepted |
+| `npm:@asermax/pi-herdr-subagents` | `0.4.0` | Replaces `pi-subagents`; exact npm tarball with zero dependencies and host-provided optional peers; delegates through fresh Herdr tabs using spawn/prompt/wait/collect/list/close; narrow package patch enforces rendered named-agent tool allowlists for child sessions |
 | `npm:pi-diet-lsp` | `0.1.6` | Packaged from exact npm tarball with no npm closure; host Pi supplies TypeScript loading and peers; on-demand subprocess execution uses language servers from `PATH` or trusted user config |
 | `npm:@juicesharp/rpiv-todo` | `2.1.0` | Upgraded from `1.20.0`; packaged with locked `rpiv-config` and `typebox` runtime deps; host Pi supplies peers; optional i18n omitted with documented English fallback |
 | `npm:@mrclrchtr/supi-context` | `2.6.1` | Upgraded from `2.5.0`; packaged with exact `supi-core` and `typebox` runtime deps; agent-callable tool remains disabled by default |
@@ -625,9 +625,11 @@ Superseded by `browser-goblin`, which owns browser automation and its configured
 
 </Decision>
 
-<Decision title="Resolve pi-subagents peers from host Pi" status="accepted">
+<Decision title="Replace pi-subagents with Herdr-tab delegation" status="accepted">
 
-`pi-subagents` bundles `jiti`, `yaml`, and runner-loaded `typebox`, removes test-only Pi copies, and keeps its optional Pi peer declarations. Offline loading and structured-output validation against the managed Pi package verify compatibility without duplicating the host Pi runtime closure.
+`@asermax/pi-herdr-subagents@0.4.0` has no runtime dependency closure; managed Pi supplies its optional Pi and `typebox` peers. Each pass gets a fresh visible Herdr tab and uses only `spawn`, `prompt`, `wait`, `collect`, `list`, and `close`; scheduling, fork, resume, interrupt, and chain parity are excluded.
+
+Upstream 0.4.0 parses named-agent files but drops `tools`, so packaging applies a bounded child-only patch. When `HERDR_SUBAGENT=1`, valid non-empty list-form `tools` are passed to `pi.setActiveTools`; missing or invalid allowlists resolve to no active tools. Parent sessions keep their existing tool surface. Remove the patch once upstream enforces named-agent tools.
 
 </Decision>
 

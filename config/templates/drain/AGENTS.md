@@ -7,7 +7,7 @@
 1. **Doctor:** require trusted Git root/common dir, approved schema-valid contract, matching generated prompt/hash, applicable project instructions, and installed models/tools/private skills. Inventory existing `.pi/agents/drain/`; unresolved capabilities block setup.
 2. **Propose:** generate exactly the ten agents below. Keep provider ids, branches, budgets, URLs, and state mappings in contract. Bind outward provider/SCM/deployment tools only to `delivery-orchestrator` and `housekeeper`; bind configured notifier only to `housekeeper`; bind `subagent` only to `delivery-orchestrator` and `build-lead`. Missing required tool/skill blocks affected agent rather than weakening it.
 3. **Preview and write:** show file list, agent/model/tool/skill matrix, and redacted diffs. Require explicit approval before overwriting existing targets; re-read targets immediately before atomic writes. Add `/.pi/agents/drain/` and `/.pi/drain/` to clone-local Git exclude without changing committed `.gitignore`.
-4. **Smoke:** use live subagent discovery to prove exactly ten local runtime names resolve to expected paths/models. Mechanically verify only two fanout agents, every leaf lacks `subagent`, outward tools exist only on delivery/housekeeper, optional notifier exists only on housekeeper, private skills resolve, generated paths are ignored, and tracker/SCM/notification mutation count is zero. Write `.pi/drain/agent-setup-report.md`.
+4. **Smoke:** inspect rendered named-agent files to prove exactly ten local runtime names resolve to expected paths/models/tool allowlists. Mechanically verify only two fanout agents include `subagent`, every leaf lacks it, outward tools exist only on delivery/housekeeper, optional notifier exists only on housekeeper, private skills resolve, generated paths are ignored, and tracker/SCM/notification mutation count is zero. Write `.pi/drain/agent-setup-report.md`.
 
 Load and execute this procedure only after contract materialization, unless agent-only edit was explicitly requested against an already valid contract.
 
@@ -20,7 +20,7 @@ inheritSkills: false
 defaultContext: fresh
 ```
 
-No package namespace or fallback model. Strict minimum tool allowlist. Only `delivery-orchestrator` and `build-lead` receive `subagent`; all others are leaves. `build-lead` may reach depth needed for worker/scout only.
+No package namespace or fallback model. Strict minimum tool allowlist. Only `delivery-orchestrator` and `build-lead` receive `subagent`; all others are leaves. Each child pass uses a fresh Herdr tab with `spawn` → `prompt` → terminal wake or `wait` → `collect` → `close`; use `list` for recovery. Scheduling, fork, resume, interrupt, and chain controls are unavailable.
 
 | Agent | Model | Thinking | Source role |
 |---|---|---|---|

@@ -117,7 +117,7 @@ let
       pix-optimizer.enable = false;
       pi-vcc.enable = false;
       remote-pi.enable = false;
-      pi-subagents = {
+      pi-herdr-subagents = {
         enable = false;
         agents.missing = { };
       };
@@ -152,14 +152,31 @@ let
         skills = [ "demo" ];
         extensions = [ "demo" ];
       };
-      plugins.pi-subagents.agents.custom = {
-        async = false;
-        defaultContext = "fork";
-      };
+      plugins.pi-herdr-subagents.agents.custom = { };
     };
   };
+  yamlSafeAgentName = "edge: # [] {}";
+  yamlSafeAgent = evaluate {
+    programs.pi-coding-agent = {
+      agents.${yamlSafeAgentName} = {
+        description = "line one:\nline two # []";
+        prompt = "Special prompt.";
+        tools = {
+          allow = [
+            "tool: special # []"
+            "line\ntool"
+          ];
+          exclude = [ ];
+        };
+      };
+      plugins.pi-herdr-subagents.agents.${yamlSafeAgentName} = { };
+    };
+  };
+  yamlSafeAgentHomeFile = yamlSafeAgent.config.home.file.".pi/agents/${yamlSafeAgentName}.md";
+  yamlSafeAgentText = yamlSafeAgentHomeFile.text;
+  yamlSafeAgentSource = yamlSafeAgentHomeFile.source;
   invalidPlugin = evaluate {
-    programs.pi-coding-agent.plugins.pi-subagents.agents.missing = { };
+    programs.pi-coding-agent.plugins.pi-herdr-subagents.agents.missing = { };
   };
   invalidPluginEvaluation = builtins.tryEval (
     builtins.deepSeq invalidPlugin.config.home.activationPackage true
@@ -182,16 +199,12 @@ let
   );
   expectedOrchestrator = ''
     ---
-    name: orchestrator
-    description: Deterministic black-box one-shot state machine
-    tools: read, bash, subagent
-    model: gpt-5.6-terra
-    thinking: medium
-    systemPromptMode: replace
-    inheritProjectContext: true
-    inheritSkills: false
-    defaultContext: fresh
-    async: true
+    name: "orchestrator"
+    description: "Deterministic black-box one-shot state machine"
+    tools:
+      - "read"
+      - "bash"
+      - "subagent"
     ---
     ${builtins.readFile ./config/agents/orchestrator.md}'';
 
@@ -260,8 +273,10 @@ let
   expectedRulesPath = "${expectedRules}/lib/node_modules/@tigorhutasuhut/pi-rules";
   expectedWebAccess = pkgs.callPackage ./packages/pi-web-access.nix { };
   expectedWebAccessPath = "${expectedWebAccess}/lib/node_modules/pi-web-access";
-  expectedSubagents = pkgs.callPackage ./packages/pi-subagents.nix { };
-  expectedSubagentsPath = "${expectedSubagents}/lib/node_modules/pi-subagents";
+  expectedHerdrSubagents = pkgs.callPackage ./packages/pi-herdr-subagents.nix { };
+  expectedHerdrSubagentsPath = "${expectedHerdrSubagents}/lib/node_modules/@asermax/pi-herdr-subagents";
+  expectedVisionHandoff = pkgs.callPackage ./packages/pi-vision-handoff.nix { };
+  expectedVisionHandoffPath = "${expectedVisionHandoff}/lib/node_modules/pi-vision-handoff";
   expectedSupiContext = pkgs.callPackage ./packages/supi-context.nix { };
   expectedSupiContextPath = "${expectedSupiContext}/lib/node_modules/@mrclrchtr/supi-context";
   expectedSupiExtras = pkgs.callPackage ./packages/supi-extras.nix { };
@@ -304,7 +319,8 @@ in
   rpiv-todo = expectedRpivTodo;
   rules = expectedRules;
   web-access = expectedWebAccess;
-  subagents = expectedSubagents;
+  herdr-subagents = expectedHerdrSubagents;
+  vision-handoff = expectedVisionHandoff;
   supi-context = expectedSupiContext;
   supi-extras = expectedSupiExtras;
 
@@ -376,7 +392,8 @@ in
           expectedRpivTodoPath
           expectedRulesPath
           expectedWebAccessPath
-          expectedSubagentsPath
+          expectedHerdrSubagentsPath
+          expectedVisionHandoffPath
           expectedSupiContextPath
           expectedSupiExtrasPath
         ]
@@ -530,22 +547,26 @@ in
     assert default.config.programs.pi-coding-agent.agents.implementer.model == "gpt-5.6-sol";
     assert default.config.programs.pi-coding-agent.agents.reviewer.model == "gpt-5.6-sol";
     assert default.config.programs.pi-coding-agent.agents.reviewer.effort == "high";
+    assert default.config.home.file.".pi/agents/orchestrator.md".text == expectedOrchestrator;
     assert
-      default.config.home.file."${default.config.programs.pi-coding-agent.configDir}/agents/orchestrator.md".text
-      == expectedOrchestrator;
-    assert
-      resolvedAgent.config.home.file."${resolvedAgent.config.programs.pi-coding-agent.configDir}/agents/custom.md".text
-      == ''
+      resolvedAgent.config.home.file.".pi/agents/custom.md".text == ''
         ---
-        name: custom
-        description: Resolver check
-        tools: custom-tool
-        skills: demo
-        extensions: ${toString ./config/AGENTS.md}
-        defaultContext: fork
-        async: false
+        name: "custom"
+        description: "Resolver check"
+        tools:
+          - "custom-tool"
         ---
         Custom prompt.'';
+    assert
+      yamlSafeAgentText == ''
+        ---
+        name: "edge: # [] {}"
+        description: "line one:\nline two # []"
+        tools:
+          - "tool: special # []"
+          - "line\ntool"
+        ---
+        Special prompt.'';
     assert
       resolvedAgent.config.home.file."${resolvedAgent.config.programs.pi-coding-agent.configDir}/skills".source.entries.demo
       == ./config/agents;
@@ -626,7 +647,7 @@ in
     assert
       !(builtins.elem expectedRemotePiPath pluginsDisabled.config.programs.pi-coding-agent.settings.packages);
     assert
-      !(builtins.elem expectedSubagentsPath pluginsDisabled.config.programs.pi-coding-agent.settings.packages);
+      !(builtins.elem expectedHerdrSubagentsPath pluginsDisabled.config.programs.pi-coding-agent.settings.packages);
     assert
       !(builtins.elem expectedRpivTodoPath pluginsDisabled.config.programs.pi-coding-agent.settings.packages);
     assert
@@ -645,11 +666,7 @@ in
         pluginsDisabled.config.home.file
         ? "${pluginsDisabled.config.programs.pi-coding-agent.configDir}/pi-vcc-config.json"
       );
-    assert
-      !(
-        pluginsDisabled.config.home.file
-        ? "${pluginsDisabled.config.programs.pi-coding-agent.configDir}/agents/orchestrator.md"
-      );
+    assert !(pluginsDisabled.config.home.file ? ".pi/agents/orchestrator.md");
     assert overridden.config.programs.pi-coding-agent.package == overridePackage;
     assert builtins.elem overridePackage overridden.config.home.packages;
     assert settingsOverridden.config.programs.pi-coding-agent.settings.theme == "light";
@@ -677,7 +694,8 @@ in
         expectedRpivTodoPath
         expectedRulesPath
         expectedWebAccessPath
-        expectedSubagentsPath
+        expectedHerdrSubagentsPath
+        expectedVisionHandoffPath
         expectedSupiContextPath
         expectedSupiExtrasPath
       ]
@@ -779,7 +797,7 @@ in
         ];
       }
       ''
-        nixfmt --check ${./flake.nix} ${./checks.nix} ${./modules/pi-coding-agent.nix} ${./modules/remote-pi-relay.nix} ${./modules/pi-coding-agent/agents.nix} ${./modules/pi-coding-agent/default-agents.nix} ${./modules/pi-coding-agent/pi-subagents.nix} ${./packages/pi-diet-lsp.nix} ${./packages/pi-commandcode-provider.nix} ${./packages/pi-effort.nix} ${./packages/pi-timestamps.nix} ${./packages/pi-herdr.nix} ${./packages/pi-herdr-sudo-task.nix} ${./packages/pi-ask-herdr.nix} ${./packages/pi-herdr-rename.nix} ${./packages/pi-patty-bg-tasks.nix} ${./packages/remote-pi.nix} ${./packages/remote-pi-config-updater.nix} ${./packages/remote-pi-relay.nix} ${./packages/pi-vimmode.nix} ${./packages/pi-usage.nix} ${./packages/pi-mcp-adapter.nix} ${./packages/browser-goblin.nix} ${./packages/pix-optimizer.nix} ${./packages/pix-tools.nix} ${./packages/pi-vcc.nix} ${./packages/pi-prompt-template-model.nix} ${./packages/rpiv-todo.nix} ${./packages/pi-rules.nix} ${./packages/pi-web-access.nix} ${./packages/pi-subagents.nix} ${./packages/supi-context.nix} ${./packages/supi-extras.nix} ${./packages/toon.nix}
+        nixfmt --check ${./flake.nix} ${./checks.nix} ${./modules/pi-coding-agent.nix} ${./modules/remote-pi-relay.nix} ${./modules/pi-coding-agent/agents.nix} ${./modules/pi-coding-agent/default-agents.nix} ${./modules/pi-coding-agent/pi-herdr-subagents.nix} ${./packages/pi-diet-lsp.nix} ${./packages/pi-commandcode-provider.nix} ${./packages/pi-effort.nix} ${./packages/pi-timestamps.nix} ${./packages/pi-herdr.nix} ${./packages/pi-herdr-sudo-task.nix} ${./packages/pi-ask-herdr.nix} ${./packages/pi-herdr-rename.nix} ${./packages/pi-patty-bg-tasks.nix} ${./packages/remote-pi.nix} ${./packages/remote-pi-config-updater.nix} ${./packages/remote-pi-relay.nix} ${./packages/pi-vimmode.nix} ${./packages/pi-usage.nix} ${./packages/pi-mcp-adapter.nix} ${./packages/browser-goblin.nix} ${./packages/pix-optimizer.nix} ${./packages/pix-tools.nix} ${./packages/pi-vcc.nix} ${./packages/pi-prompt-template-model.nix} ${./packages/rpiv-todo.nix} ${./packages/pi-rules.nix} ${./packages/pi-web-access.nix} ${./packages/pi-herdr-subagents.nix} ${./packages/pi-vision-handoff.nix} ${./packages/supi-context.nix} ${./packages/supi-extras.nix} ${./packages/toon.nix}
         WORKFLOW=${./.github/workflows/daily-update.yml} UPDATER=${./scripts/daily-update.sh} REGISTRY=${./pi-plugins.json} CHECKS=${./checks.nix} bash ${./tests/daily-updater-self-check.sh}
         touch $out
       '';
@@ -1405,21 +1423,68 @@ in
         touch $out
       '';
 
-  subagents-load =
-    pkgs.runCommandLocal "pi-subagents-load" { nativeBuildInputs = [ expectedPackage ]; }
+  vision-handoff-load =
+    pkgs.runCommandLocal "pi-vision-handoff-load" { nativeBuildInputs = [ expectedPackage ]; }
       ''
         export HOME="$TMPDIR/home"
         export PI_CODING_AGENT_DIR="$HOME/.pi/agent"
         export PI_TELEMETRY=0
         mkdir -p "$PI_CODING_AGENT_DIR"
-        test -d ${expectedSubagentsPath}/node_modules/jiti
-        test -d ${expectedSubagentsPath}/node_modules/typebox
-        test -d ${expectedSubagentsPath}/node_modules/yaml
-        cd ${expectedSubagentsPath}
-        ${pkgs.nodejs}/bin/node -e 'const { createJiti } = require("jiti"); const load = createJiti(process.cwd() + "/nix-check.cjs", { interopDefault: true }); const mod = load("./src/runs/shared/structured-output.ts"); const result = mod.validateStructuredOutputValue({ type: "object", required: ["ok"], properties: { ok: { type: "boolean" } }, additionalProperties: false }, { ok: true }); if (result.status !== "valid") { console.error(result); process.exit(1); }'
-        cd "$TMPDIR"
+        package=${expectedVisionHandoffPath}
+        test -f "$package/package.json"
+        test -f "$package/vision-handoff.ts"
+        test ! -e "$package/node_modules"
+        grep -F '"./vision-handoff.ts"' "$package/package.json"
         pi --offline --no-extensions --no-skills --no-prompt-templates --no-context-files \
-          -e ${expectedSubagentsPath} \
+          -e "$package" \
+          --list-models > pi.log 2>&1
+        ! grep -E 'Extension issues|Failed to load extension|Cannot find module|Error:' pi.log
+        test ! -e "$PI_CODING_AGENT_DIR/extensions/pi-vision-handoff.json"
+        touch $out
+      '';
+
+  herdr-subagents-load =
+    pkgs.runCommandLocal "pi-herdr-subagents-load"
+      {
+        nativeBuildInputs = [
+          expectedPackage
+          pkgs.nodejs_22
+        ];
+      }
+      ''
+        export HOME="$TMPDIR/home"
+        export PI_CODING_AGENT_DIR="$HOME/.pi/agent"
+        export PI_TELEMETRY=0
+        mkdir -p "$PI_CODING_AGENT_DIR"
+        test -f ${expectedHerdrSubagentsPath}/extension/index.ts
+        test -x ${expectedHerdrSubagentsPath}/herdr-helper
+        test ! -e ${expectedHerdrSubagentsPath}/node_modules
+        grep -F 'const COMMANDS = ["spawn", "prompt", "wait", "collect", "list", "close"]' \
+          ${expectedHerdrSubagentsPath}/extension/tool.ts
+        cp -R ${expectedHerdrSubagentsPath} "$TMPDIR/package"
+        chmod -R u+w "$TMPDIR/package"
+        mkdir -p "$TMPDIR/package/node_modules/@earendil-works/pi-coding-agent"
+        ln -s ${expectedPackage}/lib/node_modules/pi-monorepo/node_modules/typebox \
+          "$TMPDIR/package/node_modules/typebox"
+        printf '{"type":"commonjs"}\n' \
+          > "$TMPDIR/package/node_modules/@earendil-works/pi-coding-agent/package.json"
+        printf 'exports.defineTool = (definition) => definition;\n' \
+          > "$TMPDIR/package/node_modules/@earendil-works/pi-coding-agent/index.js"
+        printf '#!%s\nexit 0\n' ${pkgs.runtimeShell} > "$TMPDIR/herdr-helper"
+        chmod +x "$TMPDIR/herdr-helper"
+        managedHome="$TMPDIR/managed-home"
+        projectRoot="$TMPDIR/project"
+        mkdir -p "$managedHome/.pi/agents" "$projectRoot"
+        ln -s ${yamlSafeAgentSource} "$managedHome/.pi/agents/${yamlSafeAgentName}.md"
+        test -L "$managedHome/.pi/agents/${yamlSafeAgentName}.md"
+        node ${./tests/pi-herdr-subagents-hardening-self-check.cjs} \
+          "$TMPDIR/package" \
+          ${expectedPackage}/lib/node_modules/pi-monorepo/node_modules \
+          "$managedHome" \
+          "$projectRoot" \
+          "$TMPDIR/herdr-helper"
+        pi --offline --no-extensions --no-skills --no-prompt-templates --no-context-files \
+          -e ${expectedHerdrSubagentsPath}/extension/index.ts \
           --list-models > pi.log 2>&1
         ! grep -E 'Extension issues|Failed to load extension|Cannot find module|Error:' pi.log
         touch $out

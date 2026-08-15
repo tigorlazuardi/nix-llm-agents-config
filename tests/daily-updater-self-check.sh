@@ -76,7 +76,7 @@ tar -czf "$tmp/fixture.tgz" -C "$tmp/fixture" package
 cat >"$tmp/pi-plugins.json" <<'EOF'
 {
   "pi-rules":{"strategy":"npm","package":"@fixture/pi-rules","version":"0.5.4","src":"https://old.invalid/pi-rules-0.5.4.tgz","hash":"sha256-old-source","npmDepsHash":"sha256-old-deps","manifestTransform":{"delete":["devDependencies","peerDependencies"]},"lockFile":"packages/pi-rules-package-lock.json","check":"rules"},
-  "pi-subagents":{"strategy":"npm","package":"@fixture/pi-rules","version":"0.5.4","src":"https://old.invalid/pi-rules-0.5.4.tgz","hash":"sha256-old-source","npmDepsHash":"sha256-old-deps","manifestTransform":{"delete":["devDependencies"],"dependencyOverrides":{"typebox":"1.3.8"}},"lockFile":"packages/pi-subagents-package-lock.json","check":"rules"},
+  "pi-herdr-subagents":{"strategy":"npm","package":"@fixture/pi-rules","version":"0.5.4","src":"https://old.invalid/pi-rules-0.5.4.tgz","hash":"sha256-old-source","check":"herdr"},
   "remote-pi":{"strategy":"npm","package":"@fixture/pi-rules","version":"0.5.4","src":"https://old.invalid/pi-rules-0.5.4.tgz","hash":"sha256-old-source","npmDepsHash":"sha256-old-deps","lockFile":"packages/remote-pi-package-lock.json","check":"rules"},
   "rpiv-todo":{"strategy":"npm","package":"@fixture/pi-rules","version":"0.5.4","src":"https://old.invalid/pi-rules-0.5.4.tgz","hash":"sha256-old-source","npmDepsHash":"sha256-old-deps","manifestTransform":{"delete":["peerDependencies","peerDependenciesMeta"]},"lockFile":"packages/rpiv-todo-package-lock.json","check":"rules"},
   "pi-vcc":{"strategy":"github","owner":"fixture","repo":"pi-vcc","tagPrefix":"v","version":"0.4.0","rev":"old-vcc-rev","hash":"sha256-old-vcc","removePaths":["demo.gif"],"check":"pi-vcc"},
@@ -135,7 +135,7 @@ case "$*" in
   'store prefetch-file --json --unpack https://github.com/fixture/pi-vcc/archive/new-vcc-rev.tar.gz') printf '{"hash":"sha256-raw-vcc","storePath":"%s"}\n' "$FIXTURE_VCC_SOURCE" ;;
   'store prefetch-file --json --unpack https://github.com/fixture/github-prompt/archive/new-prompt-rev.tar.gz') printf '{"hash":"sha256-new-prompt","storePath":"%s"}\n' "$FIXTURE_GITHUB_PROMPT_SOURCE" ;;
   'store prefetch-file --json --unpack https://github.com/fixture/github-mcp/archive/new-mcp-rev.tar.gz') printf '{"hash":"sha256-new-mcp","storePath":"%s"}\n' "$FIXTURE_GITHUB_MCP_SOURCE" ;;
-  'store prefetch-file --json '*) printf '{"hash":"sha256-new-source","storePath":"%s"}\n' "$FIXTURE_TARBALL" ;;
+  'store prefetch-file --json '*) [ "${PREFETCH_FAIL:-}" != 1 ] || exit 1; printf '{"hash":"sha256-new-source","storePath":"%s"}\n' "$FIXTURE_TARBALL" ;;
   'run nixpkgs#prefetch-npm-deps -- '*)
     [ "${PREFETCH_FAIL:-}" != 1 ] || exit 1
     lock=${!#}
@@ -148,7 +148,7 @@ case "$*" in
     [ ! -e "$source_path/demo.gif" ] && [ -f "$source_path/index.ts" ]
     printf '%s\n' 'sha256-new-vcc'
     ;;
-  'build .#checks.x86_64-linux.rules'|'build .#checks.x86_64-linux.pi-vcc'|'build .#checks.x86_64-linux.pix-tools'|'build .#checks.x86_64-linux.github-prompt'|'build .#checks.x86_64-linux.github-mcp')
+  'build .#checks.x86_64-linux.rules'|'build .#checks.x86_64-linux.herdr'|'build .#checks.x86_64-linux.pi-vcc'|'build .#checks.x86_64-linux.pix-tools'|'build .#checks.x86_64-linux.github-prompt'|'build .#checks.x86_64-linux.github-mcp')
     check=${2##*.}
     [ "${CHECK_FAIL:-}" != "$check" ] || exit 1
     if [ "${POST_COMMIT_FAIL:-}" = "$check" ]; then
@@ -293,11 +293,11 @@ if (
 fi
 grep -F 'update pi-rules to 0.5.5' "$tmp/git-post-commit/commits/"*/history
 ! grep -F 'update pi-rules to 0.5.5' "$tmp/git-post-commit/push-history"
-grep -F 'update pi-subagents to 0.5.5' "$tmp/git-post-commit/push-history"
-jq -e '."pi-rules".version == "0.5.4" and ."pi-subagents".version == "0.5.5"' "$tmp/git-post-commit/pushed-pi-plugins.json" >/dev/null
+grep -F 'update pi-herdr-subagents to 0.5.5' "$tmp/git-post-commit/push-history"
+jq -e '."pi-rules".version == "0.5.4" and ."pi-herdr-subagents".version == "0.5.5"' "$tmp/git-post-commit/pushed-pi-plugins.json" >/dev/null
 head=$(cat "$tmp/git-post-commit/HEAD")
 [ ! -e "$tmp/git-post-commit/commits/$head/packages/pi-rules-package-lock.json" ]
-[ -e "$tmp/git-post-commit/commits/$head/packages/pi-subagents-package-lock.json" ]
+[ ! -e "$tmp/git-post-commit/commits/$head/packages/pi-herdr-subagents-package-lock.json" ]
 
 cp "$tmp/baseline/pi-plugins.json" "$tmp/pi-plugins.json"
 rm -f "$tmp/packages/"*-package-lock.json
@@ -307,7 +307,6 @@ rm -f "$tmp/packages/"*-package-lock.json
 )
 fixture_hash="sha256-$(sha256sum "$tmp/packages/pi-rules-package-lock.json" | cut -d' ' -f1)"
 jq -e '.packages[""].dependencies.typebox == "^1.0.0" and (.packages[""] | has("devDependencies") or has("peerDependencies") | not) and .packages[""].peerDependenciesMeta.pi.optional' "$tmp/packages/pi-rules-package-lock.json" >/dev/null
-jq -e '.packages[""].dependencies.typebox == "1.3.8" and (.packages[""] | has("devDependencies") | not) and .packages[""].peerDependencies.pi == "*" and .packages[""].peerDependenciesMeta.pi.optional' "$tmp/packages/pi-subagents-package-lock.json" >/dev/null
 jq -e '.packages[""].dependencies.typebox == "^1.0.0" and .packages[""].devDependencies["must-not-lock"] == "9.9.9" and .packages[""].peerDependencies.pi == "*" and .packages[""].peerDependenciesMeta.pi.optional' "$tmp/packages/remote-pi-package-lock.json" >/dev/null
 jq -e '.packages[""].dependencies.typebox == "^1.0.0" and .packages[""].devDependencies["must-not-lock"] == "9.9.9" and (.packages[""] | has("peerDependencies") or has("peerDependenciesMeta") | not)' "$tmp/packages/rpiv-todo-package-lock.json" >/dev/null
 [ "$packages_before" = "$(cat "$tmp/packages/pi-rules.nix" "$tmp/packages/pi-vcc.nix")" ]
