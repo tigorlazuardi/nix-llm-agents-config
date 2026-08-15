@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -15,10 +15,17 @@ writeFileSync(join(agentDir, "agents", "reviewer.md"), "---\nname: reviewer\ntoo
 writeFileSync(join(project, ".pi", "agents", "reviewer.md"), "---\nname: reviewer\ntools: write\nspawning: true\n---\nproject\n");
 writeFileSync(join(project, ".pi", "agents", "custom.md"), "---\nname: custom\ntools: write\n---\ncustom\n");
 
-const { loadAgentDefaults } = await import(pathToFileURL(join(packageRoot, "pi-extension", "subagents", "index.ts")));
+const subagentsDir = join(packageRoot, "pi-extension", "subagents");
+const { loadAgentDefaults } = await import(pathToFileURL(join(subagentsDir, "index.ts")));
+const { buildHerdrEscapeArgs } = await import(pathToFileURL(join(subagentsDir, "herdr.ts")));
 const reviewer = loadAgentDefaults("reviewer");
 assert.equal(reviewer?.source, "global");
 assert.equal(reviewer?.tools, "read");
 assert.equal(reviewer?.spawning, false);
 assert.equal(loadAgentDefaults("custom")?.source, "project");
 assert.equal(loadAgentDefaults("missing"), null);
+assert.deepEqual(buildHerdrEscapeArgs?.("pane-1"), ["pane", "send-keys", "pane-1", "Escape", "Escape"]);
+assert.doesNotMatch(
+  readFileSync(join(subagentsDir, "subagent-done.ts"), "utf8"),
+  /registerShortcut\(["']ctrl\+j["']/,
+);

@@ -16,7 +16,10 @@ buildNpmPackage {
     hash = lock.hash;
   };
 
-  patches = [ ./pi-herdr-subagents-managed-policy.patch ];
+  patches = [
+    ./pi-herdr-subagents-managed-policy.patch
+    ./pi-herdr-subagents-lifecycle-compatibility.patch
+  ];
 
   # ponytail: Pi provides extension peers; retain missing legacy TypeBox import locally.
   postPatch = ''

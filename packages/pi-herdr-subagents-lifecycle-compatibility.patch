@@ -1,0 +1,35 @@
+--- a/pi-extension/subagents/herdr.ts
++++ b/pi-extension/subagents/herdr.ts
+@@ -249,8 +249,13 @@
+   herdrExec(["pane", "run", surface, command]);
+ }
+
++export function buildHerdrEscapeArgs(surface: string): string[] {
++  // First Escape leaves Vim insert mode; second cancels the active Pi turn.
++  return ["pane", "send-keys", surface, "Escape", "Escape"];
++}
++
+ export function sendHerdrEscape(surface: string): void {
+-  herdrExec(["pane", "send-keys", surface, "Escape"]);
++  herdrExec(buildHerdrEscapeArgs(surface));
+ }
+
+ export function closeHerdrSurface(surface: string): void {
+--- a/pi-extension/subagents/subagent-done.ts
++++ b/pi-extension/subagents/subagent-done.ts
+@@ -264,15 +264,6 @@
+     recorder.sessionShutdown((event as any).reason);
+   });
+
+-  // Toggle expand/collapse with Ctrl+J
+-  pi.registerShortcut("ctrl+j", {
+-    description: "Toggle subagent tools widget",
+-    handler: (ctx) => {
+-      expanded = !expanded;
+-      renderWidget(ctx, null);
+-    },
+-  });
+-
+   pi.registerTool({
+     name: "caller_ping",
+     label: "Caller Ping",
