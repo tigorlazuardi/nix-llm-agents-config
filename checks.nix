@@ -41,6 +41,15 @@ let
   remotePiConfigured = evaluate {
     programs.pi-coding-agent.plugins.remote-pi.relayUrl = "https://relay.consumer.example";
   };
+  visionHandoffConfigured = evaluate {
+    programs.pi-coding-agent.plugins.pi-vision-handoff.visionModel = "google/gemini-2.5-pro";
+  };
+  invalidVisionHandoffModel = evaluate {
+    programs.pi-coding-agent.plugins.pi-vision-handoff.visionModel = "missing-provider";
+  };
+  invalidVisionHandoffModelEvaluation = builtins.tryEval (
+    builtins.deepSeq invalidVisionHandoffModel.config.home.activationPackage true
+  );
   invalidRemotePiRelayUrl = evaluate {
     programs.pi-coding-agent.plugins.remote-pi.relayUrl = "https://?";
   };
@@ -121,6 +130,7 @@ let
         enable = false;
         agents.missing = { };
       };
+      pi-vision-handoff.enable = false;
       rpiv-todo.enable = false;
     };
   };
@@ -277,6 +287,9 @@ let
   expectedHerdrSubagentsPath = "${expectedHerdrSubagents}/lib/node_modules/@asermax/pi-herdr-subagents";
   expectedVisionHandoff = pkgs.callPackage ./packages/pi-vision-handoff.nix { };
   expectedVisionHandoffPath = "${expectedVisionHandoff}/lib/node_modules/pi-vision-handoff";
+  expectedVisionHandoffConfigUpdater =
+    pkgs.callPackage ./packages/pi-vision-handoff-config-updater.nix
+      { };
   expectedSupiContext = pkgs.callPackage ./packages/supi-context.nix { };
   expectedSupiContextPath = "${expectedSupiContext}/lib/node_modules/@mrclrchtr/supi-context";
   expectedSupiExtras = pkgs.callPackage ./packages/supi-extras.nix { };
@@ -420,6 +433,16 @@ in
     assert default.config.home.activation ? remotePiConfig;
     assert remotePiConfigured.config.home.activation ? remotePiConfig;
     assert !(pluginsDisabled.config.home.activation ? remotePiConfig);
+    assert
+      default.config.programs.pi-coding-agent.plugins.pi-vision-handoff.visionModel
+      == "openai-codex/gpt-5.6-luna";
+    assert
+      visionHandoffConfigured.config.programs.pi-coding-agent.plugins.pi-vision-handoff.visionModel
+      == "google/gemini-2.5-pro";
+    assert !invalidVisionHandoffModelEvaluation.success;
+    assert default.config.home.activation ? visionHandoffConfig;
+    assert visionHandoffConfigured.config.home.activation ? visionHandoffConfig;
+    assert !(pluginsDisabled.config.home.activation ? visionHandoffConfig);
     assert !(default.config.home.sessionVariables ? C2C_BIN);
     assert default.config.home.sessionVariables.PI_OFFLINE == "1";
     assert
@@ -797,7 +820,7 @@ in
         ];
       }
       ''
-        nixfmt --check ${./flake.nix} ${./checks.nix} ${./modules/pi-coding-agent.nix} ${./modules/remote-pi-relay.nix} ${./modules/pi-coding-agent/agents.nix} ${./modules/pi-coding-agent/default-agents.nix} ${./modules/pi-coding-agent/pi-herdr-subagents.nix} ${./packages/pi-diet-lsp.nix} ${./packages/pi-commandcode-provider.nix} ${./packages/pi-effort.nix} ${./packages/pi-timestamps.nix} ${./packages/pi-herdr.nix} ${./packages/pi-herdr-sudo-task.nix} ${./packages/pi-ask-herdr.nix} ${./packages/pi-herdr-rename.nix} ${./packages/pi-patty-bg-tasks.nix} ${./packages/remote-pi.nix} ${./packages/remote-pi-config-updater.nix} ${./packages/remote-pi-relay.nix} ${./packages/pi-vimmode.nix} ${./packages/pi-usage.nix} ${./packages/pi-mcp-adapter.nix} ${./packages/browser-goblin.nix} ${./packages/pix-optimizer.nix} ${./packages/pix-tools.nix} ${./packages/pi-vcc.nix} ${./packages/pi-prompt-template-model.nix} ${./packages/rpiv-todo.nix} ${./packages/pi-rules.nix} ${./packages/pi-web-access.nix} ${./packages/pi-herdr-subagents.nix} ${./packages/pi-vision-handoff.nix} ${./packages/supi-context.nix} ${./packages/supi-extras.nix} ${./packages/toon.nix}
+        nixfmt --check ${./flake.nix} ${./checks.nix} ${./modules/pi-coding-agent.nix} ${./modules/remote-pi-relay.nix} ${./modules/pi-coding-agent/agents.nix} ${./modules/pi-coding-agent/default-agents.nix} ${./modules/pi-coding-agent/pi-herdr-subagents.nix} ${./packages/pi-diet-lsp.nix} ${./packages/pi-commandcode-provider.nix} ${./packages/pi-effort.nix} ${./packages/pi-timestamps.nix} ${./packages/pi-herdr.nix} ${./packages/pi-herdr-sudo-task.nix} ${./packages/pi-ask-herdr.nix} ${./packages/pi-herdr-rename.nix} ${./packages/pi-patty-bg-tasks.nix} ${./packages/remote-pi.nix} ${./packages/remote-pi-config-updater.nix} ${./packages/remote-pi-relay.nix} ${./packages/pi-vimmode.nix} ${./packages/pi-usage.nix} ${./packages/pi-mcp-adapter.nix} ${./packages/browser-goblin.nix} ${./packages/pix-optimizer.nix} ${./packages/pix-tools.nix} ${./packages/pi-vcc.nix} ${./packages/pi-prompt-template-model.nix} ${./packages/rpiv-todo.nix} ${./packages/pi-rules.nix} ${./packages/pi-web-access.nix} ${./packages/pi-herdr-subagents.nix} ${./packages/pi-vision-handoff.nix} ${./packages/pi-vision-handoff-config-updater.nix} ${./packages/supi-context.nix} ${./packages/supi-extras.nix} ${./packages/toon.nix}
         WORKFLOW=${./.github/workflows/daily-update.yml} UPDATER=${./scripts/daily-update.sh} REGISTRY=${./pi-plugins.json} CHECKS=${./checks.nix} bash ${./tests/daily-updater-self-check.sh}
         touch $out
       '';
@@ -1420,6 +1443,33 @@ in
           -e ${expectedWebAccessPath} \
           --list-models > pi.log 2>&1
         ! grep -E 'Extension issues|Failed to load extension|Cannot find module|Error:' pi.log
+        touch $out
+      '';
+
+  vision-handoff-config-updater =
+    pkgs.runCommandLocal "pi-vision-handoff-config-updater-check"
+      {
+        nativeBuildInputs = [
+          expectedVisionHandoffConfigUpdater
+          pkgs.jq
+        ];
+      }
+      ''
+        config="$TMPDIR/pi-vision-handoff.json"
+        pi-vision-handoff-config-update "$config" openai-codex/gpt-5.6-luna
+        jq -e '. == {visionModel: "openai-codex/gpt-5.6-luna"}' "$config" >/dev/null
+        test "$(stat -c %a "$config")" = 600
+
+        printf '%s\n' '{"enabled":false,"cacheMax":12,"visionModel":"old/model"}' > "$config"
+        pi-vision-handoff-config-update "$config" google/gemini-2.5-pro
+        jq -e '. == {enabled: false, cacheMax: 12, visionModel: "google/gemini-2.5-pro"}' "$config" >/dev/null
+
+        printf '%s\n' 'not-json' > "$config"
+        cp "$config" "$TMPDIR/before"
+        if pi-vision-handoff-config-update "$config" openai/gpt-4o; then
+          exit 1
+        fi
+        cmp "$TMPDIR/before" "$config"
         touch $out
       '';
 

@@ -61,6 +61,7 @@ let
   optimizerPlugin = cfg.plugins.pix-optimizer;
   vccPlugin = cfg.plugins.pi-vcc;
   webAccessPlugin = cfg.plugins.pi-web-access;
+  visionHandoffPlugin = cfg.plugins.pi-vision-handoff;
   remotePiPlugin = cfg.plugins.remote-pi;
   mkPluginOptions =
     default:
@@ -82,6 +83,9 @@ let
   pattyBgTasks = pinnedPkgs.callPackage ../packages/pi-patty-bg-tasks.nix { };
   remotePi = pinnedPkgs.callPackage ../packages/remote-pi.nix { };
   remotePiConfigUpdater = pinnedPkgs.callPackage ../packages/remote-pi-config-updater.nix { };
+  visionHandoffConfigUpdater =
+    pinnedPkgs.callPackage ../packages/pi-vision-handoff-config-updater.nix
+      { };
   vimMode = pinnedPkgs.callPackage ../packages/pi-vimmode.nix { };
   usage = pinnedPkgs.callPackage ../packages/pi-usage.nix { };
   mcpAdapter = pinnedPkgs.callPackage ../packages/pi-mcp-adapter.nix { };
@@ -384,6 +388,12 @@ in
           };
         };
 
+        pi-vision-handoff.visionModel = lib.mkOption {
+          type = lib.types.strMatching "[^/[:space:]]+/[^[:space:]]+";
+          default = "openai-codex/gpt-5.6-luna";
+          description = "Vision-capable provider/model used to describe images for text-only models.";
+        };
+
         pi-vcc.settings = {
           overrideDefaultCompaction = lib.mkOption {
             type = lib.types.bool;
@@ -471,6 +481,15 @@ in
         run ${lib.getExe remotePiConfigUpdater} \
           ${lib.escapeShellArg "${config.home.homeDirectory}/.pi/remote/config.json"} \
           ${lib.escapeShellArg remotePiPlugin.relayUrl}
+      ''
+    );
+
+    # ponytail: merge only managed default so /vision-handoff can persist every other setting.
+    home.activation.visionHandoffConfig = lib.mkIf (cfg.enable && visionHandoffPlugin.enable) (
+      lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+        run ${lib.getExe visionHandoffConfigUpdater} \
+          ${lib.escapeShellArg "${config.home.homeDirectory}/${cfg.configDir}/extensions/pi-vision-handoff.json"} \
+          ${lib.escapeShellArg visionHandoffPlugin.visionModel}
       ''
     );
 
