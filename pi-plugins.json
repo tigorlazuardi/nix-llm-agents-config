@@ -325,6 +325,14 @@
     "hash": "sha256-WclnloM/u3ka1q2oD+Xp2jXrEIoiaLSGYUhDNxc43a4=",
     "check": "pi-usage-load"
   },
+  "pi-cache-optimizer": {
+    "strategy": "npm",
+    "package": "pi-cache-optimizer",
+    "version": "2.8.2",
+    "src": "https://registry.npmjs.org/pi-cache-optimizer/-/pi-cache-optimizer-2.8.2.tgz",
+    "hash": "sha256-Qe6hX674pwzny1CZmjvdQBbWVDXSdLiDwgXwMyzEIM8=",
+    "check": "pi-cache-optimizer-load"
+  },
   "pi-timestamps": {
     "strategy": "npm",
     "package": "pi-timestamps",
