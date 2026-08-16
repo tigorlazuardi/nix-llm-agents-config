@@ -125,9 +125,9 @@
   "pi-herdr-sudo-task": {
     "strategy": "npm",
     "package": "pi-herdr-sudo-task",
-    "version": "0.1.4",
-    "src": "https://registry.npmjs.org/pi-herdr-sudo-task/-/pi-herdr-sudo-task-0.1.4.tgz",
-    "hash": "sha256-aAChwZRsJs2jB3bY0jwES33wQscoYn/wHCkYIqP4UFo=",
+    "version": "0.1.5",
+    "src": "https://registry.npmjs.org/pi-herdr-sudo-task/-/pi-herdr-sudo-task-0.1.5.tgz",
+    "hash": "sha256-Xlz9kMkdVC35YEIVXdgGvfDv1C/PoDe4J69i7iykLUg=",
     "check": "pi-herdr-sudo-task-load"
   },
   "pi-ask-herdr": {

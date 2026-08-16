@@ -1292,6 +1292,9 @@ in
         grep -F 'spawn("sudo",argv,{stdio:["inherit","pipe","pipe"]})' ${expectedHerdrSudoTaskPath}/dist/index.js
         grep -F 'if (!ctx.hasUI)' ${expectedHerdrSudoTaskPath}/dist/index.js
         grep -F 'Proceed with these exact commands? [y/n]:' ${expectedHerdrSudoTaskPath}/dist/index.js
+        grep -F 'pi.events.emit("herdr:blocked", { active, label })' ${expectedHerdrSudoTaskPath}/dist/index.js
+        grep -F 'setHerdrBlocked(pi, true, "Waiting for sudo approval")' ${expectedHerdrSudoTaskPath}/dist/index.js
+        grep -F '() => setHerdrBlocked(pi, false)' ${expectedHerdrSudoTaskPath}/dist/index.js
         pi --offline --no-extensions --no-skills --no-prompt-templates --no-context-files \
           -e ${expectedHerdrSudoTaskPath} \
           --list-models > pi.log 2>&1
