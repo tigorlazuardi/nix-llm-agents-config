@@ -264,10 +264,10 @@
   "rpiv-todo": {
     "strategy": "npm",
     "package": "@juicesharp/rpiv-todo",
-    "version": "2.5.2",
-    "src": "https://registry.npmjs.org/@juicesharp/rpiv-todo/-/rpiv-todo-2.5.2.tgz",
-    "hash": "sha256-SVKCoS4wy5fgdbZFLN7b5LDL5Sfm7q6qweAA/iTZ+bU=",
-    "npmDepsHash": "sha256-gDHXjHwpMlCvzlpLGiWhWZW1VvWfpV5xjQSyV2hgKCs=",
+    "version": "2.6.0",
+    "src": "https://registry.npmjs.org/@juicesharp/rpiv-todo/-/rpiv-todo-2.6.0.tgz",
+    "hash": "sha256-abJ3KYpv0GETf0aUXjZNKAxDSxdvq9v6BQnKeu4BXoc=",
+    "npmDepsHash": "sha256-hxowT4tYZ1M5Z4Byx9H52bB68XIgZw3ROeMJ5ewEX/A=",
     "manifestTransform": {
       "delete": [
         "peerDependencies",
