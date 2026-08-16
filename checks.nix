@@ -212,6 +212,10 @@ let
     auto-exit: true
     ---
     ${builtins.readFile ./config/agents/orchestrator.md}'';
+  managedImplementerFixture =
+    pkgs.writeText "managed-implementer.md"
+      default.config.home.file."${default.config.programs.pi-coding-agent.configDir}/agents/implementer.md".text;
+  managedOrchestratorFixture = pkgs.writeText "managed-orchestrator.md" expectedOrchestrator;
 
   expectedPackage = pkgs.pi-coding-agent;
   expectedDietLsp = pkgs.callPackage ./packages/pi-diet-lsp.nix { };
@@ -1538,7 +1542,7 @@ in
         ln -s ${expectedPackage}/lib/node_modules/pi-monorepo/node_modules/@earendil-works/pi-tui \
           "$TMPDIR/package/node_modules/@earendil-works/pi-tui"
         node --experimental-strip-types ${./tests/pi-herdr-subagents-policy-self-check.mjs} \
-          "$TMPDIR/package" "$TMPDIR/policy"
+          "$TMPDIR/package" "$TMPDIR/policy" ${managedImplementerFixture} ${managedOrchestratorFixture}
         pi --offline --no-extensions --no-skills --no-prompt-templates --no-context-files \
           -e "$package" \
           --list-models > pi.log 2>&1

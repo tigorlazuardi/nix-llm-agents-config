@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
-const [packageRoot, root] = process.argv.slice(2);
+const [packageRoot, root, implementerFixture, orchestratorFixture] = process.argv.slice(2);
 const agentDir = join(root, "agent");
 const project = join(root, "project");
 mkdirSync(join(agentDir, "agents"), { recursive: true });
@@ -11,7 +11,8 @@ mkdirSync(join(project, ".pi", "agents"), { recursive: true });
 process.env.PI_CODING_AGENT_DIR = agentDir;
 process.chdir(project);
 
-writeFileSync(join(agentDir, "agents", "implementer.md"), "---\nname: \"implementer\"\ntools: \"read, bash, edit, write, grep, find\"\nsystem-prompt: replace\nsession-mode: standalone\nspawning: false\n---\nglobal managed body\n");
+copyFileSync(implementerFixture, join(agentDir, "agents", "implementer.md"));
+copyFileSync(orchestratorFixture, join(agentDir, "agents", "orchestrator.md"));
 writeFileSync(join(project, ".pi", "agents", "implementer.md"), "---\nname: implementer\ntools: write\nspawning: true\n---\nproject\n");
 writeFileSync(join(project, ".pi", "agents", "custom.md"), "---\nname: custom\ntools: write\n---\ncustom\n");
 
@@ -23,12 +24,24 @@ const implementer = loadAgentDefaults("implementer");
 assert.equal(implementer?.source, "global");
 assert.equal(implementer?.tools, "read, bash, edit, write, grep, find");
 assert.equal(implementer?.spawning, false);
+assert.equal(implementer?.model, "openai-codex/gpt-5.6-sol");
+assert.equal(implementer?.thinking, "medium");
 assert.equal(implementer?.sessionMode, "standalone");
 assert.equal(implementer?.systemPromptMode, "replace");
-assert.equal(implementer?.body, "global managed body");
+assert.match(implementer?.body ?? "", /You implement one approved task/);
 assert.equal(
   __test__.buildSubagentToolAllowlist(implementer?.tools),
   "read,bash,edit,write,grep,find,caller_ping,subagent_done",
+);
+const orchestrator = loadAgentDefaults("orchestrator");
+assert.equal(orchestrator?.source, "global");
+assert.equal(orchestrator?.model, "openai-codex/gpt-5.6-terra");
+assert.equal(orchestrator?.thinking, "medium");
+assert.equal(orchestrator?.tools, "read, bash, subagent");
+assert.equal(orchestrator?.spawning, true);
+assert.equal(
+  __test__.buildSubagentToolAllowlist(orchestrator?.tools),
+  "read,bash,subagent,caller_ping,subagent_done",
 );
 assert.equal(loadAgentDefaults("custom")?.source, "project");
 assert.equal(loadAgentDefaults("missing"), null);
