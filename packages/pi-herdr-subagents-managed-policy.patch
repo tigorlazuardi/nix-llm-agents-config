@@ -1,6 +1,26 @@
 --- a/pi-extension/subagents/index.ts
 +++ b/pi-extension/subagents/index.ts
-@@ -449,11 +449,29 @@
+@@ -254,8 +254,18 @@
+ }
+
+ function getFrontmatterValue(frontmatter: string, key: string): string | undefined {
+   const match = frontmatter.match(new RegExp(`^${key}:\\s*(.+)$`, "m"));
+-  return match ? match[1].trim() : undefined;
++  if (!match) return undefined;
++  const value = match[1].trim();
++  if (value.startsWith('"')) {
++    try {
++      const decoded = JSON.parse(value);
++      if (typeof decoded === "string") return decoded;
++    } catch {
++      // Preserve non-JSON user-authored YAML scalars.
++    }
++  }
++  return value;
+ }
+
+ function parseOptionalBoolean(value: string | undefined): boolean | undefined {
+@@ -449,11 +459,29 @@
    return !resolveEffectiveAutoExit(params, agentDefs);
  }
 

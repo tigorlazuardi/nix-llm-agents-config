@@ -11,18 +11,25 @@ mkdirSync(join(project, ".pi", "agents"), { recursive: true });
 process.env.PI_CODING_AGENT_DIR = agentDir;
 process.chdir(project);
 
-writeFileSync(join(agentDir, "agents", "reviewer.md"), "---\nname: reviewer\ntools: read\nspawning: false\n---\nglobal\n");
-writeFileSync(join(project, ".pi", "agents", "reviewer.md"), "---\nname: reviewer\ntools: write\nspawning: true\n---\nproject\n");
+writeFileSync(join(agentDir, "agents", "implementer.md"), "---\nname: \"implementer\"\ntools: \"read, bash, edit, write, grep, find\"\nsystem-prompt: replace\nsession-mode: standalone\nspawning: false\n---\nglobal managed body\n");
+writeFileSync(join(project, ".pi", "agents", "implementer.md"), "---\nname: implementer\ntools: write\nspawning: true\n---\nproject\n");
 writeFileSync(join(project, ".pi", "agents", "custom.md"), "---\nname: custom\ntools: write\n---\ncustom\n");
 
 const subagentsDir = join(packageRoot, "pi-extension", "subagents");
-const { loadAgentDefaults } = await import(pathToFileURL(join(subagentsDir, "index.ts")));
+const { loadAgentDefaults, __test__ } = await import(pathToFileURL(join(subagentsDir, "index.ts")));
 const { buildHerdrEscapeArgs } = await import(pathToFileURL(join(subagentsDir, "herdr.ts")));
 const { default: registerSubagentDone } = await import(pathToFileURL(join(subagentsDir, "subagent-done.ts")));
-const reviewer = loadAgentDefaults("reviewer");
-assert.equal(reviewer?.source, "global");
-assert.equal(reviewer?.tools, "read");
-assert.equal(reviewer?.spawning, false);
+const implementer = loadAgentDefaults("implementer");
+assert.equal(implementer?.source, "global");
+assert.equal(implementer?.tools, "read, bash, edit, write, grep, find");
+assert.equal(implementer?.spawning, false);
+assert.equal(implementer?.sessionMode, "standalone");
+assert.equal(implementer?.systemPromptMode, "replace");
+assert.equal(implementer?.body, "global managed body");
+assert.equal(
+  __test__.buildSubagentToolAllowlist(implementer?.tools),
+  "read,bash,edit,write,grep,find,caller_ping,subagent_done",
+);
 assert.equal(loadAgentDefaults("custom")?.source, "project");
 assert.equal(loadAgentDefaults("missing"), null);
 assert.deepEqual(buildHerdrEscapeArgs?.("pane-1"), ["pane", "send-keys", "pane-1", "Escape", "Escape"]);
