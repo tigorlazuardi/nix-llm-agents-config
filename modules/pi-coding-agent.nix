@@ -513,6 +513,10 @@ in
         // lib.optionalAttrs vccPlugin.enable {
           PI_VCC_CONFIG_PATH = lib.mkDefault "${cfg.configDir}/pi-vcc-config.json";
         }
+        // lib.optionalAttrs cfg.plugins.browser-goblin.enable {
+          # ponytail: reuse browser-goblin's Nix Chromium for project Playwright; override per project when needed.
+          PLAYWRIGHT_EXECUTABLE_PATH = lib.mkDefault cfg.plugins.browser-goblin.executablePath;
+        }
       );
     };
 

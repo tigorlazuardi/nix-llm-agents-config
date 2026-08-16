@@ -123,6 +123,7 @@ let
     vccConfigured.config.home.file."${vccConfigured.config.programs.pi-coding-agent.configDir}/pi-vcc-config.json".source;
   pluginsDisabled = evaluate {
     programs.pi-coding-agent.plugins = {
+      browser-goblin.enable = false;
       command-code.enable = false;
       pi-mcp-adapter.enable = false;
       pix-optimizer.enable = false;
@@ -451,6 +452,7 @@ in
       !(pkgs.lib.hasInfix "${default.config.home.homeDirectory}/${expectedVisionHandoffConfigPath}" visionHandoffActivation);
     assert !(default.config.home.sessionVariables ? C2C_BIN);
     assert default.config.home.sessionVariables.PI_OFFLINE == "1";
+    assert default.config.home.sessionVariables.PLAYWRIGHT_EXECUTABLE_PATH == expectedBrowserExecutable;
     assert
       default.config.programs.pi-coding-agent.keybindings == {
         "app.tools.expand" = "ctrl+o";
@@ -656,6 +658,7 @@ in
     assert !(disabled.config.home.sessionVariables ? C2C_BIN);
     assert !(disabled.config.home.sessionVariables ? PI_OFFLINE);
     assert !(disabled.config.home.sessionVariables ? PI_VCC_CONFIG_PATH);
+    assert !(disabled.config.home.sessionVariables ? PLAYWRIGHT_EXECUTABLE_PATH);
     assert
       !(disabled.config.home.file ? "${disabled.config.programs.pi-coding-agent.configDir}/skills");
     assert
@@ -699,6 +702,7 @@ in
         ? "${pluginsDisabled.config.programs.pi-coding-agent.configDir}/optimizer.json"
       );
     assert !(pluginsDisabled.config.home.sessionVariables ? PI_VCC_CONFIG_PATH);
+    assert !(pluginsDisabled.config.home.sessionVariables ? PLAYWRIGHT_EXECUTABLE_PATH);
     assert
       !(
         pluginsDisabled.config.home.file
