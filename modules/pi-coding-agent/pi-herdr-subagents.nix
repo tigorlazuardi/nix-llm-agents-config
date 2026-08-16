@@ -6,7 +6,7 @@
 let
   cfg = config.programs.pi-coding-agent;
   defaultAgents = import ./default-agents.nix;
-  builtinTools = [
+  supportedTools = [
     "read"
     "bash"
     "edit"
@@ -14,6 +14,7 @@ let
     "grep"
     "find"
     "ls"
+    "subagent"
   ];
 
   pluginEnabled = cfg.enable && cfg.plugins.pi-herdr-subagents.enable;
@@ -24,7 +25,8 @@ let
   renderablePluginAgentNames = builtins.attrNames renderablePluginAgents;
 
   resolveTools =
-    agent: if agent.tools.allow == null then [ ] else lib.intersectLists builtinTools agent.tools.allow;
+    agent:
+    if agent.tools.allow == null then [ ] else lib.intersectLists supportedTools agent.tools.allow;
   resolveModel =
     model: if lib.hasInfix "/" model then model else "${cfg.settings.defaultProvider}/${model}";
   referencedSkills = lib.concatMap (

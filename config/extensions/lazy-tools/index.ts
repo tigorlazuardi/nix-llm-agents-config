@@ -18,8 +18,14 @@ const GROUP_MARKERS: Record<Group, readonly string[]> = {
 const ALWAYS_ACTIVE = new Set(["bash", "ask_user", "rename_herdr_tab", "load_tools"]);
 
 export default function (pi: ExtensionAPI) {
+  const childAllowedTools = process.env.PI_SUBAGENT_ALLOWED_TOOLS
+    ? new Set(process.env.PI_SUBAGENT_ALLOWED_TOOLS.split(",").map((name) => name.trim()).filter(Boolean))
+    : null;
   const groupTools = (group: Group) => pi.getAllTools()
-    .filter((tool) => !ALWAYS_ACTIVE.has(tool.name) && GROUP_MARKERS[group].some((marker) => tool.sourceInfo.path.includes(marker)))
+    .filter((tool) =>
+      !ALWAYS_ACTIVE.has(tool.name)
+      && (!childAllowedTools || childAllowedTools.has(tool.name))
+      && GROUP_MARKERS[group].some((marker) => tool.sourceInfo.path.includes(marker)))
     .map((tool) => tool.name);
 
   pi.registerTool({
@@ -52,9 +58,11 @@ export default function (pi: ExtensionAPI) {
 
   pi.on("session_start", () => {
     const deferred = new Set(GROUP_NAMES.flatMap(groupTools));
+    const active = pi.getActiveTools().filter((name) =>
+      childAllowedTools ? childAllowedTools.has(name) : !deferred.has(name));
     pi.setActiveTools([...new Set([
-      ...pi.getActiveTools().filter((name) => !deferred.has(name)),
-      "load_tools",
+      ...active,
+      ...(childAllowedTools ? [] : ["load_tools"]),
     ])]);
   });
 }

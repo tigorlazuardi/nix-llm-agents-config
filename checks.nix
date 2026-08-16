@@ -205,7 +205,7 @@ let
     description: "Deterministic black-box one-shot state machine"
     model: "openai-codex/gpt-5.6-terra"
     thinking: "medium"
-    tools: "read, bash"
+    tools: "read, bash, subagent"
     system-prompt: replace
     session-mode: standalone
     spawning: true

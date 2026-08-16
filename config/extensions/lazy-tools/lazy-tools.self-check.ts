@@ -62,3 +62,27 @@ for (const group of Object.keys(grouped) as Group[]) {
   for (const tool of grouped[group]) assert(active.includes(tool));
   for (const tool of core) assert(active.includes(tool));
 }
+
+process.env.PI_SUBAGENT_ALLOWED_TOOLS = "read,bash,subagent,caller_ping,subagent_done";
+let childActive = ["read", "bash", "subagent", "caller_ping", "subagent_done"];
+let childLoader: typeof loader;
+let childSessionStart: typeof sessionStart;
+lazyTools({
+  registerTool(definition: typeof loader) {
+    childLoader = definition;
+  },
+  on(event: string, handler: () => void) {
+    if (event === "session_start") childSessionStart = handler;
+  },
+  getAllTools: () => tools,
+  getActiveTools: () => childActive,
+  setActiveTools(names: string[]) {
+    childActive = names;
+  },
+} as never);
+assert(childLoader && childSessionStart);
+childSessionStart();
+assert.deepEqual(childActive, ["read", "bash", "subagent", "caller_ping", "subagent_done"]);
+await childLoader.execute("browser", { group: "browser" });
+assert.deepEqual(childActive, ["read", "bash", "subagent", "caller_ping", "subagent_done"]);
+delete process.env.PI_SUBAGENT_ALLOWED_TOOLS;

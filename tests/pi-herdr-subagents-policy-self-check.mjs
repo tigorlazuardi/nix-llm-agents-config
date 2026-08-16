@@ -18,6 +18,7 @@ writeFileSync(join(project, ".pi", "agents", "custom.md"), "---\nname: custom\nt
 const subagentsDir = join(packageRoot, "pi-extension", "subagents");
 const { loadAgentDefaults } = await import(pathToFileURL(join(subagentsDir, "index.ts")));
 const { buildHerdrEscapeArgs } = await import(pathToFileURL(join(subagentsDir, "herdr.ts")));
+const { default: registerSubagentDone } = await import(pathToFileURL(join(subagentsDir, "subagent-done.ts")));
 const reviewer = loadAgentDefaults("reviewer");
 assert.equal(reviewer?.source, "global");
 assert.equal(reviewer?.tools, "read");
@@ -29,3 +30,23 @@ assert.doesNotMatch(
   readFileSync(join(subagentsDir, "subagent-done.ts"), "utf8"),
   /registerShortcut\(["']ctrl\+j["']/,
 );
+assert.match(
+  readFileSync(join(subagentsDir, "index.ts"), "utf8"),
+  /PI_SUBAGENT_ALLOWED_TOOLS=/,
+);
+
+const handlers = new Map();
+const shortcuts = new Map();
+let widgetUpdates = 0;
+registerSubagentDone({
+  getActiveTools: () => ["read", "bash", "edit", "write", "caller_ping", "subagent_done"],
+  getAllTools: () => assert.fail("widget must not count inactive registered tools"),
+  on: (event, handler) => handlers.set(event, handler),
+  registerShortcut: (key, options) => shortcuts.set(key, options),
+  registerTool: () => {},
+});
+const ctx = { ui: { setWidget: () => widgetUpdates++ } };
+handlers.get("session_start")({}, ctx);
+assert.equal(shortcuts.has("ctrl+shift+o"), true);
+shortcuts.get("ctrl+shift+o").handler(ctx);
+assert.equal(widgetUpdates, 2);
