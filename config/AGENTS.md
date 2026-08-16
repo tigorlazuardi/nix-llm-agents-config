@@ -9,6 +9,10 @@
 ## Execution kernel
 Agents execute small–medium work directly when scope is clear and reversible. Large and XL work remains read-only until an execution mode is explicitly invoked; recommend `/supervise` for independent delivery and review, offer `/direct` as the main-agent alternative, then stop. Approval prose such as “approve”, “gas”, or “continue” grants no permission for mode-gated work. Safety confirmations and low-tolerance routing still apply regardless of size.
 
+Process routing:
+- Long-lived processes (dev servers, watchers, log streams) → create a dedicated Herdr tab with `herdr_layout`, then run and control them through `herdr_pane`.
+- Finite background commands whose completion should wake the agent → use `bash` with `run_in_background=true`.
+
 Mode router:
 - Small–medium coherent scope → main executes autonomously; no mode invocation required.
 - Large or XL scope → recommend `/supervise`; offer `/direct` as explicit alternative.
