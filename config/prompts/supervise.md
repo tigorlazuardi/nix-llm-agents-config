@@ -9,7 +9,7 @@ Main stays project-source read-only. All work routes through `implementer` + `re
 1. Resolve one accepted spec, ticket, or diagnosed fix plus exact `checkCommand`; read project instructions and current diff. Stop for user decision until scope, preserved changes, risk route, skills, and check are fixed.
 2. Resolve repo-root `CODING_STANDARDS.md`. If missing, stop and request permission to invoke `coding-standards`. Reviews use `code-review` semantics.
 3. Create compact report/evidence paths. Spawn fresh writer with scope, standards, skills, and output path; writer leaves `checkCommand` to supervisor. Complete pass when writer returns verdict plus changed-file/report pointers.
-4. Spawn fresh read-only `standards` reviewer. On FAIL, send findings pointer to fresh writer, increment shared fix count, then repeat. Stop after PASS or three failed fix passes.
+4. Spawn fresh read-only `standards` reviewer. On FAIL, send findings pointer to fresh writer, increment shared fix count, then repeat. Stop after PASS or ten failed fix passes.
 5. After standards PASS, main runs exact `checkCommand`; record command, exit status, timestamp, revision/diff identity, and output pointer. Failure enters same fix loop, then restarts standards review.
 6. After green check, spawn fresh read-only `spec` reviewer using accepted scope and recorded check evidence. FAIL enters same fix loop, then restarts standards review.
 7. Complete with terminal verdict, changed-file/report pointers, exact check evidence, fix count, and residual risks; otherwise return terminal blocked/escalated evidence.
