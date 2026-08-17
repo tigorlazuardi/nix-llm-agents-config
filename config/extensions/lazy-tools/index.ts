@@ -2,7 +2,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { StringEnum } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
 
-const GROUP_NAMES = ["browser", "subagents", "research", "herdr", "background", "mesh", "journal", "artifact", "todo"] as const;
+const GROUP_NAMES = ["browser", "subagents", "research", "herdr", "background", "mesh", "journal", "artifact"] as const;
 type Group = typeof GROUP_NAMES[number];
 const GROUP_MARKERS: Record<Group, readonly string[]> = {
   browser: ["browser-goblin"],
@@ -13,9 +13,8 @@ const GROUP_MARKERS: Record<Group, readonly string[]> = {
   mesh: ["remote-pi"],
   journal: ["dev-journal"],
   artifact: ["artifact-preview"],
-  todo: ["rpiv-todo"],
 };
-const ALWAYS_ACTIVE = new Set(["bash", "ask_user", "rename_herdr_tab", "load_tools"]);
+const ALWAYS_ACTIVE = new Set(["bash", "ask_user", "rename_herdr_tab", "todo", "load_tools"]);
 
 export default function (pi: ExtensionAPI) {
   const childAllowedTools = process.env.PI_SUBAGENT_ALLOWED_TOOLS
@@ -31,9 +30,9 @@ export default function (pi: ExtensionAPI) {
   pi.registerTool({
     name: "load_tools",
     label: "Load Tools",
-    description: "Enable an installed tool group for this session. Groups: browser, subagents, research/web/MCP, Herdr/elevation, background jobs, mesh peers, journal, artifact hosting, todo.",
+    description: "Enable an installed tool group for this session. Groups: browser, subagents, research/web/MCP, Herdr/elevation, background jobs, mesh peers, journal, artifact hosting.",
     promptSnippet: "Enable deferred tool groups when needed",
-    promptGuidelines: ["Use load_tools before browser automation; /supervise or delegation; web/current-source/MCP research; explicit Herdr or elevated work; background/streaming work; mesh coordination; journal access; artifact preview; or todo tracking for 3+ steps."],
+    promptGuidelines: ["Use load_tools before browser automation; /supervise or delegation; web/current-source/MCP research; explicit Herdr or elevated work; background/streaming work; mesh coordination; journal access; or artifact preview."],
     parameters: Type.Object({
       group: StringEnum(GROUP_NAMES),
     }),

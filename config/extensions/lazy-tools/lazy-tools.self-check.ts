@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import lazyTools from "./index.ts";
 
-type Group = "browser" | "subagents" | "research" | "herdr" | "background" | "mesh" | "journal" | "artifact" | "todo";
-const core = ["read", "bash", "ask_user", "rename_herdr_tab"];
+type Group = "browser" | "subagents" | "research" | "herdr" | "background" | "mesh" | "journal" | "artifact";
+const core = ["read", "bash", "ask_user", "rename_herdr_tab", "todo"];
 const grouped: Record<Group, string[]> = {
   browser: ["browser_open"],
   subagents: ["subagent", "subagent_interrupt", "subagents_list", "subagent_resume"],
@@ -12,7 +12,6 @@ const grouped: Record<Group, string[]> = {
   mesh: ["agent_send"],
   journal: ["dev_journal"],
   artifact: ["host_artifact"],
-  todo: ["todo"],
 };
 const paths: Record<string, string> = {
   read: "<builtin:read>",
