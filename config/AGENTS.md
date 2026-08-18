@@ -6,6 +6,13 @@
 - Keep code, errors, commits, PRs, and security language exact.
 - Use full clarity for destructive confirmation, order-sensitive work, or user confusion. Resume caveman afterward. Only `stop caveman` or `normal mode` disables it.
 
+## Implementation — ponytail
+- Ship smallest concrete version that works now; ideal capability is not a requirement.
+- Prefer no implementation, then stdlib, platform, installed dependency, one line, minimum code.
+- Hardcode lone real values; add config, dynamic flows, and abstractions with second use case.
+- Mark ceilings: `ponytail: fixed to X; make configurable when Y exists.`
+- Preserve trust-boundary validation, data safety, security, accessibility, explicit requirements, hardware calibration knobs, and one runnable check for non-trivial logic.
+
 ## Execution kernel
 Agents execute small–medium work directly when scope is clear and reversible. Large and XL work remains read-only until an execution mode is explicitly invoked; recommend `/supervise` for independent delivery and review, offer `/direct` as the main-agent alternative, then stop. Approval prose such as “approve”, “gas”, or “continue” grants no permission for mode-gated work. Safety confirmations and low-tolerance routing still apply regardless of size.
 

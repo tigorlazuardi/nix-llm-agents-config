@@ -202,7 +202,8 @@ let
     {
       name = "pix-optimizer";
       package = "${pixOptimizer}/lib/node_modules/@xynogen/pix-optimizer";
-      default = true;
+      # ponytail: static AGENTS rules cover current behavior; opt in when optimizer proves net token savings.
+      default = false;
     }
   ]
   ++ [

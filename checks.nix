@@ -81,6 +81,7 @@ let
     programs.pi-coding-agent.keybindings."app.tools.expand" = "ctrl+e";
   };
   optimizerConfigured = evaluate {
+    programs.pi-coding-agent.plugins.pix-optimizer.enable = true;
     programs.pi-coding-agent.plugins.pix-optimizer.settings = {
       caveman = "micro";
       rtk = true;
@@ -401,7 +402,6 @@ in
           expectedCacheOptimizerPath
           expectedMcpAdapterPath
           expectedBrowserGoblinPath
-          expectedPixOptimizerPath
         ]
         ++ [
           expectedPiVccPath
@@ -417,10 +417,10 @@ in
         ++ expectedPixToolPaths;
       };
     assert builtins.elem expectedOscclip default.config.home.packages;
-    assert builtins.elem expectedRtk default.config.home.packages;
+    assert !(builtins.elem expectedRtk default.config.home.packages);
     assert builtins.elem expectedRtk optimizerConfigured.config.home.packages;
     assert !(builtins.elem expectedRtk pluginsDisabled.config.home.packages);
-    assert builtins.elem expectedToon default.config.home.packages;
+    assert !(builtins.elem expectedToon default.config.home.packages);
     assert builtins.elem expectedToon optimizerConfigured.config.home.packages;
     assert !(builtins.elem expectedToon pluginsDisabled.config.home.packages);
     assert !default.config.programs.pi-coding-agent.plugins.diet-lsp.enable;
@@ -463,7 +463,7 @@ in
     assert default.config.programs.pi-coding-agent.plugins.pi-mcp-adapter.enable;
     assert default.config.programs.pi-coding-agent.plugins.pi-mcp-adapter.enableMcpIntegration;
     assert default.config.programs.pi-coding-agent.plugins.pi-vcc.enable;
-    assert default.config.programs.pi-coding-agent.plugins.pix-optimizer.enable;
+    assert !default.config.programs.pi-coding-agent.plugins.pix-optimizer.enable;
     assert builtins.all (
       name: default.config.programs.pi-coding-agent.plugins."pix-${name}".enable
     ) expectedPixToolNames;
@@ -489,6 +489,8 @@ in
         ponytail = "ultra";
       };
     assert optimizerConfigSource == expectedOptimizerStateFile;
+    assert
+      !(default.config.home.file ? "${default.config.programs.pi-coding-agent.configDir}/optimizer.json");
     assert
       default.config.programs.pi-coding-agent.plugins.pi-vcc.settings == {
         overrideDefaultCompaction = true;
@@ -733,7 +735,6 @@ in
         expectedCacheOptimizerPath
         expectedMcpAdapterPath
         expectedBrowserGoblinPath
-        expectedPixOptimizerPath
       ]
       ++ [
         expectedPiVccPath
