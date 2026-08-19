@@ -417,6 +417,28 @@ in
             default = true;
             description = "Automatically continue the agent after threshold or overflow compaction.";
           };
+          autoCompaction = {
+            enabled = lib.mkOption {
+              type = lib.types.bool;
+              default = true;
+              description = "Evaluate automatic compaction from settled-turn context usage.";
+            };
+            thresholdTokens = lib.mkOption {
+              type = lib.types.ints.positive;
+              default = 150000;
+              description = "Absolute settled context-token threshold, independent from Pi output reserve settings.";
+            };
+            modelThresholdTokens = lib.mkOption {
+              type = lib.types.attrsOf lib.types.ints.positive;
+              default = {
+                "cc/claude-fable-5" = 150000;
+                "cc/claude-opus-5" = 150000;
+                "cc/claude-sonnet-5" = 150000;
+                "cc/claude-haiku-4-5-20251001" = 136000;
+              };
+              description = "Absolute settled context-token thresholds keyed by Pi model ID.";
+            };
+          };
           debug = lib.mkOption {
             type = lib.types.bool;
             default = false;

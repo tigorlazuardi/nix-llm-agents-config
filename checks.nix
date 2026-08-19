@@ -102,9 +102,20 @@ let
       overrideDefaultCompaction = false;
       smartKeepTail = false;
       continueAfterThresholdCompact = false;
+      autoCompaction = {
+        enabled = false;
+        thresholdTokens = 123000;
+        modelThresholdTokens."test/model" = 111000;
+      };
       debug = true;
     };
   };
+  invalidVccThreshold = evaluate {
+    programs.pi-coding-agent.plugins.pi-vcc.settings.autoCompaction.thresholdTokens = 0;
+  };
+  invalidVccThresholdEvaluation = builtins.tryEval (
+    builtins.deepSeq invalidVccThreshold.config.home.activationPackage true
+  );
   webAccessConfigured = evaluate {
     programs.pi-coding-agent.plugins.pi-web-access = {
       credentialFiles.openaiApiKey = "/run/secrets/openai-api-key";
@@ -118,6 +129,11 @@ let
     overrideDefaultCompaction = false;
     smartKeepTail = false;
     continueAfterThresholdCompact = false;
+    autoCompaction = {
+      enabled = false;
+      thresholdTokens = 123000;
+      modelThresholdTokens."test/model" = 111000;
+    };
     debug = true;
   };
   vccConfigSource =
@@ -496,6 +512,16 @@ in
         overrideDefaultCompaction = true;
         smartKeepTail = true;
         continueAfterThresholdCompact = true;
+        autoCompaction = {
+          enabled = true;
+          thresholdTokens = 150000;
+          modelThresholdTokens = {
+            "cc/claude-fable-5" = 150000;
+            "cc/claude-opus-5" = 150000;
+            "cc/claude-sonnet-5" = 150000;
+            "cc/claude-haiku-4-5-20251001" = 136000;
+          };
+        };
         debug = false;
       };
     assert
@@ -503,9 +529,15 @@ in
         overrideDefaultCompaction = false;
         smartKeepTail = false;
         continueAfterThresholdCompact = false;
+        autoCompaction = {
+          enabled = false;
+          thresholdTokens = 123000;
+          modelThresholdTokens."test/model" = 111000;
+        };
         debug = true;
       };
     assert vccConfigSource == expectedVccConfigFile;
+    assert !invalidVccThresholdEvaluation.success;
     assert webAccessConfigSource == expectedWebAccessConfigFile;
     assert
       webAccessPathConfigured.config.programs.pi-coding-agent.plugins.pi-web-access.credentialFiles.braveApiKey
@@ -1424,24 +1456,45 @@ in
         touch $out
       '';
 
-  pi-vcc-load = pkgs.runCommandLocal "pi-vcc-load" { nativeBuildInputs = [ expectedPackage ]; } ''
-    export HOME="$TMPDIR/home"
-    export PI_CODING_AGENT_DIR="$HOME/.pi/agent"
-    export PI_VCC_CONFIG_PATH="$TMPDIR/pi-vcc-config.json"
-    export PI_TELEMETRY=0
-    mkdir -p "$PI_CODING_AGENT_DIR"
-    test -f ${expectedPiVcc}/index.ts
-    test ! -e ${expectedPiVcc}/demo.gif
-    pi --offline --no-extensions --no-skills --no-prompt-templates --no-context-files \
-      -e ${expectedPiVcc} \
-      --list-models > pi.log 2>&1
-    ! grep -E 'Extension issues|Failed to load extension|Cannot find module|Error:' pi.log
-    grep -F '"overrideDefaultCompaction": true' "$PI_VCC_CONFIG_PATH"
-    grep -F '"smartKeepTail": true' "$PI_VCC_CONFIG_PATH"
-    grep -F '"continueAfterThresholdCompact": true' "$PI_VCC_CONFIG_PATH"
-    grep -F '"debug": false' "$PI_VCC_CONFIG_PATH"
-    touch $out
-  '';
+  pi-vcc-load =
+    pkgs.runCommandLocal "pi-vcc-load"
+      {
+        nativeBuildInputs = [
+          expectedPackage
+          pkgs.bun
+        ];
+      }
+      ''
+        export HOME="$TMPDIR/home"
+        export PI_CODING_AGENT_DIR="$HOME/.pi/agent"
+        export PI_VCC_CONFIG_PATH="$TMPDIR/pi-vcc-config.json"
+        export PI_TELEMETRY=0
+        mkdir -p "$PI_CODING_AGENT_DIR"
+        test -f ${expectedPiVcc}/index.ts
+        test -f ${expectedPiVcc}/tests/settled-compaction.test.ts
+        test ! -e ${expectedPiVcc}/demo.gif
+        test ! -e ${expectedPiVcc}/node_modules
+
+        cp -R ${expectedPiVcc} vcc
+        chmod -R u+w vcc
+        mkdir -p vcc/node_modules/@earendil-works
+        piRuntime=${expectedPackage}/lib/node_modules/pi-monorepo
+        ln -s "$piRuntime" vcc/node_modules/@earendil-works/pi-coding-agent
+        ln -s "$piRuntime/node_modules/typebox" vcc/node_modules/typebox
+        bun test vcc/tests/settled-compaction.test.ts
+
+        pi --offline --no-extensions --no-skills --no-prompt-templates --no-context-files \
+          -e ${expectedPiVcc} \
+          --list-models > pi.log 2>&1
+        ! grep -E 'Extension issues|Failed to load extension|Cannot find module|Error:' pi.log
+        grep -F '"overrideDefaultCompaction": true' "$PI_VCC_CONFIG_PATH"
+        grep -F '"smartKeepTail": true' "$PI_VCC_CONFIG_PATH"
+        grep -F '"continueAfterThresholdCompact": true' "$PI_VCC_CONFIG_PATH"
+        grep -F '"thresholdTokens": 150000' "$PI_VCC_CONFIG_PATH"
+        grep -F '"modelThresholdTokens": {}' "$PI_VCC_CONFIG_PATH"
+        grep -F '"debug": false' "$PI_VCC_CONFIG_PATH"
+        touch $out
+      '';
 
   rpiv-todo-load =
     pkgs.runCommandLocal "rpiv-todo-load" { nativeBuildInputs = [ expectedPackage ]; }
