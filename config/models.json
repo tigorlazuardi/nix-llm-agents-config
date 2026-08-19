@@ -41,7 +41,7 @@
         {
           "id": "cc/claude-haiku-4-5-20251001",
           "reasoning": true,
-          "contextWindow": 288000,
+          "contextWindow": 200000,
           "maxTokens": 64000,
           "api": "anthropic-messages",
           "input": [
