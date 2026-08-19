@@ -8,7 +8,7 @@
         {
           "id": "cc/claude-fable-5",
           "reasoning": true,
-          "contextWindow": 200000,
+          "contextWindow": 288000,
           "maxTokens": 128000,
           "api": "anthropic-messages",
           "input": [
@@ -19,7 +19,7 @@
         {
           "id": "cc/claude-opus-5",
           "reasoning": true,
-          "contextWindow": 200000,
+          "contextWindow": 288000,
           "maxTokens": 128000,
           "api": "anthropic-messages",
           "input": [
@@ -30,7 +30,7 @@
         {
           "id": "cc/claude-sonnet-5",
           "reasoning": true,
-          "contextWindow": 200000,
+          "contextWindow": 288000,
           "maxTokens": 128000,
           "api": "anthropic-messages",
           "input": [
@@ -41,7 +41,7 @@
         {
           "id": "cc/claude-haiku-4-5-20251001",
           "reasoning": true,
-          "contextWindow": 200000,
+          "contextWindow": 288000,
           "maxTokens": 64000,
           "api": "anthropic-messages",
           "input": [
