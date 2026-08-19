@@ -383,7 +383,7 @@ in
         showCacheMissNotices = false;
         compaction = {
           enabled = true;
-          reserveTokens = 40000;
+          reserveTokens = 128000;
           keepRecentTokens = 20000;
         };
         subagents.disableBuiltins = true;

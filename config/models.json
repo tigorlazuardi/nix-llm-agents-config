@@ -20,7 +20,7 @@
           "id": "cc/claude-opus-5",
           "reasoning": true,
           "contextWindow": 200000,
-          "maxTokens": 64000,
+          "maxTokens": 128000,
           "api": "anthropic-messages",
           "input": [
             "text",
