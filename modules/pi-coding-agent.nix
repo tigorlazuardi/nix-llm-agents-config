@@ -10,6 +10,7 @@
 }:
 let
   cfg = config.programs.pi-coding-agent;
+  localUpdater = cfg.localUpdater;
   repoSkills = lib.mapAttrs (name: _: ../config/skills + "/${name}") (
     # ponytail: temporarily exclude tuxedo-todo; remove name check to restore it.
     lib.filterAttrs (name: type: type == "directory" && name != "tuxedo-todo") (
@@ -339,6 +340,24 @@ let
   ) webAccessPlugin.credentialFiles;
   webAccessConfig = webAccessPlugin.settings // webAccessCredentialConfig;
   webAccessConfigFile = jsonFormat.generate "web-search.json" webAccessConfig;
+  localUpdaterStateDirectory = "${config.home.homeDirectory}/.local/state/pi-coding-agent-local-update";
+  localUpdaterRecoveryPrompt = ../scripts/local-update-recovery.md;
+  localUpdaterPackage = pkgs.writeShellApplication {
+    name = "pi-coding-agent-local-update";
+    runtimeInputs = [
+      cfg.package
+      pkgs.coreutils
+      pkgs.git
+      pkgs.gnutar
+      pkgs.gzip
+      pkgs.jq
+      pkgs.nix
+      pkgs.nodejs
+      pkgs.openssh
+      pkgs.util-linux
+    ];
+    text = builtins.readFile ../scripts/local-update.sh;
+  };
 in
 {
   imports = [
@@ -346,6 +365,9 @@ in
     ./pi-coding-agent/agents.nix
     ./pi-coding-agent/pi-subagents.nix
   ];
+
+  options.programs.pi-coding-agent.localUpdater.enable =
+    lib.mkEnableOption "the Linux user timer for deterministic local updates with one-shot Pi recovery";
 
   options.programs.pi-coding-agent.plugins =
     lib.recursiveUpdate
@@ -504,6 +526,59 @@ in
 
     programs.mcp.enable = lib.mkIf (cfg.enable && mcpPlugin.enable) (lib.mkDefault true);
 
+    home.activation.localUpdaterState =
+      lib.mkIf (cfg.enable && localUpdater.enable && pkgs.stdenv.hostPlatform.isLinux)
+        (
+          lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+            run ${pkgs.coreutils}/bin/install -d -m 0700 -- ${lib.escapeShellArg localUpdaterStateDirectory}
+          ''
+        );
+
+    systemd.user.services.pi-coding-agent-local-update =
+      lib.mkIf (cfg.enable && localUpdater.enable && pkgs.stdenv.hostPlatform.isLinux)
+        {
+          Unit = {
+            Description = "Update nix-llm-agents-config with deterministic checks and bounded Pi recovery";
+            Wants = [ "network-online.target" ];
+            After = [ "network-online.target" ];
+          };
+          Service = {
+            Type = "oneshot";
+            ExecStart = lib.getExe localUpdaterPackage;
+            Environment = [
+              "LOCAL_UPDATE_RECOVERY_PROMPT=${localUpdaterRecoveryPrompt}"
+              "LOCAL_UPDATE_STATE_DIR=${localUpdaterStateDirectory}"
+              "PI_OFFLINE=1"
+              "PI_TELEMETRY=0"
+            ];
+            TimeoutStartSec = "6h";
+            UMask = "0077";
+            ProtectSystem = "strict";
+            ProtectHome = "read-only";
+            ReadWritePaths = [
+              localUpdaterStateDirectory
+              cfg.configDir
+            ];
+            PrivateTmp = true;
+            NoNewPrivileges = true;
+            LockPersonality = true;
+            RestrictSUIDSGID = true;
+          };
+        };
+
+    systemd.user.timers.pi-coding-agent-local-update =
+      lib.mkIf (cfg.enable && localUpdater.enable && pkgs.stdenv.hostPlatform.isLinux)
+        {
+          Unit.Description = "Daily nix-llm-agents-config update";
+          Timer = {
+            OnCalendar = "*-*-* 03:00:00";
+            Persistent = true;
+            Unit = "pi-coding-agent-local-update.service";
+          };
+          Install.WantedBy = [ "timers.target" ];
+        };
+
+    # ponytail: fixed repository and schedule; make configurable when a second deployment exists.
     # ponytail: merge only relay key so Remote Pi can keep mutating pairing and user config.
     home.activation.remotePiConfig = lib.mkIf (cfg.enable && remotePiPlugin.enable) (
       lib.hm.dag.entryAfter [ "writeBoundary" ] ''

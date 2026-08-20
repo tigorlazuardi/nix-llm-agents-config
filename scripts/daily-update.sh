@@ -27,7 +27,10 @@ run_check() {
 push_checked() {
   local check=$1 attempt=0
   while :; do
-    git fetch origin main --quiet
+    if ! git fetch origin main --quiet; then
+      error "fetch origin/main failed"
+      return 1
+    fi
     if ! git rebase origin/main; then
       git rebase --abort || true
       error "rebase onto origin/main failed"
@@ -48,7 +51,10 @@ push_checked() {
 push_inputs_checked() {
   local attempt=0
   while :; do
-    git fetch origin main --quiet
+    if ! git fetch origin main --quiet; then
+      error "fetch origin/main failed"
+      return 1
+    fi
     if ! git rebase origin/main; then
       git rebase --abort || true
       error "rebase onto origin/main failed"
@@ -235,8 +241,8 @@ plugin_commit() {
 
 update_plugins() {
   local alias alias_base entry strategy
-  git fetch origin main --quiet
-  git checkout --detach origin/main
+  git fetch origin main --quiet || return 1
+  git checkout --detach origin/main || return 1
   while IFS= read -r alias; do
     alias_base=$(git rev-parse HEAD) || return 1
     entry=$(jq -c --arg a "$alias" '.[$a]' pi-plugins.json)

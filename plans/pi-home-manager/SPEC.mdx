@@ -18,9 +18,9 @@ The owner needs one public, commit-pinnable Home Manager module that preserves P
 
 Export a Home Manager module as `homeManagerModules.default`. Importing it enables Home Manager's native `programs.pi-coding-agent` module through `lib.mkDefault true`, selects Pi from this repository's pinned `nixpkgs-unstable`, applies audited portable defaults, links only resources Home Manager does not already support, and supplies Nix-built plugins as immutable local package paths through Pi's native `settings.packages` mechanism.
 
-The module adds one option only: `programs.pi-coding-agent.apiKeyFiles.<provider>`. It converts each runtime secret-file path into Pi's native shell-command key resolution without placing secret content in Git or the Nix store.
+The module adds two narrow option surfaces: `programs.pi-coding-agent.apiKeyFiles.<provider>` converts runtime secret-file paths into Pi's native shell-command key resolution, while default-disabled `programs.pi-coding-agent.localUpdater.enable` installs the Linux user timer. Neither places secret content in Git or the Nix store.
 
-One daily GitHub Actions workflow updates pinned `nixpkgs` and Home Manager together, checks the result, then independently updates each registered plugin. Consumers remain reproducible because they pin a commit of this repository and advance it deliberately.
+A homeserver-only systemd user timer runs the deterministic updater daily, then invokes headless `pi -p` only when deterministic execution fails. Pi may diagnose, repair, test, commit, and push within this repository; the wrapper reruns the deterministic updater before reporting success. GitHub Actions retains parameterless manual dispatch as a fallback but performs no scheduled update. Consumers remain reproducible because they pin a commit of this repository and advance it deliberately.
 
 ## User Stories
 
@@ -58,6 +58,12 @@ One daily GitHub Actions workflow updates pinned `nixpkgs` and Home Manager toge
 32. As a consumer, I want rollback to mean restoring the prior repository commit pin, so that recovery requires no custom rollback tooling.
 33. As a contributor, I want `nix fmt` and `nix flake check` to prove acceptance, so that local and CI validation use the same entry points.
 34. As a future nix-darwin user, I want the module free of Linux-only assumptions, so that Darwin testing can begin later without redesigning the API.
+35. As the repository owner, I want scheduled updates to run from my homeserver instead of GitHub-hosted runners, so that local Pi can repair deterministic updater failures.
+36. As the repository owner, I want the deterministic updater attempted before any model call, so that normal no-op and successful runs consume no LLM tokens.
+37. As the repository owner, I want one dedicated updater checkout and a non-overlap lock, so that automation never disturbs my interactive checkout or races itself.
+38. As the repository owner, I want Pi repair authority limited to this repository with automatic test, commit, and push permission, so that failures can self-heal without widening credential scope.
+39. As the repository owner, I want the service to rerun deterministic inputs and plugin updates after Pi returns, so that systemd success means the updater actually passed rather than merely receiving an LLM response.
+40. As the repository owner, I want manual GitHub dispatch retained without a GitHub schedule, so that an independent recovery trigger remains available.
 
 ## Implementation Decisions
 
@@ -428,23 +434,24 @@ Do not inject a generic reminder from `agent_end` or `agent_settled`: `agent_end
 
 ### Daily update workflow
 
-- Schedule: daily at `03:00 UTC` and parameterless `workflow_dispatch`.
-- Permission: built-in `GITHUB_TOKEN` with `contents: write`; no PAT, deploy key, or GitHub App.
-- Input job updates pinned nixpkgs and Home Manager together, runs full x86_64-linux checks with current plugins, and creates one commit only when changed.
-- Plugin job uses `if: always()` and a fresh checkout of latest `origin/main`.
-- One serialized shell loop processes aliases independently, resetting failed changes before continuing.
-- Each changed plugin gets its own check and conventional commit.
-- A failed input update does not block plugin updates against last valid `main`.
-- A failed plugin does not block later plugins; plugin job reports aggregate failure after processing all aliases.
-- Before each push, automation fetches and rebases current `main`; relevant upstream changes rerun the target check.
-- One bounded retry handles a concurrent update. Automation never force-pushes.
-- No-op updates write summary status but create no commit.
-- Commit subjects use `chore(deps): update nixpkgs and home-manager` and `chore(pi-plugins): update <alias> to <version>`.
-- Shell scripts use Nix, npm metadata commands, git, and jq only. Committed npm locks may additionally use `npm install --package-lock-only --ignore-scripts`; it resolves metadata without lifecycle scripts.
+- Schedule: `programs.pi-coding-agent.localUpdater.enable` is an opt-in Linux Home Manager setting, disabled by default. When enabled by later homeserver configuration, it creates a systemd user timer at `03:00` local time with persistent catch-up. No machine is auto-detected or auto-enabled. The timer skips overlap through one updater-owned lock.
+- Checkout: automation owns a dedicated state-directory clone. It verifies an ownership marker before resetting that clone to `origin/main`; it never resets or mutates an interactive checkout.
+- Deterministic phase: run `scripts/daily-update.sh inputs`, restore the managed checkout to current `origin/main`, then run `scripts/daily-update.sh plugins`.
+- Input updates pin nixpkgs and Home Manager together, run full x86_64-linux checks with current plugins, and create one commit only when changed.
+- One serialized plugin loop processes aliases independently, resetting failed changes before continuing. Each changed plugin gets its own check and conventional commit.
+- A failed input update does not block the first plugin attempt against last valid `main`. A failed plugin does not block later plugins; the phase reports aggregate failure after processing all aliases.
+- Before each push, automation fetches and rebases current `main`; relevant upstream changes rerun the target check. One bounded retry handles a concurrent update. Automation never force-pushes.
+- Recovery phase: only after either deterministic phase fails, run exactly one managed Pi call in non-interactive print mode with an ephemeral session, explicit project approval, built-in repository tools only, and no extension, skill, prompt-template, or project-context discovery. The fixed ponytail defaults are `openai-codex/gpt-5.6-sol` with high thinking.
+- Pi may inspect and edit only the dedicated clone, run checks, create conventional commits, and push to `origin/main`. It must not change credentials, secrets, remotes, Git configuration, other repositories, or deployment state.
+- Verification phase: after Pi exits, reset the managed checkout to current `origin/main`, run the accepted formatter and full flake checks against that exact recovered revision, then rerun both deterministic phases. The service succeeds only when all checks and the deterministic rerun succeed.
+- Runtime authentication reuses the homeserver user's existing Pi subscription state and Git SSH agent/configuration. The unit uses `ProtectSystem=strict` and `ProtectHome=read-only`, retains network access, has a six-hour timeout, and uses `UMask=0077`. No credential content enters Nix, Git, prompts, summaries, or unit definitions. Same-user autonomous execution remains a deliberate trust boundary requiring explicit deployment acceptance.
+- GitHub Actions retains parameterless `workflow_dispatch` and built-in `GITHUB_TOKEN` with `contents: write` as a manual fallback. Its `schedule` trigger is removed.
+- No-op updates write summary status but create no commit. Commit subjects remain `chore(deps): update nixpkgs and home-manager` and `chore(pi-plugins): update <alias> to <version>`.
+- Shell scripts use Nix, npm metadata commands, git, jq, coreutils, and util-linux only. Committed npm locks may additionally use `npm install --package-lock-only --ignore-scripts`; it resolves metadata without lifecycle scripts.
 
 ### Update observability
 
-GitHub Actions status and an always-written step summary are sufficient for this personal repository. Summary includes old/new input revisions or plugin versions, check status, unchanged entries, skipped entries, failures, and concise errors. No OpenTelemetry pipeline, external notifier, JSON artifact, or custom metrics backend is added.
+Systemd journal events and an updater-owned private summary file are sufficient for this personal scheduled job. Log state transitions: lock acquired/skipped, checkout prepared, deterministic inputs/plugins started and passed/failed, Pi recovery started/completed, verification started/completed, and final exit status. The summary includes old/new input revisions or plugin versions, check status, unchanged entries, skipped entries, failures, and concise errors. No OpenTelemetry pipeline, external notifier, custom metrics backend, or trace infrastructure is added.
 
 Security-sensitive values never appear in summaries. API keys, auth material, command output containing credentials, and secret-file content are Tier A and always render as `<redacted>` if a field must be named. No Tier B account handles, Tier C KYC data, or Tier D context-dependent user fields are expected. Raw arbitrary command output is not copied into summaries.
 
@@ -458,7 +465,7 @@ The accepted public seam is `nix flake check` on `x86_64-linux`, plus formatter 
 
 Three focused flake checks are exposed:
 
-1. **Module evaluation** — evaluate a minimal Home Manager configuration importing the module; confirm default enable/package behavior, disable behavior, and `apiKeyFiles` assertions.
+1. **Module evaluation** — evaluate minimal Linux and Darwin Home Manager configurations; confirm updater default-disabled and enabled service/timer semantics, fixed schedule, hardening, Linux gating, default enable/package behavior, disable behavior, and `apiKeyFiles` assertions.
 2. **Pi package loading** — build the default Pi and full current plugin/local-extension set, launch Pi offline and headless, and fail on loader or extension issues.
 3. **Managed files** — build a Home Manager activation package and assert expected managed files, immutable plugin paths, omitted runtime-state paths, and secret-free generated JSON.
 
@@ -789,7 +796,7 @@ or unsupported Pi resource is added by this module.
 Input:
 
 ```text
-Scheduled workflow finds newer nixpkgs/Home Manager revisions,
+Homeserver timer finds newer nixpkgs/Home Manager revisions,
 plugin A unchanged, plugin B valid update, plugin C broken update.
 ```
 
@@ -797,10 +804,13 @@ Expected output:
 
 ```text
 1. Input pair passes full checks and lands as one commit.
-2. Plugin A writes “unchanged” to summary; no commit.
+2. Plugin A writes “unchanged” to the private summary; no commit.
 3. Plugin B passes focused load check and lands as one commit.
 4. Plugin C is reset, recorded as failed, and does not block later aliases.
-5. Plugin job ends failed because at least one alias failed.
+5. Wrapper invokes pi -p once because deterministic execution failed.
+6. Pi repairs and pushes the updater/plugin issue within repository scope.
+7. Wrapper resets its dedicated checkout and reruns both deterministic phases.
+8. Systemd unit succeeds only when the deterministic rerun passes.
 ```
 
 ## Out of Scope
@@ -816,8 +826,9 @@ Expected output:
 - Behavior-level tests for every third-party plugin.
 - Malware detection or manual review of every automated plugin release.
 - Automatic local-extension dependency updates.
-- OpenTelemetry, external notifications, dashboards, or report artifacts.
-- Ready-made `homeConfigurations`, NixOS modules, machine-specific options, or broad custom option surfaces.
+- OpenTelemetry, external notifications, dashboards, or public report artifacts.
+- Scheduled updater enablement on office boxes, Darwin, or any machine other than the homeserver.
+- Broad updater option surfaces beyond homeserver enablement, fixed daily schedule, and fixed repository identity until a second deployment requires configuration.
 
 ## Further Notes
 

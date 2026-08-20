@@ -7,8 +7,9 @@ registry=${REGISTRY:-pi-plugins.json}
 checks=${CHECKS:-checks.nix}
 
 test -x "$updater"
-grep -F 'cron: "0 3 * * *"' "$workflow"
-grep -Fx '  workflow_dispatch:' "$workflow"
+trigger_block=$(awk '/^on:$/ { active=1; next } active && /^[^[:space:]]/ { exit } active && NF { print }' "$workflow")
+[ "$trigger_block" = '  workflow_dispatch:' ]
+[ "$(grep -Fc 'workflow_dispatch:' "$workflow")" -eq 1 ]
 grep -F 'contents: write' "$workflow"
 test "$(grep -Fc 'git config user.name "github-actions[bot]"' "$workflow")" -eq 2
 grep -F 'if: always()' "$workflow"
@@ -143,6 +144,11 @@ EOF_NODE
 EOF
 printf '#!%s\n' "$BASH" >"$tmp/bin/nix"
 cat >>"$tmp/bin/nix" <<'EOF'
+[ -z "${NIX_EVENTS:-}" ] || printf '%s\n' "$*" >>"$NIX_EVENTS"
+if [ -n "${FAILED_FETCH_MARKER:-}" ] && [ -e "$FAILED_FETCH_MARKER" ]; then
+  printf '%s\n' CHECK_AFTER_FAILED_FETCH >>"$NIX_EVENTS"
+  exit 97
+fi
 case "$*" in
   'store prefetch-file --json --unpack https://github.com/fixture/pi-vcc/archive/new-vcc-rev.tar.gz') printf '{"hash":"sha256-raw-vcc","storePath":"%s"}\n' "$FIXTURE_VCC_SOURCE" ;;
   'store prefetch-file --json --unpack https://github.com/fixture/github-prompt/archive/new-prompt-rev.tar.gz') printf '{"hash":"sha256-new-prompt","storePath":"%s"}\n' "$FIXTURE_GITHUB_PROMPT_SOURCE" ;;
@@ -181,6 +187,21 @@ esac
 EOF
 printf '#!%s\n' "$BASH" >"$tmp/bin/git"
 cat >>"$tmp/bin/git" <<'EOF'
+[ -z "${GIT_EVENTS:-}" ] || printf '%s\n' "$*" >>"$GIT_EVENTS"
+if [ "$1" = fetch ]; then
+  [ "${FAIL_FETCH:-}" != 1 ] || exit 1
+  if [ -n "${FAIL_FETCH_AFTER:-}" ]; then
+    fetch_count_file=${FETCH_COUNT_FILE:-"$GIT_EVENTS.fetch-count"}
+    fetch_count=$(cat "$fetch_count_file" 2>/dev/null || printf 0)
+    fetch_count=$((fetch_count + 1))
+    printf '%s\n' "$fetch_count" >"$fetch_count_file"
+    if [ "$fetch_count" -gt "$FAIL_FETCH_AFTER" ]; then
+      [ -z "${FAILED_FETCH_MARKER:-}" ] || : >"$FAILED_FETCH_MARKER"
+      exit 1
+    fi
+  fi
+  exit 0
+fi
 restore_commit() {
   commit=$1
   cp "$GIT_STATE/commits/$commit/pi-plugins.json" pi-plugins.json
@@ -221,7 +242,11 @@ if [ "$1" = restore ]; then
   done
   exit 0
 fi
-if [ "$1" = reset ] && [ "$2" = --hard ]; then restore_commit "$3"; exit 0; fi
+if [ "$1" = reset ] && [ "$2" = --hard ]; then
+  [ -z "${FAILED_FETCH_MARKER:-}" ] || rm -f "$FAILED_FETCH_MARKER"
+  restore_commit "$3"
+  exit 0
+fi
 if [ "$1" = commit ] && [ -e pi-plugins.json ]; then
   parent=$(cat "$GIT_STATE/HEAD")
   count=$(cat "$GIT_STATE/count" 2>/dev/null || printf 0)
@@ -335,6 +360,19 @@ jq -e --arg prompt_hash "$github_prompt_hash" --arg mcp_hash "$github_mcp_hash" 
 pix_hash="sha256-$(sha256sum "$tmp/packages/pix-tools-package-lock.json" | cut -d' ' -f1)"
 jq -e --arg hash "$pix_hash" '."pix-data".version == "0.4.2" and ."pix-data".npmDepsHash == $hash and ."pix-footer".npmDepsHash == $hash' "$tmp/pi-plugins.json" >/dev/null
 
+cp "$tmp/baseline/pi-plugins.json" "$tmp/pi-plugins.json"
+rm -f "$tmp/packages/"*-package-lock.json
+if (
+  cd "$tmp"
+  PATH="$tmp/bin:$PATH" GIT_BASELINE="$tmp/baseline" GIT_STATE="$tmp/git-plugin-fetch-fail" FIXTURE_TARBALL="$tmp/fixture.tgz" FIXTURE_VCC_SOURCE="$tmp/vcc-source" FAIL_FETCH_AFTER=1 FAILED_FETCH_MARKER="$tmp/plugin-fetch-failed" GIT_EVENTS="$tmp/plugin-fetch-git-events" NIX_EVENTS="$tmp/plugin-fetch-nix-events" GITHUB_STEP_SUMMARY="$tmp/plugin-fetch-summary" bash ./daily-update.sh plugins
+); then
+  exit 1
+fi
+[ "$(grep -Fc 'fetch origin main --quiet' "$tmp/plugin-fetch-git-events")" -gt 1 ]
+! grep -Eq '^(rebase|push) ' "$tmp/plugin-fetch-git-events"
+! grep -F CHECK_AFTER_FAILED_FETCH "$tmp/plugin-fetch-nix-events"
+grep -F -- '- failure: fetch origin/main failed' "$tmp/plugin-fetch-summary"
+
 mkdir "$tmp/inputs"
 cp "$updater" "$tmp/inputs/daily-update.sh"
 cat >"$tmp/inputs/flake.lock" <<'EOF'
@@ -348,3 +386,20 @@ if (
 fi
 grep -F -- '- failure: concurrent update retry exhausted' "$tmp/input-summary"
 ! grep -F -- '- inputs: old-nix → new-nix; old-home → new-home' "$tmp/input-summary"
+
+mkdir "$tmp/inputs-fetch"
+cp "$updater" "$tmp/inputs-fetch/daily-update.sh"
+cat >"$tmp/inputs-fetch/flake.lock" <<'EOF'
+{"nodes":{"nixpkgs-unstable":{"locked":{"rev":"old-nix"}},"home-manager":{"locked":{"rev":"old-home"}}}}
+EOF
+if (
+  cd "$tmp/inputs-fetch"
+  PATH="$tmp/bin:$PATH" GIT_BASELINE="$tmp/baseline" INPUT_CHANGED=1 FAIL_FETCH=1 GIT_EVENTS="$tmp/input-fetch-git-events" NIX_EVENTS="$tmp/input-fetch-nix-events" GITHUB_STEP_SUMMARY="$tmp/input-fetch-summary" bash ./daily-update.sh inputs
+); then
+  exit 1
+fi
+grep -Fx 'fetch origin main --quiet' "$tmp/input-fetch-git-events"
+! grep -Eq '^(rebase|push) ' "$tmp/input-fetch-git-events"
+[ "$(grep -Fc 'build .#checks.x86_64-linux.formatting' "$tmp/input-fetch-nix-events")" -eq 1 ]
+[ "$(grep -Fc 'flake check' "$tmp/input-fetch-nix-events")" -eq 1 ]
+grep -F -- '- failure: fetch origin/main failed' "$tmp/input-fetch-summary"

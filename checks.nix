@@ -38,6 +38,19 @@ let
   };
   darwinEvaluation = builtins.tryEval darwin.config.home.activationPackage.drvPath;
   disabled = evaluate { programs.pi-coding-agent.enable = false; };
+  localUpdaterEnabled = evaluate { programs.pi-coding-agent.localUpdater.enable = true; };
+  darwinLocalUpdaterEnabled = home-manager.lib.homeManagerConfiguration {
+    pkgs = nixpkgs-unstable.legacyPackages.aarch64-darwin;
+    modules = [
+      piModule
+      {
+        home.stateVersion = "26.05";
+        home.username = "test";
+        home.homeDirectory = "/Users/test";
+        programs.pi-coding-agent.localUpdater.enable = true;
+      }
+    ];
+  };
   remotePiConfigured = evaluate {
     programs.pi-coding-agent.plugins.remote-pi.relayUrl = "https://relay.consumer.example";
   };
@@ -394,6 +407,44 @@ in
         == "127.0.0.2";
     assert expectedBrowserGoblin.agentBrowserVersion == pkgs.agent-browser.version;
     assert !disabled.config.programs.pi-coding-agent.enable;
+    assert !default.config.programs.pi-coding-agent.localUpdater.enable;
+    assert localUpdaterEnabled.config.programs.pi-coding-agent.localUpdater.enable;
+    assert !(darwinLocalUpdaterEnabled.config.systemd.user.services ? pi-coding-agent-local-update);
+    assert !(darwinLocalUpdaterEnabled.config.systemd.user.timers ? pi-coding-agent-local-update);
+    assert
+      localUpdaterEnabled.config.systemd.user.timers.pi-coding-agent-local-update.Timer.OnCalendar
+      == "*-*-* 03:00:00";
+    assert localUpdaterEnabled.config.systemd.user.timers.pi-coding-agent-local-update.Timer.Persistent;
+    assert
+      localUpdaterEnabled.config.systemd.user.timers.pi-coding-agent-local-update.Install.WantedBy
+      == [ "timers.target" ];
+    assert
+      localUpdaterEnabled.config.systemd.user.services.pi-coding-agent-local-update.Service.Type
+      == "oneshot";
+    assert
+      localUpdaterEnabled.config.systemd.user.services.pi-coding-agent-local-update.Service.ProtectHome
+      == "read-only";
+    assert
+      localUpdaterEnabled.config.systemd.user.services.pi-coding-agent-local-update.Service.UMask
+      == "0077";
+    assert
+      localUpdaterEnabled.config.systemd.user.services.pi-coding-agent-local-update.Service.TimeoutStartSec
+      == "6h";
+    assert builtins.elem "PI_OFFLINE=1"
+      localUpdaterEnabled.config.systemd.user.services.pi-coding-agent-local-update.Service.Environment;
+    assert builtins.elem "PI_TELEMETRY=0"
+      localUpdaterEnabled.config.systemd.user.services.pi-coding-agent-local-update.Service.Environment;
+    assert
+      localUpdaterEnabled.config.systemd.user.services.pi-coding-agent-local-update.Service.ProtectSystem
+      == "strict";
+    assert
+      localUpdaterEnabled.config.systemd.user.services.pi-coding-agent-local-update.Service.PrivateTmp;
+    assert
+      localUpdaterEnabled.config.systemd.user.services.pi-coding-agent-local-update.Service.NoNewPrivileges;
+    assert
+      localUpdaterEnabled.config.systemd.user.services.pi-coding-agent-local-update.Service.LockPersonality;
+    assert
+      localUpdaterEnabled.config.systemd.user.services.pi-coding-agent-local-update.Service.RestrictSUIDSGID;
     assert default.config.programs.pi-coding-agent.package == expectedPackage;
     assert
       default.config.programs.pi-coding-agent.settings == {
@@ -876,11 +927,14 @@ in
           pkgs.jq
           pkgs.nodejs_22
           pkgs.gnutar
+          pkgs.git
+          pkgs.util-linux
         ];
       }
       ''
         nixfmt --check ${./flake.nix} ${./checks.nix} ${./modules/pi-coding-agent.nix} ${./modules/remote-pi-relay.nix} ${./modules/pi-coding-agent/agents.nix} ${./modules/pi-coding-agent/default-agents.nix} ${./modules/pi-coding-agent/pi-subagents.nix} ${./packages/pi-diet-lsp.nix} ${./packages/pi-commandcode-provider.nix} ${./packages/pi-effort.nix} ${./packages/pi-timestamps.nix} ${./packages/pi-herdr.nix} ${./packages/pi-herdr-sudo-task.nix} ${./packages/pi-ask-herdr.nix} ${./packages/pi-herdr-rename.nix} ${./packages/pi-patty-bg-tasks.nix} ${./packages/remote-pi.nix} ${./packages/remote-pi-config-updater.nix} ${./packages/remote-pi-relay.nix} ${./packages/pi-vimmode.nix} ${./packages/pi-usage.nix} ${./packages/pi-cache-optimizer.nix} ${./packages/pi-mcp-adapter.nix} ${./packages/browser-goblin.nix} ${./packages/pix-optimizer.nix} ${./packages/pix-tools.nix} ${./packages/pi-vcc.nix} ${./packages/pi-prompt-template-model.nix} ${./packages/rpiv-todo.nix} ${./packages/pi-rules.nix} ${./packages/pi-web-access.nix} ${./packages/pi-subagents.nix} ${./packages/pi-vision-handoff.nix} ${./packages/pi-vision-handoff-config-updater.nix} ${./packages/supi-context.nix} ${./packages/supi-extras.nix} ${./packages/toon.nix}
         WORKFLOW=${./.github/workflows/daily-update.yml} UPDATER=${./scripts/daily-update.sh} REGISTRY=${./pi-plugins.json} CHECKS=${./checks.nix} bash ${./tests/daily-updater-self-check.sh}
+        RUNNER=${./scripts/local-update.sh} PROMPT=${./scripts/local-update-recovery.md} bash ${./tests/local-updater-self-check.sh}
         touch $out
       '';
 
