@@ -6,7 +6,7 @@ const GROUP_NAMES = ["browser", "subagents", "research", "herdr", "background", 
 type Group = typeof GROUP_NAMES[number];
 const GROUP_MARKERS: Record<Group, readonly string[]> = {
   browser: ["browser-goblin"],
-  subagents: ["pi-herdr-subagents"],
+  subagents: ["pi-subagents"],
   research: ["pi-web-access", "pi-mcp-adapter"],
   herdr: ["pi-herdr"],
   background: ["pi-patty-bg-tasks"],
@@ -17,13 +17,9 @@ const GROUP_MARKERS: Record<Group, readonly string[]> = {
 const ALWAYS_ACTIVE = new Set(["bash", "ask_user", "rename_herdr_tab", "todo", "load_tools"]);
 
 export default function (pi: ExtensionAPI) {
-  const childAllowedTools = process.env.PI_SUBAGENT_ALLOWED_TOOLS
-    ? new Set(process.env.PI_SUBAGENT_ALLOWED_TOOLS.split(",").map((name) => name.trim()).filter(Boolean))
-    : null;
   const groupTools = (group: Group) => pi.getAllTools()
     .filter((tool) =>
       !ALWAYS_ACTIVE.has(tool.name)
-      && (!childAllowedTools || childAllowedTools.has(tool.name))
       && GROUP_MARKERS[group].some((marker) => tool.sourceInfo.path.includes(marker)))
     .map((tool) => tool.name);
 
@@ -57,11 +53,9 @@ export default function (pi: ExtensionAPI) {
 
   pi.on("session_start", () => {
     const deferred = new Set(GROUP_NAMES.flatMap(groupTools));
-    const active = pi.getActiveTools().filter((name) =>
-      childAllowedTools ? childAllowedTools.has(name) : !deferred.has(name));
     pi.setActiveTools([...new Set([
-      ...active,
-      ...(childAllowedTools ? [] : ["load_tools"]),
+      ...pi.getActiveTools().filter((name) => !deferred.has(name)),
+      "load_tools",
     ])]);
   });
 }

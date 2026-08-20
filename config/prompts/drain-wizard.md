@@ -81,13 +81,13 @@ Preview both files. Ask one write/overwrite approval. Re-read targets immediatel
 
 ## 6. Materialize agents when needed
 
-Inspect rendered named-agent files for the ten drain agents. When all names and tool allowlists resolve and no agent edit was requested, leave them untouched. Otherwise read complete `~/.pi/agent/templates/drain/AGENTS.md` and follow its conditional materialization procedure. Do not duplicate that procedure here.
+Run live discovery for the ten drain agents. When all resolve and no agent edit was requested, leave them untouched. Otherwise read complete `~/.pi/agent/templates/drain/AGENTS.md` and follow its conditional materialization procedure. Do not duplicate that procedure here.
 
 **Complete when:** existing agents remain untouched, or the reference procedure finishes with ten valid machine-local agents. A blocked setup blocks the wizard.
 
 ## 7. Smoke
 
-Run read-only candidate queries for every project. Reconstruct one sampled ledger if present. Confirm ordered selection can distinguish resumable, hotfix, normal, blocked, and unmatched tickets without mutation. Dry-run housekeeping scope plus reminder due/dedupe decisions without sending. Confirm ten rendered drain-agent names and tool allowlists resolve.
+Run read-only candidate queries for every project. Reconstruct one sampled ledger if present. Confirm ordered selection can distinguish resumable, hotfix, normal, blocked, and unmatched tickets without mutation. Dry-run housekeeping scope plus reminder due/dedupe decisions without sending. Confirm ten drain agents resolve.
 
 Write `.pi/drain/setup-report.md` with redacted mappings, hashes, agent result, Doctor results, and timestamp.
 

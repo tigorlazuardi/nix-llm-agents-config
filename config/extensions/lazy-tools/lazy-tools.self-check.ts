@@ -5,7 +5,7 @@ type Group = "browser" | "subagents" | "research" | "herdr" | "background" | "me
 const core = ["read", "bash", "ask_user", "rename_herdr_tab", "todo"];
 const grouped: Record<Group, string[]> = {
   browser: ["browser_open"],
-  subagents: ["subagent", "subagent_interrupt", "subagents_list", "subagent_resume"],
+  subagents: ["subagent", "subagent_wait", "subagent_supervisor"],
   research: ["web_search", "mcp"],
   herdr: ["herdr_layout", "sudo_task"],
   background: ["jobs"],
@@ -19,10 +19,9 @@ const paths: Record<string, string> = {
   ask_user: "/nix/store/pi-ask-herdr/index.ts",
   rename_herdr_tab: "/nix/store/pi-herdr-rename/index.ts",
   browser_open: "/nix/store/browser-goblin/index.ts",
-  subagent: "/nix/store/pi-herdr-subagents/pi-extension/subagents/index.ts",
-  subagent_interrupt: "/nix/store/pi-herdr-subagents/pi-extension/subagents/index.ts",
-  subagents_list: "/nix/store/pi-herdr-subagents/pi-extension/subagents/index.ts",
-  subagent_resume: "/nix/store/pi-herdr-subagents/pi-extension/subagents/index.ts",
+  subagent: "/nix/store/pi-subagents/index.ts",
+  subagent_wait: "/nix/store/pi-subagents/src/runs/background/wait-tool.ts",
+  subagent_supervisor: "/nix/store/pi-subagents/src/intercom/native-supervisor-channel.ts",
   web_search: "/nix/store/pi-web-access/index.ts",
   mcp: "/nix/store/pi-mcp-adapter/index.ts",
   herdr_layout: "/nix/store/pi-herdr/index.ts",
@@ -61,27 +60,3 @@ for (const group of Object.keys(grouped) as Group[]) {
   for (const tool of grouped[group]) assert(active.includes(tool));
   for (const tool of core) assert(active.includes(tool));
 }
-
-process.env.PI_SUBAGENT_ALLOWED_TOOLS = "read,bash,subagent,caller_ping,subagent_done";
-let childActive = ["read", "bash", "subagent", "caller_ping", "subagent_done"];
-let childLoader: typeof loader;
-let childSessionStart: typeof sessionStart;
-lazyTools({
-  registerTool(definition: typeof loader) {
-    childLoader = definition;
-  },
-  on(event: string, handler: () => void) {
-    if (event === "session_start") childSessionStart = handler;
-  },
-  getAllTools: () => tools,
-  getActiveTools: () => childActive,
-  setActiveTools(names: string[]) {
-    childActive = names;
-  },
-} as never);
-assert(childLoader && childSessionStart);
-childSessionStart();
-assert.deepEqual(childActive, ["read", "bash", "subagent", "caller_ping", "subagent_done"]);
-await childLoader.execute("browser", { group: "browser" });
-assert.deepEqual(childActive, ["read", "bash", "subagent", "caller_ping", "subagent_done"]);
-delete process.env.PI_SUBAGENT_ALLOWED_TOOLS;

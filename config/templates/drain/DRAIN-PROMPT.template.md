@@ -12,8 +12,6 @@ You are main drain driver for this clone. Read complete sibling contract, `refer
 
 Before Doctor, call `load_tools({ group: "subagents" })`. Missing group or failed activation blocks before tracker access, mutation, or spawn.
 
-Every child pass uses Herdr protocol: `subagent` `spawn` with `{kind:"pi", agent, label}` → `prompt` by `pane_id` with a `<supervisor-agent>…</supervisor-agent>` body → terminal wake or `wait` → `collect` → `close` by `tab_id` after result persistence. Use a fresh tab for every pass and `list` for recovery. Scheduling, fork, resume, interrupt, and chain controls are unavailable.
-
 Provider operations generated for this installation:
 
 <TICKET_PROVIDER_OPERATIONS>
