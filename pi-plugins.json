@@ -2,10 +2,10 @@
   "pi-rules": {
     "strategy": "npm",
     "package": "@tigorhutasuhut/pi-rules",
-    "version": "0.5.4",
-    "src": "https://registry.npmjs.org/@tigorhutasuhut/pi-rules/-/pi-rules-0.5.4.tgz",
-    "hash": "sha256-vBfv9Zh08xnOJAxVWnjSWWGqPF84Hk10ViOHIxovF5E=",
-    "npmDepsHash": "sha256-umptz1C77AHcLJCtT0fCVKsbu1tiiLL0fZ22MWSrVIk=",
+    "version": "0.6.0",
+    "src": "https://registry.npmjs.org/@tigorhutasuhut/pi-rules/-/pi-rules-0.6.0.tgz",
+    "hash": "sha256-O3mjVfZHMmmPcg6XOD3mVHQjCJmAbMWNmRBFX4q1qjk=",
+    "npmDepsHash": "sha256-gONlod7vcULy/S1Xkzx6HLcGaESi3cWb8JRXmiJwb90=",
     "manifestTransform": {
       "delete": [
         "devDependencies",
