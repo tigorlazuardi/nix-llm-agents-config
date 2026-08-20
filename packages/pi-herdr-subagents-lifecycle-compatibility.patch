@@ -1,0 +1,43 @@
+--- a/pi-extension/subagents/herdr.ts
++++ b/pi-extension/subagents/herdr.ts
+@@ -251,0 +252,5 @@
++export function buildHerdrEscapeArgs(surface: string): string[] {
++  // First Escape leaves Vim insert mode; second cancels the active Pi turn.
++  return ["pane", "send-keys", surface, "Escape", "Escape"];
++}
++
+@@ -253 +258 @@
+-  herdrExec(["pane", "send-keys", surface, "Escape"]);
++  herdrExec(buildHerdrEscapeArgs(surface));
+--- a/pi-extension/subagents/subagent-done.ts
++++ b/pi-extension/subagents/subagent-done.ts
+@@ -3 +3 @@
+- * - Shows agent identity + available tools as a styled widget above the editor (toggle with Ctrl+J)
++ * - Shows agent identity + active tools as a styled widget above the editor
+@@ -6 +6 @@
+-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
++import { rawKeyHint, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
+@@ -11,0 +12,2 @@
++const TOGGLE_SHORTCUT = "ctrl+shift+o";
++
+@@ -112 +114 @@
+-          const hint = theme.fg("muted", "  (Ctrl+J to collapse)");
++          const hint = theme.fg("muted", `  (${rawKeyHint(TOGGLE_SHORTCUT, "to collapse")})`);
+@@ -139 +141 @@
+-          const hint = theme.fg("muted", "  (Ctrl+J to expand)");
++          const hint = theme.fg("muted", `  (${rawKeyHint(TOGGLE_SHORTCUT, "to expand")})`);
+@@ -158,2 +160 @@
+-    const tools = pi.getAllTools();
+-    toolNames = tools.map((t) => t.name).sort();
++    toolNames = pi.getActiveTools().sort();
+@@ -267,2 +268 @@
+-  // Toggle expand/collapse with Ctrl+J
+-  pi.registerShortcut("ctrl+j", {
++  pi.registerShortcut(TOGGLE_SHORTCUT, {
+--- a/pi-extension/subagents/harness/drivers/pi.ts
++++ b/pi-extension/subagents/harness/drivers/pi.ts
+@@ -123,0 +124,4 @@
++    if (toolAllowlist) {
++      envParts.push(`PI_SUBAGENT_ALLOWED_TOOLS=${shellQuote(toolAllowlist)}`);
++    }
++

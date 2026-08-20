@@ -264,8 +264,7 @@
     }
   ],
   "review": {
-    "quickBudget": 5,
-    "deepBudget": 3,
+    "deliveryLoopBudget": 10,
     "largeOrAmbiguousOutcome": "needsHumanReview",
     "deploymentFailureClassifier": "deep-reviewer",
     "deploymentFailureOutcomes": {

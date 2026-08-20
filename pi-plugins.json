@@ -341,20 +341,24 @@
     "hash": "sha256-ZKKKEBvLSij2vHJ9zJa4CwUkQYjYUMXh3hiPhl7sKlI=",
     "check": "pi-timestamps-load"
   },
-  "pi-subagents": {
+  "pi-herdr-subagents": {
     "strategy": "npm",
-    "package": "pi-subagents",
-    "version": "0.52.1",
-    "src": "https://registry.npmjs.org/pi-subagents/-/pi-subagents-0.52.1.tgz",
-    "hash": "sha256-v5ELbLPhsefP0iTOQ1nJR1gOCAOH+pkuXmjdBieydSI=",
-    "npmDepsHash": "sha256-WccE8pCsF0FYG4rxtwm55coEx3hfHd/a0yzSycE5BBY=",
+    "package": "pi-herdr-subagents",
+    "version": "0.2.0",
+    "src": "https://registry.npmjs.org/pi-herdr-subagents/-/pi-herdr-subagents-0.2.0.tgz",
+    "hash": "sha256-CmZFyocCW4z1O3Wg6qX6OrZh3YHVlHMAAcPU0UxdKiY=",
+    "npmDepsHash": "sha256-/BZpO7wR+Laz32Id+xGDpb5Ss06K0b2ZbqS8g3jsfgg=",
     "manifestTransform": {
       "delete": [
-        "devDependencies"
-      ]
+        "devDependencies",
+        "peerDependencies"
+      ],
+      "dependencyOverrides": {
+        "@sinclair/typebox": "0.34.52"
+      }
     },
-    "lockFile": "packages/pi-subagents-package-lock.json",
-    "check": "subagents-load"
+    "lockFile": "packages/pi-herdr-subagents-package-lock.json",
+    "check": "herdr-subagents-load"
   },
   "pi-vision-handoff": {
     "strategy": "npm",

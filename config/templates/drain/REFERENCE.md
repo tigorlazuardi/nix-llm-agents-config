@@ -42,6 +42,12 @@ Each event comment contains the exact bot marker, `pi-drain-state:v1`, and one f
   "phase": "quick-review",
   "branch": "integration/native-drain/SBN_I-42",
   "revision": "<sha-or-null>",
+  "activeChild": {
+    "role": "quick-reviewer",
+    "label": "SBN_I-42 quick 1",
+    "paneId": "<pane-id-or-null-before-spawn>",
+    "tabId": "<tab-id-or-null-before-spawn>"
+  },
   "buildAttempts": 2,
   "quickAttempts": 1,
   "deepAttempts": 0,
@@ -54,7 +60,7 @@ Each event comment contains the exact bot marker, `pi-drain-state:v1`, and one f
 }
 ```
 
-Parser trusts only schema-valid events posted under configured marker. A fork—two events sharing one `previousEventId`—moves the ticket to `needsHumanReview`; it never guesses a winner. Human requeue into mapped `ready` starts a new ledger generation with counters reset.
+Parser trusts only schema-valid events posted under configured marker. New delivery events always include `activeChild`; the optional field preserves legacy v1 parsing only. A resumed nonterminal delivery event without `activeChild` moves to `needsHumanReview` because live-child ownership is unknowable. A fork—two events sharing one `previousEventId`—also moves the ticket to `needsHumanReview`; it never guesses a winner. Human requeue into mapped `ready` starts a new ledger generation with counters reset.
 
 ## Selection
 
@@ -70,12 +76,18 @@ Claim transition plus ledger event happens before any child spawn. Re-read after
 
 ## Delivery
 
-`build-lead` preflights before writing:
+Main owns one persisted state machine per claimed ticket:
 
-- S/M and bounded → implement.
-- Ambiguous, L/XL, or product/architecture decision → `NEEDS_HUMAN_REVIEW` without implementation.
+1. fresh `build-lead` implements and preflights before writing;
+2. configured checks produce evidence;
+3. fresh `quick-reviewer` reviews the current revision;
+4. fresh `deep-reviewer` reviews only after quick PASS.
 
-Quick budget is 5; deep budget is 3. Counters persist in ledger. Every rejection ends the producing lead; fresh lead receives only findings pointer. Deep rejection restarts quick review. Exhaustion transitions to `needsHumanReview`.
+`build-lead` proceeds only for S/M bounded work. Ambiguous, L/XL, or product/architecture work returns `NEEDS_HUMAN_REVIEW` without implementation. Quick or deep rejection ends the producing lead and returns to fresh implementation with only the findings pointer; deep rejection therefore restarts quick review. `activeChild` records intended role/label before spawn, actual Herdr ids immediately afterward, and returns to null only after terminal output is persisted and the tab is closed.
+
+`review.deliveryLoopBudget` is one shared budget of 10 implementation entries. `buildAttempts` is its persisted counter; `quickAttempts` and `deepAttempts` are audit counters, not separate budgets. Exhaustion transitions to `needsHumanReview`.
+
+Persist phase, counters, intended child role/label, actual child id, revision, and evidence refs around every child spawn and settlement. Context compaction or process restart reconstructs exclusively from the latest valid ledger; conversation memory never controls a transition.
 
 Every terminal ticket outcome—success or failure—is persisted, then drain selects next-best ticket. Drain stops only when no eligible/resumable ticket remains; external ticker owns later invocation.
 
@@ -86,7 +98,7 @@ One active MR per ticket. After review PASS, open MR to lane target and transiti
 When merged code causes a development/staging deployment failure, fresh `deep-reviewer` classifies pipeline evidence:
 
 - infrastructure or ambiguous → `needsHumanReview`;
-- code → fresh build lead, full quick/deep gates, follow-up MR.
+- code → main resumes the fresh build-lead → quick-reviewer → deep-reviewer loop, then opens a follow-up MR.
 
 Deployment-fix budget is 2 and persists in ledger.
 

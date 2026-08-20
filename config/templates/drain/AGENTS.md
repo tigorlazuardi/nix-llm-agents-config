@@ -5,9 +5,9 @@
 ## Conditional materialization procedure
 
 1. **Doctor:** require trusted Git root/common dir, approved schema-valid contract, matching generated prompt/hash, applicable project instructions, and installed models/tools/private skills. Inventory existing `.pi/agents/drain/`; unresolved capabilities block setup.
-2. **Propose:** generate exactly the ten agents below. Keep provider ids, branches, budgets, URLs, and state mappings in contract. Bind outward provider/SCM/deployment tools only to `delivery-orchestrator` and `housekeeper`; bind configured notifier only to `housekeeper`; bind `subagent` only to `delivery-orchestrator` and `build-lead`. Missing required tool/skill blocks affected agent rather than weakening it.
+2. **Propose:** generate exactly the seven agents below. Keep provider ids, branches, budgets, URLs, and state mappings in contract. Main owns tracker/SCM delivery mutations; among rendered agents, bind outward provider/SCM/deployment tools only to `housekeeper`, configured notifier only to `housekeeper`, and `subagent` only to `build-lead`. Missing required tool/skill blocks affected agent rather than weakening it.
 3. **Preview and write:** show file list, agent/model/tool/skill matrix, and redacted diffs. Require explicit approval before overwriting existing targets; re-read targets immediately before atomic writes. Add `/.pi/agents/drain/` and `/.pi/drain/` to clone-local Git exclude without changing committed `.gitignore`.
-4. **Smoke:** use live subagent discovery to prove exactly ten local runtime names resolve to expected paths/models. Mechanically verify only two fanout agents, every leaf lacks `subagent`, outward tools exist only on delivery/housekeeper, optional notifier exists only on housekeeper, private skills resolve, generated paths are ignored, and tracker/SCM/notification mutation count is zero. Write `.pi/drain/agent-setup-report.md`.
+4. **Smoke:** inspect rendered named-agent files to prove exactly seven local runtime names resolve to expected paths/models/tool allowlists. Mechanically verify only `build-lead` includes `subagent`, every leaf lacks it, outward tools exist only on housekeeper, optional notifier exists only on housekeeper, private skills resolve, generated paths are ignored, and tracker/SCM/notification mutation count is zero. Write `.pi/drain/agent-setup-report.md`.
 
 Load and execute this procedure only after contract materialization, unless agent-only edit was explicitly requested against an already valid contract.
 
@@ -20,22 +20,19 @@ inheritSkills: false
 defaultContext: fresh
 ```
 
-No package namespace or fallback model. Strict minimum tool allowlist. Only `delivery-orchestrator` and `build-lead` receive `subagent`; all others are leaves. `build-lead` may reach depth needed for worker/scout only.
+No package namespace or fallback model. Strict minimum tool allowlist. Only `build-lead` receives `subagent`; all others are leaves. Main spawns every delivery, review, and housekeeping pass in a fresh Herdr tab; build-lead uses the same protocol only for worker/scout delegation: `spawn` → `prompt` → terminal wake or `wait` → `collect` → `close`, with `list` for recovery. Scheduling, fork, resume, interrupt, and chain controls are unavailable.
 
 | Agent | Model | Thinking | Source role |
 |---|---|---|---|
-| `delivery-orchestrator` | `cx/gpt-5.6-luna` | medium | no project-source writes |
 | `build-lead` | `cx/gpt-5.6-sol` | high | writer |
 | `build-worker` | `cx/gpt-5.6-terra` | high | writer |
 | `scout` | `cx/gpt-5.6-luna` | high | read-only |
 | `quick-reviewer` | `cx/gpt-5.6-sol` | medium | read-only |
 | `deep-reviewer` | `cx/gpt-5.6-sol` | high | read-only |
-| `ui-reviewer` | `cx/gpt-5.6-sol` | medium | read-only |
-| `ux-reviewer` | `cx/gpt-5.6-sol` | medium | read-only |
 | `housekeeper` | `cx/gpt-5.6-luna` | medium | no project-source writes |
 | `note-taker` | `cx/gpt-5.6-sol` | medium | report writer |
 
-Provider/tracker/SCM/deployment tools belong only to delivery and housekeeper. Builders/reviewers receive no outward mutation tools. Housekeeper alone receives deployment watch/trigger capability and, only when configured, notifier capability.
+Main performs tracker/SCM delivery mutations. Among rendered agents, provider/tracker/SCM/deployment tools belong only to housekeeper. Builders/reviewers receive no outward mutation tools. Housekeeper alone receives deployment watch/trigger capability and, only when configured, notifier capability.
 
 ## Shared behavior
 
@@ -47,20 +44,6 @@ Provider/tracker/SCM/deployment tools belong only to delivery and housekeeper. B
 - Terminal reply contains only required fields. Malformed reply fails closed.
 
 ## Roles
-
-### delivery-orchestrator
-
-Black-box state machine for one uniquely claimed ticket. Reads contract, immutable ticket snapshot, ledger counters, ref/path metadata, child terminal blocks, check exit status, and pointers. It does not read source, diff content, report content, findings, or worklogs.
-
-It spawns fresh lead; runs configured checks while redirecting full output to evidence; independently derives UI/database/low-tolerance routing from changed paths; spawns fresh sibling reviewers; persists quick 5/deep 3 counters through parent ledger requests. Rejection ends current lead and fresh lead receives findings pointer. Ambiguous/L/XL preflight, exhaustion, malformed reply, blocker, or escalation returns `NEEDS_HUMAN_REVIEW`.
-
-```text
-VERDICT: PASS|BLOCKED|ESCALATE|NEEDS_HUMAN_REVIEW
-TICKET_REF: <ticket>
-REPORT_REF: <path-or-none>
-REVISION: <sha-or-none>
-ATTRIBUTES: ui_touched=<bool>; db_touched=<bool>; build_attempts=<n>; quick_attempts=<n>; deep_attempts=<n>; deploy_fix_attempts=<n>
-```
 
 ### build-lead
 
@@ -83,7 +66,7 @@ Returns concise facts and source pointers for bounded read-only question. No des
 
 ### quick-reviewer
 
-Reads actual diff, standards, accepted work contract, and check evidence—not producer narrative. Reviews standards, obvious correctness, tests, maintainability, accidental scope. Database axis includes roundtrip budget, N+1/batching, and set-based/CTE opportunities when justified.
+Reads actual diff, standards, accepted work contract, and check evidence—not producer narrative. Reviews standards, obvious correctness, tests, maintainability, accidental scope. Database axis includes roundtrip budget, N+1/batching, and set-based/CTE opportunities when justified. When UI changed, uses runnable render, screenshots, and selected private UI/browser skills to check responsive hierarchy, spacing, typography, states, accessibility, and reduced motion; missing runnable evidence is `BLOCKED`.
 
 ```text
 VERDICT: PASS|REVISE|BLOCKED
@@ -93,7 +76,7 @@ ATTRIBUTES: findings=<n>; db_axis=<bool>
 
 ### deep-reviewer
 
-Reads actual diff, authoritative work contract/human context, standards, and check evidence. Reviews goal compliance, security, auth/authz, data exposure, public contracts, destructive risk, concurrency, failures, and cross-module edges. It also classifies deployment evidence when explicitly tasked: `CODE|INFRASTRUCTURE|AMBIGUOUS`.
+Reads actual diff, authoritative work contract/human context, standards, and check evidence. Reviews goal compliance, security, auth/authz, data exposure, public contracts, destructive risk, concurrency, failures, and cross-module edges. When UI changed, exercises interactions with selected private UX/browser skills and checks pending/success/error feedback, keyboard/focus, labels/states, safe errors, reduced motion, and recovery; missing runnable evidence is `BLOCKED`. It also classifies deployment evidence when explicitly tasked: `CODE|INFRASTRUCTURE|AMBIGUOUS`.
 
 ```text
 VERDICT: PASS|REVISE|BLOCKED|CODE|INFRASTRUCTURE|AMBIGUOUS
@@ -101,15 +84,7 @@ REPORT_REF: <path>
 ATTRIBUTES: findings=<n>
 ```
 
-### ui-reviewer
-
-Uses runnable browser render, screenshots, accepted FASE-1 evidence, and invocation-private UI/browser skills. Checks responsive hierarchy, spacing, color, depth, typography, states, accessibility, and reduced motion. Missing runnable evidence is `BLOCKED`.
-
-### ux-reviewer
-
-Exercises changed interactions with private UX/browser skills. Checks pending/success/error feedback, keyboard/focus, labels/states, reduced motion, safe errors, and recovery. Correlation precedence: `X-Response-ID` → `X-Request-ID` → `X-Trace-ID` → trace id from `traceparent` → none. Missing runnable evidence is `BLOCKED`.
-
-UI/UX reviewers return `PASS|REVISE|BLOCKED` plus report/evidence pointers. Copy only selected installed private skills into `.pi/drain/skills/<agent>/`; use relative `skillPath` and explicit `skills` so parent catalog stays unchanged.
+Quick/deep reviewers return `PASS|REVISE|BLOCKED` plus report/evidence pointers. For UI changes, copy only selected installed private UI/UX/browser skills into `.pi/drain/skills/<agent>/`; use relative `skillPath` and explicit `skills` so parent catalog stays unchanged. Correlation precedence is `X-Response-ID` → `X-Request-ID` → `X-Trace-ID` → trace id from `traceparent` → none.
 
 ### housekeeper
 

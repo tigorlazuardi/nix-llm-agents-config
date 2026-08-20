@@ -54,9 +54,25 @@
     },
     "branch": { "type": ["string", "null"] },
     "revision": { "type": ["string", "null"] },
-    "buildAttempts": { "type": "integer", "minimum": 0 },
-    "quickAttempts": { "type": "integer", "minimum": 0, "maximum": 5 },
-    "deepAttempts": { "type": "integer", "minimum": 0, "maximum": 3 },
+    "activeChild": {
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["role", "label", "paneId", "tabId"],
+          "properties": {
+            "role": { "enum": ["build-lead", "quick-reviewer", "deep-reviewer"] },
+            "label": { "type": "string", "minLength": 1 },
+            "paneId": { "type": ["string", "null"] },
+            "tabId": { "type": ["string", "null"] }
+          }
+        }
+      ]
+    },
+    "buildAttempts": { "type": "integer", "minimum": 0, "maximum": 10 },
+    "quickAttempts": { "type": "integer", "minimum": 0, "maximum": 10 },
+    "deepAttempts": { "type": "integer", "minimum": 0, "maximum": 10 },
     "deployFixAttempts": { "type": "integer", "minimum": 0, "maximum": 2 },
     "mrRef": { "type": ["string", "null"] },
     "deploymentRef": { "type": ["string", "null"] },

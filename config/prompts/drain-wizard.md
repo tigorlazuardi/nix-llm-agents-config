@@ -14,7 +14,7 @@ Before Doctor, call `load_tools({ group: "subagents" })`. Missing group or faile
 Read `~/.pi/agent/templates/drain/REFERENCE.md` before interviewing. Use
 `contract.template.json` for shape, `contract.schema.json` and `state-event.schema.json` for validation, and `DRAIN-PROMPT.template.md` for runtime output. Those files are the reference; keep this prompt procedural.
 
-Agent setup/edit is conditional. Inspect discovery first; do not load `~/.pi/agent/templates/drain/AGENTS.md` unless one of the ten drain agents is missing/drifted or the user requested agent changes.
+Agent setup/edit is conditional. Inspect discovery first; do not load `~/.pi/agent/templates/drain/AGENTS.md` unless one of the seven drain agents is missing/drifted or the user requested agent changes.
 
 ## 1. Doctor the current system
 
@@ -38,7 +38,7 @@ When a required role has no safe mapping, offer the smallest new status/field/la
 
 Build ordered `hotfixPolicies[]` first, then ordered `policies[]`. Multiple tracker projects are allowed; operator guarantees one vertical product.
 
-For every lane resolve project scope, matcher, source branch, branch pattern, MR target, completion gate, deployment environment/trigger, and deploy-fix behavior. First matching lane wins; tickets within tiers are oldest first.
+For every lane resolve project scope, matcher, source branch, branch pattern, MR target, completion gate, deployment environment/trigger, and deploy-fix behavior. First matching lane wins; tickets within tiers are oldest first. Delivery always uses the main-agent state machine `implement → quick reviewer → deep reviewer` with one shared loop budget of 10; every reviewer rejection restarts at implement.
 
 Hotfix lane uses production source → reviewed cherry-pick to development/staging → deployment green → upstream MR to production. Full review remains mandatory. Standard deployment code fixes use follow-up MRs. Both use deploy-fix budget 2.
 
@@ -56,7 +56,7 @@ Show:
 2. authoritative ticket-context source;
 3. hotfix and normal lane order/matchers;
 4. branch/MR/deployment flow;
-5. ledger, budgets, resume, housekeeping round/cadence, optional reminder policy, and failure transitions;
+5. ledger, shared 10-loop delivery budget, resume, housekeeping round/cadence, optional reminder policy, and failure transitions;
 6. exact remote statuses/labels/fields proposed for creation;
 7. local files created/changed and redacted diffs.
 
@@ -81,17 +81,17 @@ Preview both files. Ask one write/overwrite approval. Re-read targets immediatel
 
 ## 6. Materialize agents when needed
 
-Run live discovery for the ten drain agents. When all resolve and no agent edit was requested, leave them untouched. Otherwise read complete `~/.pi/agent/templates/drain/AGENTS.md` and follow its conditional materialization procedure. Do not duplicate that procedure here.
+Inspect rendered named-agent files for the seven drain agents. When all names and tool allowlists resolve and no agent edit was requested, leave them untouched. Otherwise read complete `~/.pi/agent/templates/drain/AGENTS.md` and follow its conditional materialization procedure. Do not duplicate that procedure here.
 
-**Complete when:** existing agents remain untouched, or the reference procedure finishes with ten valid machine-local agents. A blocked setup blocks the wizard.
+**Complete when:** existing agents remain untouched, or the reference procedure finishes with seven valid machine-local agents. A blocked setup blocks the wizard.
 
 ## 7. Smoke
 
-Run read-only candidate queries for every project. Reconstruct one sampled ledger if present. Confirm ordered selection can distinguish resumable, hotfix, normal, blocked, and unmatched tickets without mutation. Dry-run housekeeping scope plus reminder due/dedupe decisions without sending. Confirm ten drain agents resolve.
+Run read-only candidate queries for every project. Reconstruct one sampled ledger if present. Confirm ordered selection can distinguish resumable, hotfix, normal, blocked, and unmatched tickets without mutation. Dry-run housekeeping scope plus reminder due/dedupe decisions without sending. Confirm seven rendered drain-agent names and tool allowlists resolve. Mechanically verify the generated prompt assigns the delivery state machine directly to main and binds its loop to 10.
 
 Write `.pi/drain/setup-report.md` with redacted mappings, hashes, agent result, Doctor results, and timestamp.
 
-**Complete when:** every mapped remote object resolves, candidate query succeeds, contract/prompt binding passes, ten agents resolve, and mutation count during smoke is zero.
+**Complete when:** every mapped remote object resolves, candidate query succeeds, contract/prompt binding passes, seven agents resolve, the main-agent delivery state machine is bound, and mutation count during smoke is zero.
 
 Return exactly:
 

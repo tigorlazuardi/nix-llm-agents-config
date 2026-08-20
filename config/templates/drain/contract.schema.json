@@ -489,16 +489,14 @@
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "quickBudget",
-        "deepBudget",
+        "deliveryLoopBudget",
         "largeOrAmbiguousOutcome",
         "deploymentFailureClassifier",
         "deploymentFailureOutcomes",
         "restartAllGatesAfterFix"
       ],
       "properties": {
-        "quickBudget": { "const": 5 },
-        "deepBudget": { "const": 3 },
+        "deliveryLoopBudget": { "const": 10 },
         "largeOrAmbiguousOutcome": { "const": "needsHumanReview" },
         "deploymentFailureClassifier": { "const": "deep-reviewer" },
         "deploymentFailureOutcomes": {

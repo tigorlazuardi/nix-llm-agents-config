@@ -100,7 +100,7 @@ update_inputs() {
 apply_manifest_transform() {
   local entry=$1 manifest=$2 transform
   transform=$(jq -c '.manifestTransform // {}' <<<"$entry") || return 1
-  node -e 'const fs = require("fs"); const [file, raw] = process.argv.slice(1); const p = require(file); const transform = JSON.parse(raw); for (const key of transform.delete || []) delete p[key]; for (const [key, value] of Object.entries(transform.dependencyOverrides || {})) (p.dependencies ??= {})[key] = value; if (transform.overrides) p.overrides = {...(p.overrides || {}), ...transform.overrides}; fs.writeFileSync(file, JSON.stringify(p, null, 2) + "\n")' "$manifest" "$transform"
+  node -e 'const fs = require("fs"); const [file, raw] = process.argv.slice(1); const p = require(file); const transform = JSON.parse(raw); for (const key of transform.delete || []) delete p[key]; for (const [key, value] of Object.entries(transform.dependencyOverrides || {})) p.dependencies[key] = value; if (transform.overrides) p.overrides = {...(p.overrides || {}), ...transform.overrides}; fs.writeFileSync(file, JSON.stringify(p, null, 2) + "\n")' "$manifest" "$transform"
 }
 
 apply_lock_integrity_patches() {
