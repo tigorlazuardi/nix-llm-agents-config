@@ -31,6 +31,9 @@
       "name": "omniroute",
       "baseUrl": "https://omniroute.tigor.web.id/v1",
       "apiKey": "omniroute-no-api-key",
+      "compat": {
+        "forceAdaptiveThinking": true
+      },
       "models": [
         {
           "id": "cc/claude-fable-5",
