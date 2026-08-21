@@ -2,20 +2,13 @@ diff --git a/src/core/compact-args.ts b/src/core/compact-args.ts
 index 74f955b..cbfb222 100644
 --- a/src/core/compact-args.ts
 +++ b/src/core/compact-args.ts
-@@ -1,4 +1,5 @@
- export const PI_VCC_COMPACT_INSTRUCTION = "__pi_vcc__";
+@@ -1,0 +2 @@ export const PI_VCC_COMPACT_INSTRUCTION = "__pi_vcc__";
 +export const PI_VCC_SETTLED_COMPACT_INSTRUCTION = "__pi_vcc_settled_threshold__";
-
- const KEEP_TOKEN_RE = /^keep:(\d+)$/;
-
 diff --git a/src/core/settings.ts b/src/core/settings.ts
 index 10eb1dd..6778772 100644
 --- a/src/core/settings.ts
 +++ b/src/core/settings.ts
-@@ -36,6 +36,15 @@ export interface PiVccSettings {
-    * Overflow retry is still owned by pi-core via willRetry.
-    */
-   continueAfterThresholdCompact: boolean;
+@@ -38,0 +39,9 @@ export interface PiVccSettings {
 +  /**
 +   * Absolute context-usage policy evaluated after a turn settles. This is
 +   * intentionally independent from Pi's reserveTokens/output-token policy.
@@ -25,25 +18,13 @@ index 10eb1dd..6778772 100644
 +    thresholdTokens: number;
 +    modelThresholdTokens: Record<string, number>;
 +  };
-   /** Write debug snapshot to /tmp/pi-vcc-debug.json on each compaction. */
-   debug: boolean;
- }
-@@ -44,6 +53,11 @@ export const DEFAULT_SETTINGS: PiVccSettings = {
-   overrideDefaultCompaction: true,
-   smartKeepTail: true,
-   continueAfterThresholdCompact: true,
+@@ -46,0 +56,5 @@ export const DEFAULT_SETTINGS: PiVccSettings = {
 +  autoCompaction: {
 +    enabled: true,
 +    thresholdTokens: 150_000,
 +    modelThresholdTokens: {},
 +  },
-   debug: false,
- };
-
-@@ -55,10 +69,39 @@ const readJson = (path: string): Record<string, unknown> | null => {
-   }
- };
-
+@@ -57,0 +72,23 @@ const readJson = (path: string): Record<string, unknown> | null => {
 +const isPositiveInteger = (value: unknown): value is number =>
 +  typeof value === "number" && Number.isSafeInteger(value) && value > 0;
 +
@@ -67,8 +48,7 @@ index 10eb1dd..6778772 100644
 +  };
 +};
 +
- export function loadSettings(): PiVccSettings {
-   const parsed = readJson(settingsPath());
+@@ -60,2 +97,8 @@ export function loadSettings(): PiVccSettings {
 -  if (!parsed || typeof parsed !== "object") return { ...DEFAULT_SETTINGS };
 -  return { ...DEFAULT_SETTINGS, ...(parsed as Partial<PiVccSettings>) };
 +  if (!parsed || typeof parsed !== "object") {
@@ -79,54 +59,30 @@ index 10eb1dd..6778772 100644
 +    ...(parsed as Partial<PiVccSettings>),
 +    autoCompaction: normalizeAutoCompaction(parsed.autoCompaction),
 +  };
- }
-
- /**
 diff --git a/src/hooks/before-compact.ts b/src/hooks/before-compact.ts
-index 4fb1149..46b5702 100644
+index 4fb1149..1b19941 100644
 --- a/src/hooks/before-compact.ts
 +++ b/src/hooks/before-compact.ts
-@@ -2,13 +2,20 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
- import { convertToLlm } from "@earendil-works/pi-coding-agent";
- import { writeFileSync } from "fs";
- import { compileRanked } from "../core/summarize";
+@@ -5 +5,5 @@ import { compileRanked } from "../core/summarize";
 -import { parseKeepAndPrompt, PI_VCC_COMPACT_INSTRUCTION } from "../core/compact-args";
 +import {
 +  parseKeepAndPrompt,
 +  PI_VCC_COMPACT_INSTRUCTION,
 +  PI_VCC_SETTLED_COMPACT_INSTRUCTION,
 +} from "../core/compact-args";
- import { loadSettings, type PiVccSettings } from "../core/settings";
- import { calibrateCharsPerToken, estimateMessageContentChars, estimateMessageContentTokens, estimateTokensFromChars } from "../core/token-estimate";
- import type { PiVccCompactionDetails } from "../details";
- import type { CompactionReason } from "../types";
-
+@@ -11 +15,4 @@ import type { CompactionReason } from "../types";
 -export { PI_VCC_COMPACT_INSTRUCTION } from "../core/compact-args";
 +export {
 +  PI_VCC_COMPACT_INSTRUCTION,
 +  PI_VCC_SETTLED_COMPACT_INSTRUCTION,
 +} from "../core/compact-args";
-
- export interface CompactionStats {
-   summarized: number;
-@@ -36,6 +43,7 @@ let lastStats: CompactionStats | null = null;
- let lastCompactWasPiVcc = false;
- let pendingFollowUpPrompt: string | null = null;
- let pendingAutoContinueTimer: ReturnType<typeof setTimeout> | null = null;
+@@ -38,0 +46,3 @@ let pendingAutoContinueTimer: ReturnType<typeof setTimeout> | null = null;
++let pendingSettledCompactionTimer: ReturnType<typeof setTimeout> | null = null;
 +let settledCompactionInFlight = false;
-
- // Invisible auto-continue: resume the agent after compaction without polluting
- // the LLM context with a user-visible continue prompt. triggerInvisibleContinue
-@@ -122,13 +130,29 @@ export const scheduleCompactionStatsNotify = (ctx: any, stats: CompactionStats)
-
- const parseCompactionInstructions = (customInstructions?: string): {
-   isPiVcc: boolean;
++export const SETTLED_COMPACTION_IDLE_GRACE_MS = 100;
+@@ -124,0 +135 @@ const parseCompactionInstructions = (customInstructions?: string): {
 +  isSettledThreshold: boolean;
-   keepUserTurns: number;
-   keepUserTurnsExplicit: boolean;
-   followUpPrompt: string | null;
- } => {
-   const trimmed = customInstructions?.trim();
+@@ -129,0 +141,9 @@ const parseCompactionInstructions = (customInstructions?: string): {
 +  if (trimmed === PI_VCC_SETTLED_COMPACT_INSTRUCTION) {
 +    return {
 +      isPiVcc: true,
@@ -136,7 +92,7 @@ index 4fb1149..46b5702 100644
 +      followUpPrompt: null,
 +    };
 +  }
-   if (trimmed === PI_VCC_COMPACT_INSTRUCTION) {
+@@ -131 +151,7 @@ const parseCompactionInstructions = (customInstructions?: string): {
 -    return { isPiVcc: true, keepUserTurns: 1, keepUserTurnsExplicit: false, followUpPrompt: null };
 +    return {
 +      isPiVcc: true,
@@ -145,29 +101,11 @@ index 4fb1149..46b5702 100644
 +      keepUserTurnsExplicit: false,
 +      followUpPrompt: null,
 +    };
-   }
-
-   const keepPrefix = `${PI_VCC_COMPACT_INSTRUCTION} `;
-@@ -136,6 +160,7 @@ const parseCompactionInstructions = (customInstructions?: string): {
-     const parsed = parseKeepAndPrompt(trimmed.slice(keepPrefix.length));
-     return {
-       isPiVcc: true,
+@@ -138,0 +165 @@ const parseCompactionInstructions = (customInstructions?: string): {
 +      isSettledThreshold: false,
-       keepUserTurns: parsed.keepUserTurns ?? 1,
-       keepUserTurnsExplicit: parsed.keepUserTurnsExplicit,
-       followUpPrompt: null,
-@@ -145,6 +170,7 @@ const parseCompactionInstructions = (customInstructions?: string): {
-   const parsed = parseKeepAndPrompt(customInstructions);
-   return {
-     isPiVcc: false,
+@@ -147,0 +175 @@ const parseCompactionInstructions = (customInstructions?: string): {
 +    isSettledThreshold: false,
-     keepUserTurns: parsed.keepUserTurns ?? 1,
-     keepUserTurnsExplicit: parsed.keepUserTurnsExplicit,
-     followUpPrompt: parsed.followUpPrompt || null,
-@@ -477,6 +503,22 @@ const REASON_MESSAGES: Record<OwnCutCancelReason, string> = {
-   too_few_live_messages: "pi-vcc: Too few messages to compact",
- };
-
+@@ -479,0 +508,16 @@ const REASON_MESSAGES: Record<OwnCutCancelReason, string> = {
 +export const resolveAutoCompactionThreshold = (
 +  settings: PiVccSettings,
 +  modelId: string | undefined,
@@ -184,51 +122,59 @@ index 4fb1149..46b5702 100644
 +  return Number.isFinite(contextWindow) && thresholdTokens < contextWindow;
 +};
 +
- export const registerBeforeCompactHook = (pi: ExtensionAPI) => {
-   // Filter our invisible-continue marker out of the LLM context payload so the
-   // model just continues from the compaction summary (matched by customType ONLY).
-@@ -492,16 +534,70 @@ export const registerBeforeCompactHook = (pi: ExtensionAPI) => {
-     clearPendingAutoContinue();
-   });
-
-+  pi.on("agent_settled", (_event, ctx) => {
-+    const settings = loadSettings();
-+    if (
-+      settledCompactionInFlight
-+      || !settings.overrideDefaultCompaction
-+      || !settings.autoCompaction.enabled
-+      || !ctx.isIdle()
-+    ) return;
+@@ -490,0 +535,7 @@ export const registerBeforeCompactHook = (pi: ExtensionAPI) => {
++  const clearPendingSettledCompaction = () => {
++    if (pendingSettledCompactionTimer) {
++      clearTimeout(pendingSettledCompactionTimer);
++      pendingSettledCompactionTimer = null;
++    }
++  };
 +
-+    const usage = ctx.getContextUsage();
-+    const thresholdTokens = resolveAutoCompactionThreshold(settings, ctx.model?.id);
-+    if (
-+      !usage
-+      || usage.tokens < thresholdTokens
-+      || !canApplyAutoCompactionPolicy(ctx, thresholdTokens)
-+    ) return;
-+
-+    settledCompactionInFlight = true;
-+    ctx.compact({
-+      customInstructions: PI_VCC_SETTLED_COMPACT_INSTRUCTION,
-+      onComplete: () => {
-+        settledCompactionInFlight = false;
-+      },
-+      onError: (error) => {
-+        settledCompactionInFlight = false;
-+        try {
-+          ctx.ui.notify(`Automatic pi-vcc compaction failed: ${error.message}`, "error");
-+        } catch {}
-+      },
-+    });
+@@ -492,0 +544,41 @@ export const registerBeforeCompactHook = (pi: ExtensionAPI) => {
++    clearPendingSettledCompaction();
 +  });
 +
-   pi.on("session_before_compact", (event, ctx) => {
-     const { preparation, branchEntries, customInstructions } = event;
-     const { reason, willRetry } = readCompactionEventContext(event);
-     const settings = loadSettings();
++  pi.on("session_shutdown", () => {
++    clearPendingSettledCompaction();
++  });
++
++  pi.on("agent_settled", (_event, ctx) => {
++    clearPendingSettledCompaction();
++    pendingSettledCompactionTimer = setTimeout(() => {
++      pendingSettledCompactionTimer = null;
++      const settings = loadSettings();
++      if (
++        settledCompactionInFlight
++        || !settings.overrideDefaultCompaction
++        || !settings.autoCompaction.enabled
++        || !ctx.isIdle()
++      ) return;
++
++      const usage = ctx.getContextUsage();
++      const thresholdTokens = resolveAutoCompactionThreshold(settings, ctx.model?.id);
++      if (
++        !usage
++        || usage.tokens < thresholdTokens
++        || !canApplyAutoCompactionPolicy(ctx, thresholdTokens)
++      ) return;
++
++      settledCompactionInFlight = true;
++      ctx.compact({
++        customInstructions: PI_VCC_SETTLED_COMPACT_INSTRUCTION,
++        onComplete: () => {
++          settledCompactionInFlight = false;
++        },
++        onError: (error) => {
++          settledCompactionInFlight = false;
++          try {
++            ctx.ui.notify(`Automatic pi-vcc compaction failed: ${error.message}`, "error");
++          } catch {}
++        },
++      });
++    }, SETTLED_COMPACTION_IDLE_GRACE_MS);
+@@ -498,0 +591 @@ export const registerBeforeCompactHook = (pi: ExtensionAPI) => {
 +    const thresholdTokens = resolveAutoCompactionThreshold(settings, ctx.model?.id);
-
+@@ -500 +593,15 @@ export const registerBeforeCompactHook = (pi: ExtensionAPI) => {
 -    // Always handle explicit /pi-vcc marker.
 +    // Pi's reserve-based threshold can fire while a turn is still completing.
 +    // Suppress it below the absolute policy, or while the active turn still has
@@ -245,7 +191,7 @@ index 4fb1149..46b5702 100644
 +    }
 +
 +    // Always handle explicit /pi-vcc markers.
-     // Otherwise, only handle when user opted in via settings.
+@@ -502 +609,7 @@ export const registerBeforeCompactHook = (pi: ExtensionAPI) => {
 -    const { isPiVcc, keepUserTurns, keepUserTurnsExplicit, followUpPrompt } = parseCompactionInstructions(customInstructions);
 +    const {
 +      isPiVcc,
@@ -254,67 +200,38 @@ index 4fb1149..46b5702 100644
 +      keepUserTurnsExplicit,
 +      followUpPrompt,
 +    } = parseCompactionInstructions(customInstructions);
-     pendingFollowUpPrompt = null;
-     if (!isPiVcc && !settings.overrideDefaultCompaction) return;
+@@ -504,0 +618 @@ export const registerBeforeCompactHook = (pi: ExtensionAPI) => {
 +    const effectiveReason = isSettledThreshold ? "threshold" : reason;
-
-     const calibrationCut = buildOwnCut(branchEntries as any[], 0);
-     const calibrationMessageChars = calibrationCut.ok
-@@ -630,7 +726,7 @@ export const registerBeforeCompactHook = (pi: ExtensionAPI) => {
-       smartKeepAdjusted: smartKeep.smartAdjusted,
-       smartFromKeep: smartKeep.fromKeep,
-       budgetCut: ownCut.ok ? ownCut.budgetCut : undefined,
+@@ -633 +747 @@ export const registerBeforeCompactHook = (pi: ExtensionAPI) => {
 -      reason,
 +      reason: effectiveReason,
-       willRetry,
-     };
-
-@@ -683,7 +779,7 @@ export const registerBeforeCompactHook = (pi: ExtensionAPI) => {
-     dbg(config, {
-       usedOwnCut: true,
-       budgetCut: ownCut.budgetCut,
+@@ -686 +800 @@ export const registerBeforeCompactHook = (pi: ExtensionAPI) => {
 -      compaction: { reason, willRetry },
 +      compaction: { reason: effectiveReason, piReason: reason, willRetry },
-       messagesToSummarize: agentMessages.length,
-       messagesPreviewHead: agentMessages.slice(0, 3).map((m: any) => ({ role: m.role, preview: previewContent(m.content) })),
-       messagesPreviewTail: agentMessages.slice(-3).map((m: any) => ({ role: m.role, preview: previewContent(m.content) })),
-@@ -703,11 +799,11 @@ export const registerBeforeCompactHook = (pi: ExtensionAPI) => {
-       sections: [...summary.matchAll(/^\[(.+?)\]/gm)].map((m) => m[1]),
-       sourceMessageCount: agentMessages.length,
-       previousSummaryUsed: Boolean(preparation.previousSummary),
+@@ -706 +820 @@ export const registerBeforeCompactHook = (pi: ExtensionAPI) => {
 -      reason,
 +      reason: effectiveReason,
-       willRetry,
-     };
-
+@@ -710 +824 @@ export const registerBeforeCompactHook = (pi: ExtensionAPI) => {
 -    lastCompactWasPiVcc = isPiVcc;
 +    lastCompactWasPiVcc = isPiVcc && !isSettledThreshold;
-
-     return {
-       compaction: {
-@@ -730,7 +826,9 @@ export const registerBeforeCompactHook = (pi: ExtensionAPI) => {
-     if (willRetry) return;
-     const stats = lastStats;
-     if (!stats) return;
+@@ -733 +847,3 @@ export const registerBeforeCompactHook = (pi: ExtensionAPI) => {
 -    const shouldContinueAfterAutoCompact = (reason === "threshold" || reason === "overflow") && loadSettings().continueAfterThresholdCompact;
 +    const compactionReason = stats.reason ?? reason;
 +    const shouldContinueAfterAutoCompact = (compactionReason === "threshold" || compactionReason === "overflow")
 +      && loadSettings().continueAfterThresholdCompact;
-     scheduleCompactionStatsNotify(ctx, stats);
-     if (followUpPrompt) {
-       try {
 diff --git a/tests/settled-compaction.test.ts b/tests/settled-compaction.test.ts
 new file mode 100644
-index 0000000..c2f4e3b
+index 0000000..9c81a02
 --- /dev/null
 +++ b/tests/settled-compaction.test.ts
-@@ -0,0 +1,165 @@
+@@ -0,0 +1,180 @@
 +import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 +import { mkdtempSync, rmSync, writeFileSync } from "fs";
 +import { tmpdir } from "os";
 +import { join } from "path";
 +import {
 +  PI_VCC_SETTLED_COMPACT_INSTRUCTION,
++  SETTLED_COMPACTION_IDLE_GRACE_MS,
 +  registerBeforeCompactHook,
 +  resolveAutoCompactionThreshold,
 +} from "../src/hooks/before-compact";
@@ -412,7 +329,7 @@ index 0000000..c2f4e3b
 +    expect(harness.compactCalls).toEqual([]);
 +  });
 +
-+  test("cancels Pi threshold during the active turn then compacts after agent_settled", () => {
++  test("cancels Pi threshold during the active turn then compacts after agent_settled", async () => {
 +    writeConfig({ enabled: true, thresholdTokens: 150_000, modelThresholdTokens: {} });
 +    const harness = makeHarness({ tokens: 150_000, idle: false });
 +    expect(harness.invoke("session_before_compact", thresholdEvent(150_000))).toEqual({ cancel: true });
@@ -420,12 +337,13 @@ index 0000000..c2f4e3b
 +
 +    harness.setIdle(true);
 +    harness.invoke("agent_settled");
++    await Bun.sleep(SETTLED_COMPACTION_IDLE_GRACE_MS + 25);
 +    expect(harness.compactCalls).toHaveLength(1);
 +    expect(harness.compactCalls[0].customInstructions).toBe(PI_VCC_SETTLED_COMPACT_INSTRUCTION);
 +    harness.compactCalls[0].onComplete();
 +  });
 +
-+  test("uses the Haiku safety override", () => {
++  test("uses the Haiku safety override", async () => {
 +    writeConfig({
 +      enabled: true,
 +      thresholdTokens: 150_000,
@@ -437,6 +355,7 @@ index 0000000..c2f4e3b
 +      contextWindow: 200_000,
 +    });
 +    harness.invoke("agent_settled");
++    await Bun.sleep(SETTLED_COMPACTION_IDLE_GRACE_MS + 25);
 +    expect(harness.compactCalls).toHaveLength(1);
 +    harness.compactCalls[0].onComplete();
 +  });
@@ -464,12 +383,24 @@ index 0000000..c2f4e3b
 +    expect(harness.compactCalls).toEqual([]);
 +  });
 +
-+  test("allows another settled compaction after completion", () => {
++  test("a new prompt cancels pending settled compaction", async () => {
++    writeConfig({ enabled: true, thresholdTokens: 150_000, modelThresholdTokens: {} });
++    const harness = makeHarness({ tokens: 155_221 });
++    harness.invoke("agent_settled");
++    harness.setIdle(false);
++    harness.invoke("before_agent_start");
++    await Bun.sleep(SETTLED_COMPACTION_IDLE_GRACE_MS + 25);
++    expect(harness.compactCalls).toEqual([]);
++  });
++
++  test("allows another settled compaction after completion", async () => {
 +    writeConfig({ enabled: true, thresholdTokens: 150_000, modelThresholdTokens: {} });
 +    const harness = makeHarness({ tokens: 160_000 });
 +    harness.invoke("agent_settled");
++    await Bun.sleep(SETTLED_COMPACTION_IDLE_GRACE_MS + 25);
 +    harness.compactCalls[0].onComplete();
 +    harness.invoke("agent_settled");
++    await Bun.sleep(SETTLED_COMPACTION_IDLE_GRACE_MS + 25);
 +    expect(harness.compactCalls).toHaveLength(2);
 +    harness.compactCalls[1].onComplete();
 +  });
