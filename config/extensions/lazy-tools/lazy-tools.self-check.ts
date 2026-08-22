@@ -31,7 +31,7 @@ const paths: Record<string, string> = {
   agent_send: "/nix/store/remote-pi/index.ts",
   dev_journal: "/config/extensions/dev-journal/index.ts",
   host_artifact: "/config/extensions/artifact-preview/index.ts",
-  todo: "/nix/store/rpiv-todo/index.ts",
+  todo: "/nix/store/pi-todo-herdr/index.ts",
 };
 let active = [...core, ...Object.values(grouped).flat()];
 let loader: { execute: (_id: string, params: { group: Group }) => Promise<unknown> } | undefined;

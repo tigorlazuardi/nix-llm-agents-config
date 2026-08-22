@@ -161,7 +161,7 @@ let
       remote-pi.enable = false;
       pi-herdr-subagents.enable = false;
       pi-vision-handoff.enable = false;
-      rpiv-todo.enable = false;
+      pi-todo-herdr.enable = false;
     };
   };
   rulesEnabled = evaluate { programs.pi-coding-agent.plugins.pi-rules.enable = true; };
@@ -309,8 +309,8 @@ let
   expectedPiVccPath = "${expectedPiVcc}";
   expectedPromptTemplateModel = pkgs.callPackage ./packages/pi-prompt-template-model.nix { };
   expectedPromptTemplateModelPath = "${expectedPromptTemplateModel}/lib/node_modules/pi-prompt-template-model";
-  expectedRpivTodo = pkgs.callPackage ./packages/rpiv-todo.nix { };
-  expectedRpivTodoPath = "${expectedRpivTodo}/lib/node_modules/@juicesharp/rpiv-todo";
+  expectedTodoHerdr = pkgs.callPackage ./packages/pi-todo-herdr.nix { };
+  expectedTodoHerdrPath = "${expectedTodoHerdr}/lib/node_modules/pi-todo-herdr";
   expectedRules = pkgs.callPackage ./packages/pi-rules.nix { };
   expectedRulesPath = "${expectedRules}/lib/node_modules/@tigorhutasuhut/pi-rules";
   expectedWebAccess = pkgs.callPackage ./packages/pi-web-access.nix { };
@@ -362,7 +362,7 @@ in
   pix-tools = expectedPixTools;
   pi-vcc = expectedPiVcc;
   prompt-template-model = expectedPromptTemplateModel;
-  rpiv-todo = expectedRpivTodo;
+  pi-todo-herdr = expectedTodoHerdr;
   rules = expectedRules;
   web-access = expectedWebAccess;
   herdr-subagents = expectedHerdrSubagents;
@@ -473,7 +473,7 @@ in
         ++ [
           expectedPiVccPath
           expectedPromptTemplateModelPath
-          expectedRpivTodoPath
+          expectedTodoHerdrPath
           expectedRulesPath
           expectedWebAccessPath
           expectedHerdrSubagentsPath
@@ -775,7 +775,7 @@ in
     assert
       !(builtins.elem expectedHerdrSubagentsPath pluginsDisabled.config.programs.pi-coding-agent.settings.packages);
     assert
-      !(builtins.elem expectedRpivTodoPath pluginsDisabled.config.programs.pi-coding-agent.settings.packages);
+      !(builtins.elem expectedTodoHerdrPath pluginsDisabled.config.programs.pi-coding-agent.settings.packages);
     assert
       !(
         pluginsDisabled.config.home.file
@@ -822,7 +822,7 @@ in
       ++ [
         expectedPiVccPath
         expectedPromptTemplateModelPath
-        expectedRpivTodoPath
+        expectedTodoHerdrPath
         expectedRulesPath
         expectedWebAccessPath
         expectedHerdrSubagentsPath
@@ -930,7 +930,7 @@ in
         ];
       }
       ''
-        nixfmt --check ${./flake.nix} ${./checks.nix} ${./modules/pi-coding-agent.nix} ${./modules/remote-pi-relay.nix} ${./modules/pi-coding-agent/agents.nix} ${./modules/pi-coding-agent/default-agents.nix} ${./modules/pi-coding-agent/pi-herdr-subagents.nix} ${./packages/pi-diet-lsp.nix} ${./packages/pi-commandcode-provider.nix} ${./packages/pi-effort.nix} ${./packages/pi-timestamps.nix} ${./packages/pi-herdr.nix} ${./packages/pi-herdr-sudo-task.nix} ${./packages/pi-ask-herdr.nix} ${./packages/pi-herdr-rename.nix} ${./packages/pi-patty-bg-tasks.nix} ${./packages/remote-pi.nix} ${./packages/remote-pi-config-updater.nix} ${./packages/remote-pi-relay.nix} ${./packages/pi-vimmode.nix} ${./packages/pi-usage.nix} ${./packages/pi-cache-optimizer.nix} ${./packages/pi-mcp-adapter.nix} ${./packages/browser-goblin.nix} ${./packages/pix-optimizer.nix} ${./packages/pix-tools.nix} ${./packages/pi-vcc.nix} ${./packages/pi-prompt-template-model.nix} ${./packages/rpiv-todo.nix} ${./packages/pi-rules.nix} ${./packages/pi-web-access.nix} ${./packages/pi-herdr-subagents.nix} ${./packages/pi-vision-handoff.nix} ${./packages/pi-vision-handoff-config-updater.nix} ${./packages/supi-context.nix} ${./packages/supi-extras.nix} ${./packages/toon.nix}
+        nixfmt --check ${./flake.nix} ${./checks.nix} ${./modules/pi-coding-agent.nix} ${./modules/remote-pi-relay.nix} ${./modules/pi-coding-agent/agents.nix} ${./modules/pi-coding-agent/default-agents.nix} ${./modules/pi-coding-agent/pi-herdr-subagents.nix} ${./packages/pi-diet-lsp.nix} ${./packages/pi-commandcode-provider.nix} ${./packages/pi-effort.nix} ${./packages/pi-timestamps.nix} ${./packages/pi-herdr.nix} ${./packages/pi-herdr-sudo-task.nix} ${./packages/pi-ask-herdr.nix} ${./packages/pi-herdr-rename.nix} ${./packages/pi-patty-bg-tasks.nix} ${./packages/remote-pi.nix} ${./packages/remote-pi-config-updater.nix} ${./packages/remote-pi-relay.nix} ${./packages/pi-vimmode.nix} ${./packages/pi-usage.nix} ${./packages/pi-cache-optimizer.nix} ${./packages/pi-mcp-adapter.nix} ${./packages/browser-goblin.nix} ${./packages/pix-optimizer.nix} ${./packages/pix-tools.nix} ${./packages/pi-vcc.nix} ${./packages/pi-prompt-template-model.nix} ${./packages/pi-todo-herdr.nix} ${./packages/pi-rules.nix} ${./packages/pi-web-access.nix} ${./packages/pi-herdr-subagents.nix} ${./packages/pi-vision-handoff.nix} ${./packages/pi-vision-handoff-config-updater.nix} ${./packages/supi-context.nix} ${./packages/supi-extras.nix} ${./packages/toon.nix}
         WORKFLOW=${./.github/workflows/daily-update.yml} UPDATER=${./scripts/daily-update.sh} REGISTRY=${./pi-plugins.json} CHECKS=${./checks.nix} bash ${./tests/daily-updater-self-check.sh}
         RUNNER=${./scripts/local-update.sh} PROMPT=${./scripts/local-update-recovery.md} bash ${./tests/local-updater-self-check.sh}
         touch $out
@@ -1550,21 +1550,18 @@ in
         touch $out
       '';
 
-  rpiv-todo-load =
-    pkgs.runCommandLocal "rpiv-todo-load" { nativeBuildInputs = [ expectedPackage ]; }
+  pi-todo-herdr-load =
+    pkgs.runCommandLocal "pi-todo-herdr-load" { nativeBuildInputs = [ expectedPackage ]; }
       ''
         export HOME="$TMPDIR/home"
         export XDG_CONFIG_HOME="$TMPDIR/config"
         export PI_CODING_AGENT_DIR="$HOME/.pi/agent"
         export PI_TELEMETRY=0
         mkdir -p "$PI_CODING_AGENT_DIR"
-        test -d ${expectedRpivTodoPath}/node_modules/@juicesharp/rpiv-config
-        test -d ${expectedRpivTodoPath}/node_modules/typebox
         pi --offline --no-extensions --no-skills --no-prompt-templates --no-context-files \
-          -e ${expectedRpivTodoPath} \
+          -e ${expectedTodoHerdrPath} \
           --list-models > pi.log 2>&1
         ! grep -E 'Extension issues|Failed to load extension|Cannot find module|Error:' pi.log
-        test ! -e "$XDG_CONFIG_HOME/rpiv-todo/config.json"
         touch $out
       '';
 

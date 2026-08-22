@@ -116,7 +116,7 @@ let
   }) pixToolNames;
   piVcc = pinnedPkgs.callPackage ../packages/pi-vcc.nix { };
   promptTemplateModel = pinnedPkgs.callPackage ../packages/pi-prompt-template-model.nix { };
-  rpivTodo = pinnedPkgs.callPackage ../packages/rpiv-todo.nix { };
+  todoHerdr = pinnedPkgs.callPackage ../packages/pi-todo-herdr.nix { };
   rules = pinnedPkgs.callPackage ../packages/pi-rules.nix { };
   webAccess = pinnedPkgs.callPackage ../packages/pi-web-access.nix { };
   herdrSubagents = pinnedPkgs.callPackage ../packages/pi-herdr-subagents.nix { };
@@ -219,8 +219,8 @@ let
       default = true;
     }
     {
-      name = "rpiv-todo";
-      package = "${rpivTodo}/lib/node_modules/@juicesharp/rpiv-todo";
+      name = "pi-todo-herdr";
+      package = "${todoHerdr}/lib/node_modules/pi-todo-herdr";
       default = true;
     }
     {

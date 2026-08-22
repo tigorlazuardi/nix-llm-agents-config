@@ -261,21 +261,13 @@
     "npmDepsHash": "sha256-i4cRKbaaTtKSa/vw5F4xJwI5gjTB6hz/XW3QokxrVxU=",
     "check": "pix-tools-load"
   },
-  "rpiv-todo": {
+  "pi-todo-herdr": {
     "strategy": "npm",
-    "package": "@juicesharp/rpiv-todo",
-    "version": "2.6.2",
-    "src": "https://registry.npmjs.org/@juicesharp/rpiv-todo/-/rpiv-todo-2.6.2.tgz",
-    "hash": "sha256-f+2FJELHHsp7N0Bsm7sQ46C3l/lCnUSjzHCo6Eq1L0c=",
-    "npmDepsHash": "sha256-1ZEbMZ1jt8rZUHQpEdH0Yb5lOCm542YS+YmdJXKW5Vw=",
-    "manifestTransform": {
-      "delete": [
-        "peerDependencies",
-        "peerDependenciesMeta"
-      ]
-    },
-    "lockFile": "packages/rpiv-todo-package-lock.json",
-    "check": "rpiv-todo-load"
+    "package": "pi-todo-herdr",
+    "version": "0.2.4",
+    "src": "https://registry.npmjs.org/pi-todo-herdr/-/pi-todo-herdr-0.2.4.tgz",
+    "hash": "sha256-qC2YMEC6zjG78CJ7RnFFeHEwQWgrsbIpVhSd0J63OPk=",
+    "check": "pi-todo-herdr-load"
   },
   "pi-web-access": {
     "strategy": "npm",
