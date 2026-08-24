@@ -264,9 +264,9 @@
   "pi-todo-herdr": {
     "strategy": "npm",
     "package": "pi-todo-herdr",
-    "version": "0.2.4",
-    "src": "https://registry.npmjs.org/pi-todo-herdr/-/pi-todo-herdr-0.2.4.tgz",
-    "hash": "sha256-qC2YMEC6zjG78CJ7RnFFeHEwQWgrsbIpVhSd0J63OPk=",
+    "version": "0.2.5",
+    "src": "https://registry.npmjs.org/pi-todo-herdr/-/pi-todo-herdr-0.2.5.tgz",
+    "hash": "sha256-/pqJrJey50s6WWvXD2F74obWrMgtnq7yOGaCgVe6cpA=",
     "check": "pi-todo-herdr-load"
   },
   "pi-web-access": {
