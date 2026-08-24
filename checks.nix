@@ -445,6 +445,9 @@ in
       == "6h";
     assert builtins.elem "XDG_CACHE_HOME=/home/test/.local/state/pi-coding-agent-local-update/cache"
       localUpdaterEnabled.config.systemd.user.services.pi-coding-agent-local-update.Service.Environment;
+    assert builtins.elem
+      "npm_config_cache=/home/test/.local/state/pi-coding-agent-local-update/cache/npm"
+      localUpdaterEnabled.config.systemd.user.services.pi-coding-agent-local-update.Service.Environment;
     assert builtins.elem "PI_OFFLINE=1"
       localUpdaterEnabled.config.systemd.user.services.pi-coding-agent-local-update.Service.Environment;
     assert builtins.elem "PI_TELEMETRY=0"
@@ -864,6 +867,8 @@ in
         git_ssh_command=${pkgs.lib.escapeShellArg localUpdaterGitSshCommand}
         git_ssh_wrapper="''${git_ssh_command#GIT_SSH_COMMAND=}"
 
+        grep -Fx 'Environment=XDG_CACHE_HOME=/home/test/.local/state/pi-coding-agent-local-update/cache' "$unit"
+        grep -Fx 'Environment=npm_config_cache=/home/test/.local/state/pi-coding-agent-local-update/cache/npm' "$unit"
         grep -Fx "Environment=$git_ssh_command" "$unit"
         test "$(grep -c '^Environment=GIT_SSH_COMMAND=' "$unit")" -eq 1
         case "$git_ssh_wrapper" in

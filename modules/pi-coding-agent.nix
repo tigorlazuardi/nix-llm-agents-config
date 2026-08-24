@@ -569,6 +569,7 @@ in
               "LOCAL_UPDATE_RECOVERY_PROMPT=${localUpdaterRecoveryPrompt}"
               "LOCAL_UPDATE_STATE_DIR=${localUpdaterStateDirectory}"
               "XDG_CACHE_HOME=${localUpdaterStateDirectory}/cache"
+              "npm_config_cache=${localUpdaterStateDirectory}/cache/npm"
               "PI_OFFLINE=1"
               "PI_TELEMETRY=0"
             ]
