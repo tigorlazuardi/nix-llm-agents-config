@@ -128,7 +128,9 @@ npm_update() {
     # Match package-specific build postPatch before generating adjacent lock metadata.
     apply_manifest_transform "$entry" "$source_dir/package.json" || { rm -rf "$tmp"; return 1; }
     jq -e --arg package "$package" --arg version "$version" '.name == $package and .version == $version' "$source_dir/package.json" >/dev/null || { rm -rf "$tmp"; return 1; }
-    npm install --package-lock-only --ignore-scripts --omit=dev --omit=peer --prefix "$source_dir" >/dev/null || { rm -rf "$tmp"; return 1; }
+    # Generate registry-backed metadata instead of trusting bundled node_modules from the tarball.
+    rm -rf "$source_dir/node_modules"
+    npm install --package-lock-only --ignore-scripts --omit=dev --omit=peer --legacy-peer-deps --prefix "$source_dir" >/dev/null || { rm -rf "$tmp"; return 1; }
     jq -e --arg package "$package" --arg version "$version" '.packages[""].name == $package and .packages[""].version == $version' "$source_dir/package-lock.json" >/dev/null || { rm -rf "$tmp"; return 1; }
     old_npm_deps_hash=$(jq -r '.npmDepsHash // empty' <<<"$entry")
     [ -n "$old_npm_deps_hash" ] || { rm -rf "$tmp"; return 1; }

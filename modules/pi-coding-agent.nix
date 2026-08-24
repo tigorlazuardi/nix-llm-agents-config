@@ -245,7 +245,7 @@ let
     }
     {
       name = "supi-context";
-      package = "${supiContext}/lib/node_modules/@mrclrchtr/supi-context";
+      package = "${supiContext}/lib/node_modules/@mrclrchtr/supi-context/src/extension.ts";
       default = true;
     }
     {

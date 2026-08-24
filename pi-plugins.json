@@ -288,10 +288,10 @@
   "supi-context": {
     "strategy": "npm",
     "package": "@mrclrchtr/supi-context",
-    "version": "2.6.1",
-    "src": "https://registry.npmjs.org/@mrclrchtr/supi-context/-/supi-context-2.6.1.tgz",
-    "hash": "sha256-AKKWvDaxx6rEVRAlSKPA9BkpHBXeEO2citXNzLm/csQ=",
-    "npmDepsHash": "sha256-I6NmyT/zpHoK7zCWau51ym+Y6sUqQq5CIVvj2IlIMXk=",
+    "version": "5.0.0",
+    "src": "https://registry.npmjs.org/@mrclrchtr/supi-context/-/supi-context-5.0.0.tgz",
+    "hash": "sha256-UCdLolkaIDb1iJMs68wZdTFeFEUsioEGhZ6+eWsvNlo=",
+    "npmDepsHash": "sha256-uu3B3mxbYG33N71OAkaBMNDrYGyeKbhV8pks7/ldnXo=",
     "manifestTransform": {
       "delete": [
         "peerDependencies",
@@ -312,17 +312,25 @@
   "pi-usage": {
     "strategy": "npm",
     "package": "@narumitw/pi-usage",
-    "version": "0.34.0",
-    "src": "https://registry.npmjs.org/@narumitw/pi-usage/-/pi-usage-0.34.0.tgz",
-    "hash": "sha256-WclnloM/u3ka1q2oD+Xp2jXrEIoiaLSGYUhDNxc43a4=",
+    "version": "0.52.1",
+    "src": "https://registry.npmjs.org/@narumitw/pi-usage/-/pi-usage-0.52.1.tgz",
+    "hash": "sha256-2UXaNDo9CG/BEV4u4i04uWoqIzaJEIxxg6tgPZv2gp0=",
+    "npmDepsHash": "sha256-826TcbfvT/4XZh8Kf1x1fSmcJKeCGK8m3vi1TcTAhJU=",
+    "manifestTransform": {
+      "delete": [
+        "devDependencies",
+        "peerDependencies"
+      ]
+    },
+    "lockFile": "packages/pi-usage-package-lock.json",
     "check": "pi-usage-load"
   },
   "pi-cache-optimizer": {
     "strategy": "npm",
     "package": "pi-cache-optimizer",
-    "version": "2.8.2",
-    "src": "https://registry.npmjs.org/pi-cache-optimizer/-/pi-cache-optimizer-2.8.2.tgz",
-    "hash": "sha256-Qe6hX674pwzny1CZmjvdQBbWVDXSdLiDwgXwMyzEIM8=",
+    "version": "2.8.6",
+    "src": "https://registry.npmjs.org/pi-cache-optimizer/-/pi-cache-optimizer-2.8.6.tgz",
+    "hash": "sha256-pWpHc76PFQQbhxVqyV7VOxuJZnYyR1zpDzMkBXnk6Ao=",
     "check": "pi-cache-optimizer-load"
   },
   "pi-timestamps": {

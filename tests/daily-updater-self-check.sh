@@ -23,7 +23,8 @@ grep -F 'nix flake check' "$updater"
 grep -F 'git commit -m '\''chore(deps): update nixpkgs and home-manager'\'' || return 1' "$updater"
 grep -F 'push_inputs_checked || return 1' "$updater"
 grep -F 'tar -xzf "$source_store" --strip-components=1 -C "$source_dir"' "$updater"
-grep -F 'npm install --package-lock-only --ignore-scripts --omit=dev --omit=peer --prefix "$source_dir"' "$updater"
+grep -F 'rm -rf "$source_dir/node_modules"' "$updater"
+grep -F 'npm install --package-lock-only --ignore-scripts --omit=dev --omit=peer --legacy-peer-deps --prefix "$source_dir"' "$updater"
 grep -F 'apply_manifest_transform "$entry" "$source_dir/package.json"' "$updater"
 grep -F 'apply_lock_integrity_patches "$entry" "$source_dir/package-lock.json"' "$updater"
 grep -F 'nix run nixpkgs#prefetch-npm-deps -- "$source_dir/package-lock.json"' "$updater"
@@ -73,6 +74,8 @@ cat >"$tmp/fixture/package/package.json" <<'EOF'
   "peerDependenciesMeta": { "pi": { "optional": true } }
 }
 EOF
+mkdir -p "$tmp/fixture/package/node_modules/bundled-fixture"
+printf '%s\n' stale >"$tmp/fixture/package/node_modules/bundled-fixture/index.js"
 tar -czf "$tmp/fixture.tgz" -C "$tmp/fixture" package
 cat >"$tmp/pi-plugins.json" <<'EOF'
 {
@@ -116,6 +119,7 @@ while [ "$#" -gt 0 ]; do
   case "$1" in @fixture/pi-rules@*) exit 1 ;; esac
   shift
 done
+[ ! -e "$prefix/node_modules" ] || exit 3
 node - "$prefix/package.json" "$prefix/package-lock.json" <<'EOF_NODE'
 const fs = require("fs");
 const [manifestPath, lockPath] = process.argv.slice(2);

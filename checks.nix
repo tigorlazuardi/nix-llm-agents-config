@@ -262,6 +262,7 @@ let
       default.config.home.file."${default.config.programs.pi-coding-agent.configDir}/agents/implementer.md".text;
   managedOrchestratorFixture = pkgs.writeText "managed-orchestrator.md" expectedOrchestrator;
 
+  pluginLocks = import ./packages/pi-plugin-lock.nix;
   expectedPackage = pkgs.pi-coding-agent;
   expectedDietLsp = pkgs.callPackage ./packages/pi-diet-lsp.nix { };
   expectedDietLspPath = "${expectedDietLsp}";
@@ -338,6 +339,7 @@ let
       { };
   expectedSupiContext = pkgs.callPackage ./packages/supi-context.nix { };
   expectedSupiContextPath = "${expectedSupiContext}/lib/node_modules/@mrclrchtr/supi-context";
+  expectedSupiContextExtension = "${expectedSupiContextPath}/src/extension.ts";
   expectedSupiExtras = pkgs.callPackage ./packages/supi-extras.nix { };
   expectedSupiExtrasPath = "${expectedSupiExtras}/lib/node_modules/@mrclrchtr/supi-extras";
   expectedOscclip = pkgs.oscclip;
@@ -503,7 +505,7 @@ in
           expectedWebAccessPath
           expectedHerdrSubagentsPath
           expectedVisionHandoffPath
-          expectedSupiContextPath
+          expectedSupiContextExtension
           expectedSupiExtrasPath
         ]
         ++ expectedPixToolPaths;
@@ -852,7 +854,7 @@ in
         expectedWebAccessPath
         expectedHerdrSubagentsPath
         expectedVisionHandoffPath
-        expectedSupiContextPath
+        expectedSupiContextExtension
         expectedSupiExtrasPath
       ]
       ++ expectedPixToolPaths;
@@ -1231,7 +1233,7 @@ in
         test -f "$optimizer/index.ts"
         test ! -e "$optimizer/node_modules"
         grep -F '"name": "pi-cache-optimizer"' "$optimizer/package.json"
-        grep -F '"version": "2.8.2"' "$optimizer/package.json"
+        grep -F '"version": "${pluginLocks."pi-cache-optimizer".version}"' "$optimizer/package.json"
         grep -F 'pi.registerCommand("cache-optimizer"' "$optimizer/index.ts"
         ! grep -F 'registerTool' "$optimizer/index.ts"
         pi --offline --no-extensions --no-skills --no-prompt-templates --no-context-files \
@@ -1257,15 +1259,22 @@ in
         usage=${expectedUsagePath}
         test -f "$usage/package.json"
         test -f "$usage/src/index.ts"
-        test ! -e "$usage/node_modules"
+        test -d "$usage/node_modules/@narumitw/pi-tui-kit"
         grep -F '"name": "@narumitw/pi-usage"' "$usage/package.json"
-        grep -F '"version": "0.34.0"' "$usage/package.json"
-        grep -F '"./src/index.ts"' "$usage/package.json"
-        grep -F 'pi.registerCommand("usage"' "$usage/src/usage.ts"
+        grep -F '"version": "${pluginLocks."pi-usage".version}"' "$usage/package.json"
+        grep -F '"./dist/index.ts"' "$usage/package.json"
+        grep -F 'pi.registerCommand("usage"' "$usage/dist/index.ts"
 
         # ponytail: .js aliases let dependency-free Node strip-types run exact packaged .ts files.
         cp -R "$usage/src" "$TMPDIR/usage-src"
         chmod -R u+w "$TMPDIR/usage-src"
+        mkdir -p "$TMPDIR/node_modules/@earendil-works"
+        ln -s ${expectedPackage}/lib/node_modules/pi-monorepo \
+          "$TMPDIR/node_modules/@earendil-works/pi-coding-agent"
+        ln -s ${expectedPackage}/lib/node_modules/pi-monorepo/node_modules/@earendil-works/pi-ai \
+          "$TMPDIR/node_modules/@earendil-works/pi-ai"
+        ln -s ${expectedPackage}/lib/node_modules/pi-monorepo/node_modules/@earendil-works/pi-tui \
+          "$TMPDIR/node_modules/@earendil-works/pi-tui"
         find "$TMPDIR/usage-src" -type f -name '*.ts' -print0 | while IFS= read -r -d ''' source; do
           ln -s "$(basename "$source")" "''${source%.ts}.js"
         done
@@ -1760,8 +1769,9 @@ in
         mkdir -p "$PI_CODING_AGENT_DIR"
         test -d ${expectedSupiContextPath}/node_modules/@mrclrchtr/supi-core
         test -d ${expectedSupiContextPath}/node_modules/typebox
+        test -f ${expectedSupiContextPath}/src/extension.ts
         pi --offline --no-extensions --no-skills --no-prompt-templates --no-context-files \
-          -e ${expectedSupiContextPath} \
+          -e ${expectedSupiContextPath}/src/extension.ts \
           --list-models > pi.log 2>&1
         ! grep -E 'Extension issues|Failed to load extension|Cannot find module|Error:' pi.log
         test ! -e "$PI_CODING_AGENT_DIR/supi/config.json"

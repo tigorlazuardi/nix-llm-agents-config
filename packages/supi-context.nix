@@ -23,7 +23,11 @@ buildNpmPackage {
   '';
 
   npmDepsHash = lock.npmDepsHash;
-  npmInstallFlags = [ "--omit=dev" ];
+  npmInstallFlags = [
+    "--omit=dev"
+    "--omit=peer"
+    "--legacy-peer-deps"
+  ];
   dontNpmBuild = true;
 
   meta = {
