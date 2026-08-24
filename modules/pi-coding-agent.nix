@@ -366,8 +366,19 @@ in
     ./pi-coding-agent/pi-herdr-subagents.nix
   ];
 
-  options.programs.pi-coding-agent.localUpdater.enable =
-    lib.mkEnableOption "the Linux user timer for deterministic local updates with one-shot Pi recovery";
+  options.programs.pi-coding-agent.localUpdater = {
+    enable = lib.mkEnableOption "the Linux user timer for deterministic local updates with one-shot Pi recovery";
+
+    ssh.configFile = lib.mkOption {
+      type = lib.types.nullOr (lib.types.strMatching "/.*");
+      default = null;
+      example = "/home/user/.ssh/config";
+      description = ''
+        Absolute runtime SSH configuration path used by Git in the local updater.
+        The path is passed to packaged OpenSSH with `-F`; its contents remain outside the Nix store.
+      '';
+    };
+  };
 
   options.programs.pi-coding-agent.plugins =
     lib.recursiveUpdate
@@ -550,7 +561,10 @@ in
               "LOCAL_UPDATE_STATE_DIR=${localUpdaterStateDirectory}"
               "PI_OFFLINE=1"
               "PI_TELEMETRY=0"
-            ];
+            ]
+            ++
+              lib.optional (localUpdater.ssh.configFile != null)
+                "GIT_SSH_COMMAND=${lib.getExe pkgs.openssh} -F ${lib.escapeShellArg localUpdater.ssh.configFile} -o BatchMode=yes";
             TimeoutStartSec = "6h";
             UMask = "0077";
             ProtectSystem = "strict";

@@ -39,6 +39,14 @@ let
   darwinEvaluation = builtins.tryEval darwin.config.home.activationPackage.drvPath;
   disabled = evaluate { programs.pi-coding-agent.enable = false; };
   localUpdaterEnabled = evaluate { programs.pi-coding-agent.localUpdater.enable = true; };
+  localUpdaterSshConfigFile = "/run/user/1000/ssh config'quoted";
+  localUpdaterSshConfigured = evaluate {
+    programs.pi-coding-agent.localUpdater = {
+      enable = true;
+      ssh.configFile = localUpdaterSshConfigFile;
+    };
+  };
+  expectedLocalUpdaterGitSshCommand = "GIT_SSH_COMMAND=${pkgs.lib.getExe pkgs.openssh} -F ${pkgs.lib.escapeShellArg localUpdaterSshConfigFile} -o BatchMode=yes";
   darwinLocalUpdaterEnabled = home-manager.lib.homeManagerConfiguration {
     pkgs = nixpkgs-unstable.legacyPackages.aarch64-darwin;
     modules = [
@@ -401,7 +409,13 @@ in
     assert expectedBrowserGoblin.agentBrowserVersion == pkgs.agent-browser.version;
     assert !disabled.config.programs.pi-coding-agent.enable;
     assert !default.config.programs.pi-coding-agent.localUpdater.enable;
+    assert default.config.programs.pi-coding-agent.localUpdater.ssh.configFile == null;
     assert localUpdaterEnabled.config.programs.pi-coding-agent.localUpdater.enable;
+    assert
+      localUpdaterSshConfigured.config.programs.pi-coding-agent.localUpdater.ssh.configFile
+      == localUpdaterSshConfigFile;
+    assert builtins.elem expectedLocalUpdaterGitSshCommand
+      localUpdaterSshConfigured.config.systemd.user.services.pi-coding-agent-local-update.Service.Environment;
     assert !(darwinLocalUpdaterEnabled.config.systemd.user.services ? pi-coding-agent-local-update);
     assert !(darwinLocalUpdaterEnabled.config.systemd.user.timers ? pi-coding-agent-local-update);
     assert
