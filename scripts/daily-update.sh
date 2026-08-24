@@ -103,10 +103,24 @@ apply_manifest_transform() {
   node -e 'const fs = require("fs"); const [file, raw] = process.argv.slice(1); const p = require(file); const transform = JSON.parse(raw); for (const key of transform.delete || []) delete p[key]; for (const [key, value] of Object.entries(transform.dependencyOverrides || {})) p.dependencies[key] = value; if (transform.overrides) p.overrides = {...(p.overrides || {}), ...transform.overrides}; fs.writeFileSync(file, JSON.stringify(p, null, 2) + "\n")' "$manifest" "$transform"
 }
 
-apply_lock_integrity_patches() {
-  local entry=$1 lock=$2 patches
-  patches=$(jq -c '.lockIntegrityPatches // []' <<<"$entry") || return 1
-  node -e 'const fs = require("fs"); const [file, raw] = process.argv.slice(1); const lock = require(file); for (const patch of JSON.parse(raw)) { const matches = Object.values(lock.packages || {}).filter(pkg => pkg.resolved === patch.resolved); if (!matches.length || matches.some(pkg => Object.hasOwn(pkg, "integrity"))) process.exit(1); for (const pkg of matches) pkg.integrity = patch.integrity; } fs.writeFileSync(file, JSON.stringify(lock, null, 2) + "\n")' "$lock" "$patches"
+hydrate_lock_integrities() {
+  local lock=$1 encoded resolved source_metadata source_store integrity patched
+  # Validate every fetch candidate before network access. Shell variables cannot
+  # losslessly represent control characters, and line-based iteration can split them.
+  jq -e '[.packages[] | select((.integrity? | not) and ((.resolved? | type) == "string") and (.resolved | test("^https?://"))) | .resolved] | all(.[]; explode | all(.[]; . >= 32 and . != 127))' "$lock" >/dev/null || return 1
+  while IFS= read -r encoded; do
+    [ -n "$encoded" ] || continue
+    resolved=$(printf '%s' "$encoded" | base64 --decode) || return 1
+    [ -n "$resolved" ] || return 1
+    source_metadata=$(nix store prefetch-file --json "$resolved") || return 1
+    source_store=$(jq -r '.storePath // empty' <<<"$source_metadata") || return 1
+    [ -n "$source_store" ] || return 1
+    integrity=$(nix hash file --type sha512 --sri "$source_store") || return 1
+    patched="$lock.hydrated"
+    jq --arg resolved "$resolved" --arg integrity "$integrity" '(.packages[] | select(.resolved? == $resolved and (.integrity? | not))).integrity = $integrity' "$lock" >"$patched" || return 1
+    mv "$patched" "$lock" || return 1
+  done < <(jq -r '[.packages[] | select((.integrity? | not) and ((.resolved? | type) == "string") and (.resolved | test("^https?://"))) | .resolved] | unique[] | @base64' "$lock")
+  jq -e 'all(.packages[]; .integrity? or (((.resolved? // "") | test("^https?://")) | not))' "$lock" >/dev/null
 }
 
 npm_update() {
@@ -132,6 +146,7 @@ npm_update() {
     rm -rf "$source_dir/node_modules"
     npm install --package-lock-only --ignore-scripts --omit=dev --omit=peer --legacy-peer-deps --prefix "$source_dir" >/dev/null || { rm -rf "$tmp"; return 1; }
     jq -e --arg package "$package" --arg version "$version" '.packages[""].name == $package and .packages[""].version == $version' "$source_dir/package-lock.json" >/dev/null || { rm -rf "$tmp"; return 1; }
+    hydrate_lock_integrities "$source_dir/package-lock.json" || { rm -rf "$tmp"; return 1; }
     old_npm_deps_hash=$(jq -r '.npmDepsHash // empty' <<<"$entry")
     [ -n "$old_npm_deps_hash" ] || { rm -rf "$tmp"; return 1; }
     npm_deps_hash=$(nix run nixpkgs#prefetch-npm-deps -- "$source_dir/package-lock.json") || { rm -rf "$tmp"; return 1; }
@@ -158,6 +173,7 @@ npm_shared_update() {
   registry=$(jq --arg a "$alias" --arg v "$version" '.[$a].version=$v' pi-plugins.json) || { rm -rf "$tmp"; return 1; }
   jq --arg shared "$shared" '{name:$shared,version:"1.0.0",private:true,dependencies:(to_entries | map(select(.value.sharedPackage? == $shared)) | map({key:.value.package,value:.value.version}) | from_entries)}' <<<"$registry" >"$tmp/package.json" || { rm -rf "$tmp"; return 1; }
   npm install --package-lock-only --ignore-scripts --omit=dev --omit=peer --legacy-peer-deps --prefix "$tmp" >/dev/null || { rm -rf "$tmp"; return 1; }
+  hydrate_lock_integrities "$tmp/package-lock.json" || { rm -rf "$tmp"; return 1; }
   npm_deps_hash=$(nix run nixpkgs#prefetch-npm-deps -- "$tmp/package-lock.json") || { rm -rf "$tmp"; return 1; }
   registry=$(jq --arg shared "$shared" --arg hash "$npm_deps_hash" 'with_entries(if .value.sharedPackage? == $shared then .value.npmDepsHash=$hash else . end)' <<<"$registry") || { rm -rf "$tmp"; return 1; }
   printf '%s\n' "$registry" >"$tmp/pi-plugins.json"
@@ -215,11 +231,11 @@ github_update() {
     chmod -R u+w "$source_dir" || { rm -rf "$tmp"; return 1; }
     apply_manifest_transform "$entry" "$source_dir/package.json" || { rm -rf "$tmp"; return 1; }
     if [ -n "$lock" ]; then
-      npm install --package-lock-only --ignore-scripts --omit=dev --omit=peer --prefix "$source_dir" >/dev/null || { rm -rf "$tmp"; return 1; }
+      npm install --package-lock-only --ignore-scripts --omit=dev --omit=peer --legacy-peer-deps --prefix "$source_dir" >/dev/null || { rm -rf "$tmp"; return 1; }
     else
       [ -f "$source_dir/package-lock.json" ] || { rm -rf "$tmp"; return 1; }
     fi
-    apply_lock_integrity_patches "$entry" "$source_dir/package-lock.json" || { rm -rf "$tmp"; return 1; }
+    hydrate_lock_integrities "$source_dir/package-lock.json" || { rm -rf "$tmp"; return 1; }
     npm_deps_hash=$(nix run nixpkgs#prefetch-npm-deps -- "$source_dir/package-lock.json") || { rm -rf "$tmp"; return 1; }
     if [ -n "$lock" ]; then cp "$source_dir/package-lock.json" "$tmp/lock" || { rm -rf "$tmp"; return 1; }; fi
   fi

@@ -5,6 +5,8 @@ workflow=${WORKFLOW:-.github/workflows/daily-update.yml}
 updater=${UPDATER:-scripts/daily-update.sh}
 registry=${REGISTRY:-pi-plugins.json}
 checks=${CHECKS:-checks.nix}
+missing_integrity_fixture=${MISSING_INTEGRITY_FIXTURE:-tests/fixtures/npm-lock-missing-integrity.json}
+control_resolved_fixture=${CONTROL_RESOLVED_FIXTURE:-tests/fixtures/npm-lock-control-resolved.json}
 
 test -x "$updater"
 trigger_block=$(awk '/^on:$/ { active=1; next } active && /^[^[:space:]]/ { exit } active && NF { print }' "$workflow")
@@ -24,9 +26,11 @@ grep -F 'git commit -m '\''chore(deps): update nixpkgs and home-manager'\'' || r
 grep -F 'push_inputs_checked || return 1' "$updater"
 grep -F 'tar -xzf "$source_store" --strip-components=1 -C "$source_dir"' "$updater"
 grep -F 'rm -rf "$source_dir/node_modules"' "$updater"
-grep -F 'npm install --package-lock-only --ignore-scripts --omit=dev --omit=peer --legacy-peer-deps --prefix "$source_dir"' "$updater"
+test "$(grep -Fc 'npm install --package-lock-only --ignore-scripts --omit=dev --omit=peer --legacy-peer-deps --prefix "$source_dir"' "$updater")" -eq 2
 grep -F 'apply_manifest_transform "$entry" "$source_dir/package.json"' "$updater"
-grep -F 'apply_lock_integrity_patches "$entry" "$source_dir/package-lock.json"' "$updater"
+test "$(grep -Fc 'hydrate_lock_integrities ' "$updater")" -eq 3
+grep -F 'nix store prefetch-file --json "$resolved"' "$updater"
+grep -F 'nix hash file --type sha512 --sri "$source_store"' "$updater"
 grep -F 'nix run nixpkgs#prefetch-npm-deps -- "$source_dir/package-lock.json"' "$updater"
 grep -F 'npm_shared_update "$alias" "$entry"' "$updater"
 ! grep -F '"$package@$version" >/dev/null' "$updater"
@@ -40,7 +44,7 @@ jq -e 'all(.[]; has("reason") | not)' "$registry" >/dev/null
 jq -e 'all(.[]; (.notes? // []) | all(.[]; (.issue | type == "string") and (.resolveStrategy | type == "string")))' "$registry" >/dev/null
 jq -e 'all(to_entries[]; .value | has("version") and has("check") and (if .strategy == "npm" then has("package") and (has("sharedPackage") or (has("src") and has("hash"))) else has("owner") and has("repo") and has("rev") and has("hash") end))' "$registry" >/dev/null
 jq -e 'all(.[]; .manifestTransform? // {} | ((keys - ["delete", "dependencyOverrides", "overrides"]) | length == 0) and ((.delete? // []) | all(. == "devDependencies" or . == "peerDependencies" or . == "peerDependenciesMeta")) and ((.dependencyOverrides? // {}) | type == "object" and all(.[]; type == "string")) and ((.overrides? // {}) | type == "object" and all(.[]; type == "string")))' "$registry" >/dev/null
-jq -e 'all(.[]; (.lockIntegrityPatches? // []) | type == "array" and all(.[]; (keys | sort) == ["integrity", "resolved"] and (.resolved | type == "string") and (.integrity | type == "string")))' "$registry" >/dev/null
+jq -e 'all(.[]; has("lockIntegrityPatches") | not)' "$registry" >/dev/null
 jq -e '([.[] | select(.sharedPackage? == "pix-tools") | .npmDepsHash] | unique | length) == 1' "$registry" >/dev/null
 jq -e '."pi-vcc".tagPrefix == "v" and ."pi-vcc".removePaths == ["demo.gif"]' "$registry" >/dev/null
 ! grep -F 'git push --force' "$updater"
@@ -59,9 +63,7 @@ EOF
 cat >"$tmp/github-mcp-source/package.json" <<'EOF'
 {"name":"github-mcp","version":"2.0.0","dependencies":{"upstream-dependency":"3.0.0"}}
 EOF
-cat >"$tmp/github-mcp-source/package-lock.json" <<'EOF'
-{"name":"github-mcp","version":"2.0.0","lockfileVersion":3,"requires":true,"packages":{"":{"name":"github-mcp","version":"2.0.0","dependencies":{"upstream-dependency":"3.0.0"}},"node_modules/upstream-dependency":{"version":"3.0.0","resolved":"https://registry.invalid/upstream-dependency-3.0.0.tgz","integrity":"sha512-fixture"},"node_modules/pi-agent-core":{"version":"0.79.10","resolved":"https://registry.npmjs.org/@earendil-works/pi-agent-core/-/pi-agent-core-0.79.10.tgz"},"node_modules/pi-ai":{"version":"0.79.10","resolved":"https://registry.npmjs.org/@earendil-works/pi-ai/-/pi-ai-0.79.10.tgz"},"node_modules/pi-tui":{"version":"0.79.10","resolved":"https://registry.npmjs.org/@earendil-works/pi-tui/-/pi-tui-0.79.10.tgz"}}}
-EOF
+cp "$missing_integrity_fixture" "$tmp/github-mcp-source/package-lock.json"
 jq -e 'all(.packages["node_modules/pi-agent-core", "node_modules/pi-ai", "node_modules/pi-tui"]; has("integrity") | not)' "$tmp/github-mcp-source/package-lock.json" >/dev/null
 cp "$updater" "$tmp/daily-update.sh"
 cat >"$tmp/fixture/package/package.json" <<'EOF'
@@ -85,7 +87,7 @@ cat >"$tmp/pi-plugins.json" <<'EOF'
   "rpiv-todo":{"strategy":"npm","package":"@fixture/pi-rules","version":"0.5.4","src":"https://old.invalid/pi-rules-0.5.4.tgz","hash":"sha256-old-source","npmDepsHash":"sha256-old-deps","manifestTransform":{"delete":["peerDependencies","peerDependenciesMeta"]},"lockFile":"packages/rpiv-todo-package-lock.json","check":"rules"},
   "pi-vcc":{"strategy":"github","owner":"fixture","repo":"pi-vcc","tagPrefix":"v","version":"0.4.0","rev":"old-vcc-rev","hash":"sha256-old-vcc","removePaths":["demo.gif"],"check":"pi-vcc"},
   "github-prompt":{"strategy":"github","owner":"fixture","repo":"github-prompt","track":"main","version":"unstable-old","rev":"old-prompt-rev","hash":"sha256-old-prompt","npmDepsHash":"sha256-old-prompt-deps","manifestTransform":{"delete":["devDependencies"],"overrides":{"brace-expansion":"5.0.8"}},"lockFile":"packages/github-prompt-package-lock.json","check":"github-prompt"},
-  "github-mcp":{"strategy":"github","owner":"fixture","repo":"github-mcp","track":"main","version":"1.0.0","rev":"old-mcp-rev","hash":"sha256-old-mcp","npmDepsHash":"sha256-old-mcp-deps","lockIntegrityPatches":[{"resolved":"https://registry.npmjs.org/@earendil-works/pi-agent-core/-/pi-agent-core-0.79.10.tgz","integrity":"sha512-XKxgdjhcPuyjrthCOFSgfzT3xZ1uBrJ1IMVDxci1to6hIN6BIg9J5iY8q0pGXK1DLgATLP23da+1UyZLwA360Q=="},{"resolved":"https://registry.npmjs.org/@earendil-works/pi-ai/-/pi-ai-0.79.10.tgz","integrity":"sha512-9jR23tOl0BIUdQMn70Gr72xYBpM7Xgl9Lyv7gAnU1USfkNRuYG/f/edLl+n/Dp/RafDW3JI4DF7y/GhgkORuew=="},{"resolved":"https://registry.npmjs.org/@earendil-works/pi-tui/-/pi-tui-0.79.10.tgz","integrity":"sha512-FUVOjDn1DVwM1uHD5MNYboXQrXjIDbSt+BQ3py7nQWCY62tKfxgiM1OBMxTcwRWLfSdZHUPpV0hm1loIdUJnPw=="}],"check":"github-mcp"},
+  "github-mcp":{"strategy":"github","owner":"fixture","repo":"github-mcp","track":"main","version":"1.0.0","rev":"old-mcp-rev","hash":"sha256-old-mcp","npmDepsHash":"sha256-old-mcp-deps","check":"github-mcp"},
   "pix-data":{"strategy":"npm","package":"@fixture/pix-data","version":"0.4.1","sharedPackage":"pix-tools","npmDepsHash":"sha256-old-pix-deps","lockFile":"packages/pix-tools-package-lock.json","check":"pix-tools"},
   "pix-footer":{"strategy":"npm","package":"@fixture/pix-footer","version":"0.1.20","sharedPackage":"pix-tools","npmDepsHash":"sha256-old-pix-deps","lockFile":"packages/pix-tools-package-lock.json","check":"pix-tools"}
 }
@@ -129,7 +131,12 @@ const deps = p.dependencies;
 const root = { name: p.name, version: p.version, dependencies: deps };
 for (const key of ["devDependencies", "peerDependencies", "peerDependenciesMeta"]) if (p[key]) root[key] = p[key];
 const packages = { "": root };
-for (const [name, version] of Object.entries(deps)) packages[`node_modules/${name}`] = { version, resolved: `https://registry.invalid/${name}-${version}.tgz`, integrity: "sha512-fixture" };
+for (const [name, version] of Object.entries(deps)) {
+  const dependency = { version, resolved: `https://registry.invalid/${name}-${version}.tgz` };
+  const omitIntegrity = (p.name === "@fixture/pi-rules" && name === "fixture-dependency") || (p.name === "pix-tools" && name === "@fixture/pix-data");
+  if (!omitIntegrity) dependency.integrity = "sha512-fixture";
+  packages[`node_modules/${name}`] = dependency;
+}
 if (p.overrides?.["brace-expansion"]) packages["node_modules/brace-expansion"] = { version: p.overrides["brace-expansion"], resolved: `https://registry.invalid/brace-expansion-${p.overrides["brace-expansion"]}.tgz`, integrity: "sha512-fixture" };
 fs.writeFileSync(lockPath, JSON.stringify({ name: p.name, version: p.version, lockfileVersion: 3, requires: true, packages }, null, 2) + "\n");
 EOF_NODE
@@ -142,6 +149,14 @@ if [ -n "${FAILED_FETCH_MARKER:-}" ] && [ -e "$FAILED_FETCH_MARKER" ]; then
   exit 97
 fi
 case "$*" in
+  'store prefetch-file --json https://registry.npmjs.org/@earendil-works/pi-agent-core/-/pi-agent-core-0.79.10.tgz') printf '%s\n' '{"storePath":"/fixture/pi-agent-core"}' ;;
+  'store prefetch-file --json https://registry.npmjs.org/@earendil-works/pi-ai/-/pi-ai-0.79.10.tgz') printf '%s\n' '{"storePath":"/fixture/pi-ai"}' ;;
+  'store prefetch-file --json https://registry.npmjs.org/@earendil-works/pi-tui/-/pi-tui-0.79.10.tgz') printf '%s\n' '{"storePath":"/fixture/pi-tui"}' ;;
+  'hash file --type sha512 --sri /fixture/pi-agent-core') printf '%s\n' 'sha512-XKxgdjhcPuyjrthCOFSgfzT3xZ1uBrJ1IMVDxci1to6hIN6BIg9J5iY8q0pGXK1DLgATLP23da+1UyZLwA360Q==' ;;
+  'hash file --type sha512 --sri /fixture/pi-ai') printf '%s\n' 'sha512-9jR23tOl0BIUdQMn70Gr72xYBpM7Xgl9Lyv7gAnU1USfkNRuYG/f/edLl+n/Dp/RafDW3JI4DF7y/GhgkORuew==' ;;
+  'hash file --type sha512 --sri /fixture/pi-tui') printf '%s\n' 'sha512-FUVOjDn1DVwM1uHD5MNYboXQrXjIDbSt+BQ3py7nQWCY62tKfxgiM1OBMxTcwRWLfSdZHUPpV0hm1loIdUJnPw==' ;;
+  'store prefetch-file --json https://registry.invalid/'*) printf '%s\n' '{"storePath":"/fixture/generated-dependency"}' ;;
+  'hash file --type sha512 --sri /fixture/generated-dependency') printf '%s\n' 'sha512-hydrated-generated-dependency' ;;
   'store prefetch-file --json --unpack https://github.com/fixture/pi-vcc/archive/new-vcc-rev.tar.gz') printf '{"hash":"sha256-raw-vcc","storePath":"%s"}\n' "$FIXTURE_VCC_SOURCE" ;;
   'store prefetch-file --json --unpack https://github.com/fixture/github-prompt/archive/new-prompt-rev.tar.gz') printf '{"hash":"sha256-new-prompt","storePath":"%s"}\n' "$FIXTURE_GITHUB_PROMPT_SOURCE" ;;
   'store prefetch-file --json --unpack https://github.com/fixture/github-mcp/archive/new-mcp-rev.tar.gz') printf '{"hash":"sha256-new-mcp","storePath":"%s"}\n' "$FIXTURE_GITHUB_MCP_SOURCE" ;;
@@ -149,7 +164,11 @@ case "$*" in
   'run nixpkgs#prefetch-npm-deps -- '*)
     [ "${PREFETCH_FAIL:-}" != 1 ] || exit 1
     lock=${!#}
-    jq -e 'if .packages[""].name == "pix-tools" then .packages[""].dependencies == {"@fixture/pix-data":"0.4.2","@fixture/pix-footer":"0.1.20"} elif .packages[""].name == "@fixture/pi-rules" then .packages[""].dependencies["fixture-dependency"] == "1.2.3" and .packages["node_modules/fixture-dependency"].version == "1.2.3" elif .packages[""].name == "github-prompt" then .packages[""].dependencies == {"github-dependency":"2.0.0"} and (.packages[""] | has("devDependencies") | not) and .packages["node_modules/brace-expansion"].version == "5.0.8" else .packages[""].name == "github-mcp" and .packages[""].dependencies == {"upstream-dependency":"3.0.0"} and .packages["node_modules/pi-agent-core"].integrity == "sha512-XKxgdjhcPuyjrthCOFSgfzT3xZ1uBrJ1IMVDxci1to6hIN6BIg9J5iY8q0pGXK1DLgATLP23da+1UyZLwA360Q==" and .packages["node_modules/pi-ai"].integrity == "sha512-9jR23tOl0BIUdQMn70Gr72xYBpM7Xgl9Lyv7gAnU1USfkNRuYG/f/edLl+n/Dp/RafDW3JI4DF7y/GhgkORuew==" and .packages["node_modules/pi-tui"].integrity == "sha512-FUVOjDn1DVwM1uHD5MNYboXQrXjIDbSt+BQ3py7nQWCY62tKfxgiM1OBMxTcwRWLfSdZHUPpV0hm1loIdUJnPw==" end' "$lock" >/dev/null
+    if ! jq -e 'all(.packages[]; .integrity? or (((.resolved? // "") | test("^https?://")) | not))' "$lock" >/dev/null; then
+      printf '%s\n' 'non-git dependencies should have associated integrity' >&2
+      exit 101
+    fi
+    jq -e 'if .packages[""].name == "pix-tools" then .packages[""].dependencies == {"@fixture/pix-data":"0.4.2","@fixture/pix-footer":"0.1.20"} and .packages["node_modules/@fixture/pix-data"].integrity == "sha512-hydrated-generated-dependency" elif .packages[""].name == "@fixture/pi-rules" then .packages[""].dependencies["fixture-dependency"] == "1.2.3" and .packages["node_modules/fixture-dependency"].version == "1.2.3" and .packages["node_modules/fixture-dependency"].integrity == "sha512-hydrated-generated-dependency" elif .packages[""].name == "github-prompt" then .packages[""].dependencies == {"github-dependency":"2.0.0"} and (.packages[""] | has("devDependencies") | not) and .packages["node_modules/brace-expansion"].version == "5.0.8" else .packages[""].name == "github-mcp" and .packages[""].dependencies == {"upstream-dependency":"3.0.0"} and .packages["node_modules/pi-agent-core"].integrity == "sha512-XKxgdjhcPuyjrthCOFSgfzT3xZ1uBrJ1IMVDxci1to6hIN6BIg9J5iY8q0pGXK1DLgATLP23da+1UyZLwA360Q==" and .packages["node_modules/pi-ai"].integrity == "sha512-9jR23tOl0BIUdQMn70Gr72xYBpM7Xgl9Lyv7gAnU1USfkNRuYG/f/edLl+n/Dp/RafDW3JI4DF7y/GhgkORuew==" and .packages["node_modules/pi-tui"].integrity == "sha512-FUVOjDn1DVwM1uHD5MNYboXQrXjIDbSt+BQ3py7nQWCY62tKfxgiM1OBMxTcwRWLfSdZHUPpV0hm1loIdUJnPw==" end' "$lock" >/dev/null
     if jq -e '.packages[""].name == "github-mcp"' "$lock" >/dev/null; then cp "$lock" "$MCP_PATCHED_LOCK"; fi
     printf 'sha256-%s\n' "$(sha256sum "$lock" | cut -d' ' -f1)"
     ;;
@@ -284,6 +303,27 @@ packages_before=$(cat "$tmp/packages/pi-rules.nix" "$tmp/packages/pi-vcc.nix")
 mkdir -p "$tmp/baseline/packages"
 cp "$tmp/pi-plugins.json" "$tmp/baseline/pi-plugins.json"
 cp "$tmp/packages/"* "$tmp/baseline/packages/"
+
+mkdir -p "$tmp/adversarial/source" "$tmp/adversarial/packages" "$tmp/adversarial/baseline/packages" "$tmp/adversarial/tmp"
+cp "$tmp/daily-update.sh" "$tmp/adversarial/daily-update.sh"
+cp "$tmp/github-mcp-source/package.json" "$tmp/adversarial/source/package.json"
+cp "$control_resolved_fixture" "$tmp/adversarial/source/package-lock.json"
+jq '{"github-mcp": .["github-mcp"]}' "$tmp/pi-plugins.json" >"$tmp/adversarial/pi-plugins.json"
+cp "$tmp/adversarial/pi-plugins.json" "$tmp/adversarial/baseline/pi-plugins.json"
+adversarial_registry_before=$(cat "$tmp/adversarial/pi-plugins.json")
+adversarial_lock_before=$(cat "$tmp/adversarial/source/package-lock.json")
+if (
+  cd "$tmp/adversarial"
+  PATH="$tmp/bin:$PATH" TMPDIR="$tmp/adversarial/tmp" GIT_BASELINE="$tmp/adversarial/baseline" GIT_STATE="$tmp/adversarial/git-state" FIXTURE_GITHUB_MCP_SOURCE="$tmp/adversarial/source" NIX_EVENTS="$tmp/adversarial/nix-events" GITHUB_STEP_SUMMARY="$tmp/adversarial/summary" bash ./daily-update.sh plugins
+); then
+  exit 1
+fi
+[ "$adversarial_registry_before" = "$(cat "$tmp/adversarial/pi-plugins.json")" ]
+[ "$adversarial_lock_before" = "$(cat "$tmp/adversarial/source/package-lock.json")" ]
+[ ! -e "$tmp/adversarial/packages/github-mcp-package-lock.json" ]
+test "$(grep -Ec '^store prefetch-file --json https?://' "$tmp/adversarial/nix-events" || true)" -eq 0
+[ -z "$(find "$tmp/adversarial/tmp" -mindepth 1 -print -quit)" ]
+
 if (
   cd "$tmp"
   PATH="$tmp/bin:$PATH" GIT_BASELINE="$tmp/baseline" GIT_STATE="$tmp/git-prefetch-fail" FIXTURE_TARBALL="$tmp/fixture.tgz" FIXTURE_VCC_SOURCE="$tmp/vcc-source" PREFETCH_FAIL=1 GITHUB_STEP_SUMMARY="$tmp/summary" bash ./daily-update.sh plugins
@@ -332,8 +372,10 @@ cp "$tmp/baseline/pi-plugins.json" "$tmp/pi-plugins.json"
 rm -f "$tmp/packages/"*-package-lock.json
 (
   cd "$tmp"
-  PATH="$tmp/bin:$PATH" GIT_BASELINE="$tmp/baseline" GIT_STATE="$tmp/git-success" FIXTURE_TARBALL="$tmp/fixture.tgz" FIXTURE_VCC_SOURCE="$tmp/vcc-source" GITHUB_STEP_SUMMARY="$tmp/summary" bash ./daily-update.sh plugins
+  PATH="$tmp/bin:$PATH" GIT_BASELINE="$tmp/baseline" GIT_STATE="$tmp/git-success" FIXTURE_TARBALL="$tmp/fixture.tgz" FIXTURE_VCC_SOURCE="$tmp/vcc-source" NIX_EVENTS="$tmp/success-nix-events" GITHUB_STEP_SUMMARY="$tmp/summary" bash ./daily-update.sh plugins
 )
+grep -F 'store prefetch-file --json https://registry.invalid/fixture-dependency-1.2.3.tgz' "$tmp/success-nix-events"
+grep -F 'store prefetch-file --json https://registry.invalid/@fixture/pix-data-0.4.2.tgz' "$tmp/success-nix-events"
 fixture_hash="sha256-$(sha256sum "$tmp/packages/pi-rules-package-lock.json" | cut -d' ' -f1)"
 jq -e '.packages[""].dependencies.typebox == "^1.0.0" and (.packages[""] | has("devDependencies") or has("peerDependencies") | not) and .packages[""].peerDependenciesMeta.pi.optional' "$tmp/packages/pi-rules-package-lock.json" >/dev/null
 jq -e '.packages[""].dependencies.typebox == "^1.0.0" and .packages[""].devDependencies["must-not-lock"] == "9.9.9" and .packages[""].peerDependencies.pi == "*" and .packages[""].peerDependenciesMeta.pi.optional' "$tmp/packages/remote-pi-package-lock.json" >/dev/null

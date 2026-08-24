@@ -1,0 +1,19 @@
+{
+  "name": "github-mcp",
+  "version": "2.0.0",
+  "lockfileVersion": 3,
+  "requires": true,
+  "packages": {
+    "": {
+      "name": "github-mcp",
+      "version": "2.0.0",
+      "dependencies": {
+        "upstream-dependency": "3.0.0"
+      }
+    },
+    "node_modules/upstream-dependency": {
+      "version": "3.0.0",
+      "resolved": "https://expected.invalid/archive.tgz\nhttp://169.254.169.254/metadata\u0001"
+    }
+  }
+}

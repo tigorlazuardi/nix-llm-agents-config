@@ -6,7 +6,7 @@ const core = ["read", "bash", "ask_user", "rename_herdr_tab", "todo"];
 const grouped: Record<Group, string[]> = {
   browser: ["browser_open"],
   subagents: ["subagent", "subagent_interrupt", "subagents_list", "subagent_resume"],
-  research: ["web_search", "mcp"],
+  research: ["web_search", "mcp", "mcpScript"],
   herdr: ["herdr_layout", "sudo_task"],
   background: ["jobs"],
   mesh: ["agent_send"],
@@ -25,6 +25,7 @@ const paths: Record<string, string> = {
   subagent_resume: "/nix/store/pi-herdr-subagents/pi-extension/subagents/index.ts",
   web_search: "/nix/store/pi-web-access/index.ts",
   mcp: "/nix/store/pi-mcp-adapter/index.ts",
+  mcpScript: "/nix/store/pi-mcp-adapter/index.ts",
   herdr_layout: "/nix/store/pi-herdr/index.ts",
   sudo_task: "/nix/store/pi-herdr-sudo-task/index.ts",
   jobs: "/nix/store/pi-patty-bg-tasks/index.ts",
@@ -56,10 +57,15 @@ lazyTools({
 assert(loader && sessionStart);
 sessionStart();
 assert.deepEqual(active, [...core, "load_tools"]);
+assert(!active.includes("mcpScript"));
+let researchLoaded = false;
 for (const group of Object.keys(grouped) as Group[]) {
+  if (!researchLoaded) assert(!active.includes("mcpScript"));
   await loader.execute(group, { group });
   for (const tool of grouped[group]) assert(active.includes(tool));
   for (const tool of core) assert(active.includes(tool));
+  if (group === "research") researchLoaded = true;
+  assert.equal(active.includes("mcpScript"), researchLoaded);
 }
 
 process.env.PI_SUBAGENT_ALLOWED_TOOLS = "read,bash,subagent,caller_ping,subagent_done";
