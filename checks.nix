@@ -46,7 +46,13 @@ let
       ssh.configFile = localUpdaterSshConfigFile;
     };
   };
-  expectedLocalUpdaterGitSshCommand = "GIT_SSH_COMMAND=${pkgs.lib.getExe pkgs.openssh} -F ${pkgs.lib.escapeShellArg localUpdaterSshConfigFile} -o BatchMode=yes";
+  localUpdaterSshEnvironment =
+    builtins.filter (environment: builtins.match "GIT_SSH_COMMAND=.*" environment != null)
+      localUpdaterSshConfigured.config.systemd.user.services.pi-coding-agent-local-update.Service.Environment;
+  localUpdaterGitSshCommand = builtins.head localUpdaterSshEnvironment;
+  localUpdaterSshUnit =
+    localUpdaterSshConfigured.config.xdg.configFile."systemd/user/pi-coding-agent-local-update.service".source;
+  escapedLocalUpdaterSshConfigFile = pkgs.lib.escapeShellArg localUpdaterSshConfigFile;
   darwinLocalUpdaterEnabled = home-manager.lib.homeManagerConfiguration {
     pkgs = nixpkgs-unstable.legacyPackages.aarch64-darwin;
     modules = [
@@ -414,8 +420,8 @@ in
     assert
       localUpdaterSshConfigured.config.programs.pi-coding-agent.localUpdater.ssh.configFile
       == localUpdaterSshConfigFile;
-    assert builtins.elem expectedLocalUpdaterGitSshCommand
-      localUpdaterSshConfigured.config.systemd.user.services.pi-coding-agent-local-update.Service.Environment;
+    assert builtins.length localUpdaterSshEnvironment == 1;
+    assert builtins.match "GIT_SSH_COMMAND=[^[:space:]]+" localUpdaterGitSshCommand != null;
     assert !(darwinLocalUpdaterEnabled.config.systemd.user.services ? pi-coding-agent-local-update);
     assert !(darwinLocalUpdaterEnabled.config.systemd.user.timers ? pi-coding-agent-local-update);
     assert
@@ -850,7 +856,40 @@ in
         "app.tools.expand" = "ctrl+e";
         "tui.editor.cursorLeft" = "left";
       };
-    pkgs.runCommandLocal "pi-home-manager-module-evaluation" { } "touch $out";
+    pkgs.runCommandLocal "pi-home-manager-module-evaluation" { nativeBuildInputs = [ pkgs.systemd ]; }
+      ''
+        unit=${localUpdaterSshUnit}
+        git_ssh_command=${pkgs.lib.escapeShellArg localUpdaterGitSshCommand}
+        git_ssh_wrapper="''${git_ssh_command#GIT_SSH_COMMAND=}"
+
+        grep -Fx "Environment=$git_ssh_command" "$unit"
+        test "$(grep -c '^Environment=GIT_SSH_COMMAND=' "$unit")" -eq 1
+        case "$git_ssh_wrapper" in
+          *[[:space:]]*)
+            echo "GIT_SSH_COMMAND contains whitespace: $git_ssh_wrapper" >&2
+            exit 1
+            ;;
+        esac
+
+        runtime_dir="$TMPDIR/runtime"
+        mkdir -m 0700 "$runtime_dir"
+        XDG_RUNTIME_DIR="$runtime_dir" \
+          systemd-analyze --user --recursive-errors=no verify "$unit" > verify.log 2>&1 || {
+          cat verify.log >&2
+          exit 1
+        }
+        if grep -F 'Invalid environment assignment' verify.log; then
+          cat verify.log >&2
+          exit 1
+        fi
+
+        test -x "$git_ssh_wrapper"
+        grep -F -- '-F ' "$git_ssh_wrapper"
+        grep -F -- ${pkgs.lib.escapeShellArg escapedLocalUpdaterSshConfigFile} "$git_ssh_wrapper"
+        grep -F -- '-o BatchMode=yes' "$git_ssh_wrapper"
+
+        touch $out
+      '';
 
   artifact-preview =
     pkgs.runCommandLocal "pi-artifact-preview"

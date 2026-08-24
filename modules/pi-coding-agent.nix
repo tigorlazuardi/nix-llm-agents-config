@@ -342,6 +342,15 @@ let
   webAccessConfigFile = jsonFormat.generate "web-search.json" webAccessConfig;
   localUpdaterStateDirectory = "${config.home.homeDirectory}/.local/state/pi-coding-agent-local-update";
   localUpdaterRecoveryPrompt = ../scripts/local-update-recovery.md;
+  localUpdaterSshWrapper = pkgs.writeShellApplication {
+    name = "pi-coding-agent-local-update-ssh";
+    text = ''
+      exec ${lib.getExe pkgs.openssh} \
+        -F ${lib.escapeShellArg localUpdater.ssh.configFile} \
+        -o BatchMode=yes \
+        "$@"
+    '';
+  };
   localUpdaterPackage = pkgs.writeShellApplication {
     name = "pi-coding-agent-local-update";
     runtimeInputs = [
@@ -562,9 +571,9 @@ in
               "PI_OFFLINE=1"
               "PI_TELEMETRY=0"
             ]
-            ++
-              lib.optional (localUpdater.ssh.configFile != null)
-                "GIT_SSH_COMMAND=${lib.getExe pkgs.openssh} -F ${lib.escapeShellArg localUpdater.ssh.configFile} -o BatchMode=yes";
+            ++ lib.optional (
+              localUpdater.ssh.configFile != null
+            ) "GIT_SSH_COMMAND=${lib.getExe localUpdaterSshWrapper}";
             TimeoutStartSec = "6h";
             UMask = "0077";
             ProtectSystem = "strict";
