@@ -443,6 +443,8 @@ in
     assert
       localUpdaterEnabled.config.systemd.user.services.pi-coding-agent-local-update.Service.TimeoutStartSec
       == "6h";
+    assert builtins.elem "XDG_CACHE_HOME=/home/test/.local/state/pi-coding-agent-local-update/cache"
+      localUpdaterEnabled.config.systemd.user.services.pi-coding-agent-local-update.Service.Environment;
     assert builtins.elem "PI_OFFLINE=1"
       localUpdaterEnabled.config.systemd.user.services.pi-coding-agent-local-update.Service.Environment;
     assert builtins.elem "PI_TELEMETRY=0"

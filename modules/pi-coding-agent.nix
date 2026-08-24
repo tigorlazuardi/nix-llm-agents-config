@@ -568,6 +568,7 @@ in
             Environment = [
               "LOCAL_UPDATE_RECOVERY_PROMPT=${localUpdaterRecoveryPrompt}"
               "LOCAL_UPDATE_STATE_DIR=${localUpdaterStateDirectory}"
+              "XDG_CACHE_HOME=${localUpdaterStateDirectory}/cache"
               "PI_OFFLINE=1"
               "PI_TELEMETRY=0"
             ]
