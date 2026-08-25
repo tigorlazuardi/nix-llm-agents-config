@@ -85,9 +85,9 @@
   "pi-commandcode-provider": {
     "strategy": "npm",
     "package": "pi-commandcode-provider",
-    "version": "0.5.1",
-    "src": "https://registry.npmjs.org/pi-commandcode-provider/-/pi-commandcode-provider-0.5.1.tgz",
-    "hash": "sha256-KjEOIFPJSY+vSrxWzlM2J/jkIvhok8vnFlSXrdqABgQ=",
+    "version": "0.6.0",
+    "src": "https://registry.npmjs.org/pi-commandcode-provider/-/pi-commandcode-provider-0.6.0.tgz",
+    "hash": "sha256-b39NRxC1VB/wBIhmBIDRFuLaBpIDqI2Ojzk1Skb9ubM=",
     "check": "command-code-load"
   },
   "pi-effort": {
