@@ -63,8 +63,8 @@
     "repo": "pi-mcp-adapter",
     "track": "main",
     "version": "unstable-2026-09-02",
-    "rev": "10a45367e033a32026987a75d6f401e37340c86f",
-    "hash": "sha256-/NrC8cVEdhswKEQcuVugNSOCGJ3/c6k2Qg8o6hg0X14=",
+    "rev": "cb8e316f3c3fb823ed133bde2a2fa292a7d68b34",
+    "hash": "sha256-DYa+QSNhGvPwbLrYCKIsJiEk3kkMPSQIOQVoAetXvdY=",
     "npmDepsHash": "sha256-M/OE8vusoS1tfanshYMso/mDVoG0J0JkgeWoYSequo8=",
     "lockFile": "packages/pi-mcp-adapter-package-lock.json",
     "manifestTransform": {
