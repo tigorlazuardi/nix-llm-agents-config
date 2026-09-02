@@ -304,10 +304,10 @@
   "pi-usage": {
     "strategy": "npm",
     "package": "@narumitw/pi-usage",
-    "version": "0.60.1",
-    "src": "https://registry.npmjs.org/@narumitw/pi-usage/-/pi-usage-0.60.1.tgz",
-    "hash": "sha256-SjanH/rocx3HLAGxuwLI3vl21HPZyaTClD4kqBgOtnA=",
-    "npmDepsHash": "sha256-IPtULpm2L4A53LoPRr56HFWu1r/fjl7gPPu5cnYm14I=",
+    "version": "0.60.2",
+    "src": "https://registry.npmjs.org/@narumitw/pi-usage/-/pi-usage-0.60.2.tgz",
+    "hash": "sha256-86y2FzDtQD19Ldg88UwuAlTZ8HqQUof9Wr+gIxEcoaQ=",
+    "npmDepsHash": "sha256-yX/qW/uuv8dSzC1x0i9NeryyJ7qf88wzAshcgo9i3xU=",
     "manifestTransform": {
       "delete": [
         "devDependencies",
