@@ -38,9 +38,22 @@
     ];
   };
   reviewer = {
-    description = "Sol reviewer; standards or spec axis";
+    description = "Sol reviewer; spec axis";
     prompt = ../../config/agents/reviewer.md;
     model = "gpt-5.6-sol";
+    effort = "high";
+    tools.allow = [
+      "read"
+      "grep"
+      "find"
+      "bash"
+      "write"
+    ];
+  };
+  standards-reviewer = {
+    description = "Terra reviewer; standards axis";
+    prompt = ../../config/agents/reviewer.md;
+    model = "gpt-5.6-terra";
     effort = "high";
     tools.allow = [
       "read"
