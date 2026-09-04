@@ -18,13 +18,13 @@ After any of: nontrivial bug fixed (root cause found), vendor/dependency quirk o
 ```
 docs/src/content/docs/reports/
 ├── index.mdx                        ← Index of Reports (pinned top of sidebar group)
-├── 2026-07-starlight-sidebar.mdx    ← <yyyy-mm>-<topic-slug>.mdx, sidebar label "2026-07-07 …"
+├── 2026-07-starlight-sidebar.mdx    ← <report-yyyy-mm>-<topic-slug>.mdx, sidebar label "2026-07-08 …"
 └── 2026-07-git-status-uall.mdx
 ```
 
-- One file per **(month, topic)**. Topic slug = the symptom family, kebab-case, stable across months.
-- Recurrence **same month + same topic** → append a row to that file's Recurrence log (update Root cause/Fix if understanding changed). No new file.
-- Recurrence in a **new month** → new file `<new-month>-<same-topic>.mdx`, first line links the predecessor ("Previously: [2026-06](/reports/2026-06-topic/)"). This is how "sampai kapan kejadian ini" stays answerable — the chain shows the lesson's lifespan.
+- One file per **(report month, topic)**. Topic slug = the symptom family, kebab-case, stable across months.
+- Recurrence **reported in the same month + same topic** → append a row to that file's Recurrence log (update Root cause/Fix if understanding changed). No new file.
+- Recurrence **reported in a new month** → new file `<new-report-month>-<same-topic>.mdx`, first line links the predecessor ("Previously: [2026-06](/reports/2026-06-topic/)"). This is how "sampai kapan kejadian ini" stays answerable — the chain shows the lesson's lifespan.
 - BEFORE creating a file, grep `reports/` for the symptom (exact error string first, then topic words). Hit → append/chain instead of duplicating.
 
 ## Report structure — literal headings, greppable
@@ -33,12 +33,12 @@ docs/src/content/docs/reports/
 ---
 title: Starlight ≥0.39 sidebar autogenerate breaking change
 description: astro build fails "Found an autogenerate object with a label" — sidebar syntax changed in Starlight 0.39.
-date: 2026-07-07
+date: 2026-07-08
 severity: medium
 tags: [tech/astro, tech/starlight, kind/breaking-change, area/build]
 sidebar:
-  label: 2026-07-07 Starlight sidebar breaking change
-  order: -1783382400000   # -(unix epoch MILLIS of first hit) → newest sorts top, no ties
+  label: 2026-07-08 Starlight sidebar breaking change
+  order: -1783468800123   # -(unix epoch MILLIS when report was written) → newest sorts top, no ties
 ---
 
 ## Symptom
@@ -110,16 +110,16 @@ Concrete steps / diff. Use ```diff fences.
 | 2026-07-07 | scaffold test | — | first hit |
 ```
 
-- **Frontmatter**: `title` + `description` required (description carries symptom keywords — llms.txt index + customSets entry text). `date` = first hit of this month's file. `severity` — impact when it hit: `critical` = data loss / prod down / money wrong; `high` = prod user-facing impact or blocked release; `medium` = dev-time sink, wrong builds, flaky CI; `low` = annoyance/papercut; `info` = no failure — a reference/mapping/informational report (e.g. "topics & consumers of X"), not an incident. `tags` — scoped format `<scope>/<item>`, three fixed scopes:
+- **Frontmatter**: `title` + `description` required (description carries symptom keywords — llms.txt index + customSets entry text). `date` = date the report file was written; its month determines the `<yyyy-mm>` filename. Incident dates stay in the body and Recurrence log. `severity` — impact when it hit: `critical` = data loss / prod down / money wrong; `high` = prod user-facing impact or blocked release; `medium` = dev-time sink, wrong builds, flaky CI; `low` = annoyance/papercut; `info` = no failure — a reference/mapping/informational report (e.g. "topics & consumers of X"), not an incident. `tags` — scoped format `<scope>/<item>`, three fixed scopes:
   - `tech/<name>` — technology/dependency involved (`tech/astro`, `tech/postgres`). Kebab-case, no versions (`tech/postgres` not `tech/postgresql16`).
   - `kind/<name>` — failure kind (`kind/breaking-change`, `kind/race-condition`, `kind/config-error`, `kind/oom`, `kind/n-plus-one`, `kind/vendor-quirk`).
   - `area/<name>` — repo subsystem hit (`area/build`, `area/ci`, `area/auth`, `area/ingest`).
 
   Scoped tags = quick lookup per axis: `grep -rl "kind/breaking-change" docs/src/content/docs/reports/` answers "breaking change apa saja yang pernah kena", `grep -rl "tech/kafka"` answers "semua lesson Kafka". At least one tag per scope when applicable. **Discover before minting** — reuse existing spellings, never scope-less tags: `grep -rhoE '(tech|kind|area)/[a-z0-9.+-]+' docs/src/content/docs/reports/ | sort -u`. Recurrence with worse impact → bump `severity` up (never down).
 - **`sidebar` — REQUIRED** (this is what puts the report in the sidebar under the Reports group):
-  - `sidebar.label` = `<yyyy-mm-dd> <short topic>` — full first-hit date, then a concise topic (not the whole `title`). This is the sidebar text, e.g. `2026-07-07 Starlight sidebar breaking change`.
-  - `sidebar.order` = **negative unix epoch milliseconds** of the first hit — `-$(node -p Date.now())` at creation (e.g. `-1783382400000`; portable alt: `-$(python3 -c 'import time;print(int(time.time()*1000))')`). Starlight sorts ascending (lower = higher), so the most negative sorts first → **newest report on top**. Millisecond granularity means two reports minted the same second still never tie (`-<yyyymmdd>` or even `-<epoch-secs>` could). Index is pinned above every report with `order: -1000000000000000` (`-1e15` — more negative than any ms epoch until ~year 33000, still inside JS's safe-integer range `9.007e15`).
-  - Monthly cadence unchanged: filename stays `<yyyy-mm>-<topic>.mdx` and recurrences still append to it. The date in `sidebar.label`/`order` is the **first hit** and does NOT change on recurrence (the Recurrence log carries later dates). New-month chain file → its own `sidebar.label`/`order` with the new date.
+  - `sidebar.label` = `<yyyy-mm-dd> <short topic>` — full report-written date, then a concise topic (not the whole `title`). This is the sidebar text, e.g. `2026-07-08 Starlight sidebar breaking change`.
+  - `sidebar.order` = **negative unix epoch milliseconds when the report was written** — `-$(node -p Date.now())` at creation (e.g. `-1783468800123`; portable alt: `-$(python3 -c 'import time;print(int(time.time()*1000))')`). Starlight sorts ascending (lower = higher), so the most negative sorts first → **newest report on top**. Millisecond granularity means two reports minted the same second still never tie (`-<yyyymmdd>` or even `-<epoch-secs>` could). Index is pinned above every report with `order: -1000000000000000` (`-1e15` — more negative than any ms epoch until ~year 33000, still inside JS's safe-integer range `9.007e15`).
+  - Monthly cadence uses the **report date**: filename `<report-yyyy-mm>-<topic>.mdx`, frontmatter `date`, `sidebar.label`, and `sidebar.order` are set when that report file is written and stay fixed when same-month recurrences append. Incident and recurrence dates live in the body and Recurrence log. A new-month chain file gets its own report date and write timestamp.
 - **Symptom quoted verbatim in a code fence** — non-negotiable. It is the RAG/grep key: paste the error → find the report.
 - **Telemetry — MANDATORY when a trace existed during debugging**, omit the section entirely otherwise. Record the trace ID verbatim (grep/Tempo/Grafana lookup key later) and DRAW the spans as a mermaid `gantt` waterfall: `section` per service, one bar per span with duration, `:crit` on the failing/slow span. **Relevant spans only** — the 3–8 that tell the story, never the full trace dump. Span attributes follow telemetry redaction tiers (secrets never; account handles OK).
 - **Offending code — MANDATORY when the culprit was identified**, omit otherwise. Extract the actual snippet as it was WHEN THE BUG HIT (pre-fix — the Fix section shows the after). This is real repo source, so it MUST carry `title="<repo-relative path>"` + `showLineNumbers startLineNumber=<first line>`, plus `{n}` highlight on the guilty line(s) and an inline comment stating what's wrong. Snippet only — the function/block that matters, not the whole file. If you must elide middle lines (`// ...`), drop `showLineNumbers` and put `path:line` in the `title` instead (the gutter can't stay honest across a gap). Redaction tiers apply.
@@ -134,7 +134,7 @@ Concrete steps / diff. Use ```diff fences.
 
 ## Index of Reports — update EVERY write
 
-`reports/index.mdx` sits at the top of the Reports sidebar group (individual reports list below it); it is also the summary page. On every new report or recurrence, update its table (newest month first):
+`reports/index.mdx` sits at the top of the Reports sidebar group (individual reports list below it); it is also the summary page. On every new report or recurrence, update its table (newest report month first):
 
 ```mdx
 ---
@@ -179,7 +179,7 @@ starlightLlmsTxt({
 ## Checklist per report
 
 1. Grep `reports/` for existing symptom → append/chain vs new file.
-2. Write/update `<yyyy-mm>-<topic>.mdx` per structure above — incl. `sidebar.label` (`<yyyy-mm-dd> <topic>`) + `sidebar.order` (`-$(node -p Date.now())`, negative epoch millis) so it lands in the sidebar, newest-first, no ties.
+2. Write/update `<report-yyyy-mm>-<topic>.mdx` per structure above — set frontmatter `date` and `sidebar.label` from the report-written date, plus `sidebar.order` from `-$(node -p Date.now())`, so it lands in the sidebar newest-first with no ties. Record incident dates in the body and Recurrence log.
 3. Update `reports/index.mdx` table.
 4. Append `customSets` entry in `astro.config.mjs` (new files only).
 5. `npm run build` in the site dir — must exit 0; check `dist/_llms-txt/<slug>.txt` exists.
