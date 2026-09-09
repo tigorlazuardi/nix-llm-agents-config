@@ -38,6 +38,32 @@ let
   };
   darwinEvaluation = builtins.tryEval darwin.config.home.activationPackage.drvPath;
   disabled = evaluate { programs.pi-coding-agent.enable = false; };
+  validatedTerminalBrowserPlatform = pkgs.stdenv.hostPlatform.system == "x86_64-linux";
+  terminalBrowserEnabled =
+    if validatedTerminalBrowserPlatform then
+      evaluate {
+        programs.pi-coding-agent.terminalBrowser.enable = true;
+        programs.herdr.enable = true;
+      }
+    else
+      null;
+  terminalBrowserWithoutPi = evaluate {
+    programs.pi-coding-agent = {
+      enable = false;
+      terminalBrowser.enable = true;
+    };
+    programs.herdr.enable = true;
+  };
+  unsupportedTerminalBrowser =
+    if validatedTerminalBrowserPlatform then
+      null
+    else
+      evaluate { programs.pi-coding-agent.terminalBrowser.enable = true; };
+  unsupportedTerminalBrowserEvaluation =
+    if validatedTerminalBrowserPlatform then
+      null
+    else
+      builtins.tryEval (builtins.deepSeq unsupportedTerminalBrowser.config.home.activationPackage true);
   localUpdaterEnabled = evaluate { programs.pi-coding-agent.localUpdater.enable = true; };
   localUpdaterSshConfigFile = "/run/user/1000/ssh config'quoted";
   localUpdaterSshConfigured = evaluate {
@@ -303,6 +329,7 @@ let
     browserExecutable = expectedBrowserExecutable;
   };
   expectedBrowserGoblinPath = "${expectedBrowserGoblin}/lib/node_modules/browser-goblin";
+  expectedTerminalBrowser = pkgs.callPackage ./packages/terminal-browser.nix { };
   expectedPixOptimizer = pkgs.callPackage ./packages/pix-optimizer.nix { };
   expectedPixOptimizerPath = "${expectedPixOptimizer}/lib/node_modules/@xynogen/pix-optimizer";
   expectedPixTools = pkgs.callPackage ./packages/pix-tools.nix { };
@@ -374,6 +401,11 @@ in
   pi-cache-optimizer = expectedCacheOptimizer;
   mcp-adapter = expectedMcpAdapter;
   browser-goblin = expectedBrowserGoblin;
+  terminal-browser =
+    if validatedTerminalBrowserPlatform then
+      expectedTerminalBrowser
+    else
+      pkgs.runCommandLocal "terminal-browser-unsupported-platform" { } "touch $out";
   pix-optimizer = expectedPixOptimizer;
   pix-tools = expectedPixTools;
   pi-vcc = expectedPiVcc;
@@ -415,6 +447,35 @@ in
         relayConfigured.config.launchd.agents.remote-pi-relay.config.EnvironmentVariables.REMOTEPI_RELAY_HOST
         == "127.0.0.2";
     assert expectedBrowserGoblin.agentBrowserVersion == pkgs.agent-browser.version;
+    assert !default.config.programs.pi-coding-agent.terminalBrowser.enable;
+    assert !(default.config.programs.pi-coding-agent.skills ? terminal-browser);
+    assert
+      if validatedTerminalBrowserPlatform then
+        !(builtins.elem expectedTerminalBrowser default.config.home.packages)
+      else
+        true;
+    assert !((default.config.programs.herdr.settings.experimental or { }) ? kitty_graphics);
+    assert
+      if validatedTerminalBrowserPlatform then
+        terminalBrowserEnabled.config.programs.pi-coding-agent.terminalBrowser.enable
+        &&
+          terminalBrowserEnabled.config.programs.pi-coding-agent.skills.terminal-browser
+          == ./config/skills/terminal-browser
+        && builtins.elem expectedTerminalBrowser terminalBrowserEnabled.config.home.packages
+        && terminalBrowserEnabled.config.programs.herdr.settings.experimental.kitty_graphics
+        &&
+          terminalBrowserEnabled.config.home.file."${terminalBrowserEnabled.config.programs.pi-coding-agent.configDir}/skills".source.entries.terminal-browser
+          == ./config/skills/terminal-browser
+      else
+        !unsupportedTerminalBrowserEvaluation.success;
+    assert !(terminalBrowserWithoutPi.config.programs.pi-coding-agent.skills ? terminal-browser);
+    assert
+      if validatedTerminalBrowserPlatform then
+        !(builtins.elem expectedTerminalBrowser terminalBrowserWithoutPi.config.home.packages)
+      else
+        true;
+    assert
+      !((terminalBrowserWithoutPi.config.programs.herdr.settings.experimental or { }) ? kitty_graphics);
     assert !disabled.config.programs.pi-coding-agent.enable;
     assert !default.config.programs.pi-coding-agent.localUpdater.enable;
     assert default.config.programs.pi-coding-agent.localUpdater.ssh.configFile == null;
@@ -981,6 +1042,44 @@ in
         touch $out
       '';
 
+  terminal-browser-smoke =
+    if validatedTerminalBrowserPlatform then
+      pkgs.runCommandLocal "terminal-browser-smoke"
+        {
+          nativeBuildInputs = [ expectedTerminalBrowser ];
+        }
+        ''
+          export HOME="$TMPDIR/home"
+          export XDG_CACHE_HOME="$HOME/cache"
+          export XDG_CONFIG_HOME="$HOME/config"
+          export XDG_DATA_HOME="$HOME/data"
+          export XDG_STATE_HOME="$HOME/state"
+          mkdir -p "$HOME"
+
+          terminal-browser --version | grep -Fx 'terminal-browser v0.8.1'
+          terminal-browser help > help.log
+          terminal-browser action --help > action-help.log
+          grep -F 'Open the browser in a terminal pane' help.log
+          grep -F 'agent-browser compatible CLI' action-help.log
+          test -z "$(find "$HOME" -mindepth 1 -print -quit)"
+          test -z "$(find ${expectedTerminalBrowser} -type d -name node_modules -print -quit)"
+
+          if terminal-browser setup > setup.log 2>&1; then
+            echo 'terminal-browser setup unexpectedly succeeded' >&2
+            exit 1
+          fi
+          grep -F 'setup is managed by Nix' setup.log
+          if terminal-browser upgrade > upgrade.log 2>&1; then
+            echo 'terminal-browser upgrade unexpectedly succeeded' >&2
+            exit 1
+          fi
+          grep -F 'upgrades are managed by Nix' upgrade.log
+          test -z "$(find "$HOME" -mindepth 1 -print -quit)"
+          touch $out
+        ''
+    else
+      pkgs.runCommandLocal "terminal-browser-smoke-unsupported-platform" { } "touch $out";
+
   formatting =
     pkgs.runCommandLocal "pi-home-manager-formatting"
       {
@@ -994,7 +1093,7 @@ in
         ];
       }
       ''
-        nixfmt --check ${./flake.nix} ${./checks.nix} ${./modules/pi-coding-agent.nix} ${./modules/remote-pi-relay.nix} ${./modules/pi-coding-agent/agents.nix} ${./modules/pi-coding-agent/default-agents.nix} ${./modules/pi-coding-agent/pi-herdr-subagents.nix} ${./packages/pi-diet-lsp.nix} ${./packages/pi-commandcode-provider.nix} ${./packages/pi-effort.nix} ${./packages/pi-timestamps.nix} ${./packages/pi-herdr.nix} ${./packages/pi-herdr-sudo-task.nix} ${./packages/pi-ask-herdr.nix} ${./packages/pi-herdr-rename.nix} ${./packages/pi-patty-bg-tasks.nix} ${./packages/remote-pi.nix} ${./packages/remote-pi-config-updater.nix} ${./packages/remote-pi-relay.nix} ${./packages/pi-vimmode.nix} ${./packages/pi-usage.nix} ${./packages/pi-cache-optimizer.nix} ${./packages/pi-mcp-adapter.nix} ${./packages/browser-goblin.nix} ${./packages/pix-optimizer.nix} ${./packages/pix-tools.nix} ${./packages/pi-vcc.nix} ${./packages/pi-prompt-template-model.nix} ${./packages/pi-todo-herdr.nix} ${./packages/pi-rules.nix} ${./packages/pi-web-access.nix} ${./packages/pi-herdr-subagents.nix} ${./packages/pi-vision-handoff.nix} ${./packages/pi-vision-handoff-config-updater.nix} ${./packages/supi-context.nix} ${./packages/supi-extras.nix} ${./packages/toon.nix}
+        nixfmt --check ${./flake.nix} ${./checks.nix} ${./modules/pi-coding-agent.nix} ${./modules/remote-pi-relay.nix} ${./modules/pi-coding-agent/agents.nix} ${./modules/pi-coding-agent/default-agents.nix} ${./modules/pi-coding-agent/pi-herdr-subagents.nix} ${./packages/pi-diet-lsp.nix} ${./packages/pi-commandcode-provider.nix} ${./packages/pi-effort.nix} ${./packages/pi-timestamps.nix} ${./packages/pi-herdr.nix} ${./packages/pi-herdr-sudo-task.nix} ${./packages/pi-ask-herdr.nix} ${./packages/pi-herdr-rename.nix} ${./packages/pi-patty-bg-tasks.nix} ${./packages/remote-pi.nix} ${./packages/remote-pi-config-updater.nix} ${./packages/remote-pi-relay.nix} ${./packages/pi-vimmode.nix} ${./packages/pi-usage.nix} ${./packages/pi-cache-optimizer.nix} ${./packages/pi-mcp-adapter.nix} ${./packages/browser-goblin.nix} ${./packages/terminal-browser.nix} ${./packages/pix-optimizer.nix} ${./packages/pix-tools.nix} ${./packages/pi-vcc.nix} ${./packages/pi-prompt-template-model.nix} ${./packages/pi-todo-herdr.nix} ${./packages/pi-rules.nix} ${./packages/pi-web-access.nix} ${./packages/pi-herdr-subagents.nix} ${./packages/pi-vision-handoff.nix} ${./packages/pi-vision-handoff-config-updater.nix} ${./packages/supi-context.nix} ${./packages/supi-extras.nix} ${./packages/toon.nix}
         WORKFLOW=${./.github/workflows/daily-update.yml} UPDATER=${./scripts/daily-update.sh} REGISTRY=${./pi-plugins.json} CHECKS=${./checks.nix} MISSING_INTEGRITY_FIXTURE=${./tests/fixtures/npm-lock-missing-integrity.json} CONTROL_RESOLVED_FIXTURE=${./tests/fixtures/npm-lock-control-resolved.json} bash ${./tests/daily-updater-self-check.sh}
         RUNNER=${./scripts/local-update.sh} PROMPT=${./scripts/local-update-recovery.md} bash ${./tests/local-updater-self-check.sh}
         touch $out
