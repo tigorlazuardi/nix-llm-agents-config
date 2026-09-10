@@ -455,6 +455,7 @@ in
       else
         true;
     assert !((default.config.programs.herdr.settings.terminal or { }) ? kitty_graphics);
+    assert !((default.config.programs.herdr.settings.experimental or { }) ? kitty_graphics);
     assert
       if validatedTerminalBrowserPlatform then
         terminalBrowserEnabled.config.programs.pi-coding-agent.terminalBrowser.enable
@@ -463,6 +464,7 @@ in
           == ./config/skills/terminal-browser
         && builtins.elem expectedTerminalBrowser terminalBrowserEnabled.config.home.packages
         && terminalBrowserEnabled.config.programs.herdr.settings.terminal.kitty_graphics
+        && terminalBrowserEnabled.config.programs.herdr.settings.experimental.kitty_graphics
         &&
           terminalBrowserEnabled.config.home.file."${terminalBrowserEnabled.config.programs.pi-coding-agent.configDir}/skills".source.entries.terminal-browser
           == ./config/skills/terminal-browser
@@ -476,6 +478,8 @@ in
         true;
     assert
       !((terminalBrowserWithoutPi.config.programs.herdr.settings.terminal or { }) ? kitty_graphics);
+    assert
+      !((terminalBrowserWithoutPi.config.programs.herdr.settings.experimental or { }) ? kitty_graphics);
     assert !disabled.config.programs.pi-coding-agent.enable;
     assert !default.config.programs.pi-coding-agent.localUpdater.enable;
     assert default.config.programs.pi-coding-agent.localUpdater.ssh.configFile == null;

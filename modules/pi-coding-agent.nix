@@ -560,6 +560,11 @@ in
       cfg.enable && terminalBrowser.enable && config.programs.herdr.enable
     ) (lib.mkDefault true);
 
+    # Herdr 0.8.2 reads only the legacy location; remove after requiring Herdr 0.9+.
+    programs.herdr.settings.experimental.kitty_graphics = lib.mkIf (
+      cfg.enable && terminalBrowser.enable && config.programs.herdr.enable
+    ) (lib.mkDefault true);
+
     home.activation.localUpdaterState =
       lib.mkIf (cfg.enable && localUpdater.enable && pkgs.stdenv.hostPlatform.isLinux)
         (
