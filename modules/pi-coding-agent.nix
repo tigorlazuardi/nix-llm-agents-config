@@ -556,7 +556,7 @@ in
 
     programs.mcp.enable = lib.mkIf (cfg.enable && mcpPlugin.enable) (lib.mkDefault true);
 
-    programs.herdr.settings.experimental.kitty_graphics = lib.mkIf (
+    programs.herdr.settings.terminal.kitty_graphics = lib.mkIf (
       cfg.enable && terminalBrowser.enable && config.programs.herdr.enable
     ) (lib.mkDefault true);
 
