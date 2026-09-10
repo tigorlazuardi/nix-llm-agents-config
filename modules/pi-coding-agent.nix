@@ -11,16 +11,11 @@
 let
   cfg = config.programs.pi-coding-agent;
   localUpdater = cfg.localUpdater;
-  terminalBrowser = cfg.terminalBrowser;
-  herdrPackage = config.programs.herdr.package;
-  terminalBrowserHerdrEnabled = cfg.enable && terminalBrowser.enable && config.programs.herdr.enable;
-  herdrUsesCanonicalKittyGraphics =
-    herdrPackage != null && lib.versionAtLeast (lib.getVersion herdrPackage) "0.9";
   repoSkills = lib.mapAttrs (name: _: ../config/skills + "/${name}") (
     # ponytail: temporarily exclude tuxedo-todo; remove name check to restore it.
-    lib.filterAttrs (
-      name: type: type == "directory" && name != "tuxedo-todo" && name != "terminal-browser"
-    ) (builtins.readDir ../config/skills)
+    lib.filterAttrs (name: type: type == "directory" && name != "tuxedo-todo") (
+      builtins.readDir ../config/skills
+    )
   );
   grillingStopInstruction = "Stop asking questions when we reach a shared understanding and big decision was already made, because relatively smaller decisions would automatically derive.";
   appendMattSkillInstruction =
@@ -99,7 +94,6 @@ let
   browserGoblin = pinnedPkgs.callPackage ../packages/browser-goblin.nix {
     browserExecutable = cfg.plugins.browser-goblin.executablePath;
   };
-  terminalBrowserPackage = pinnedPkgs.callPackage ../packages/terminal-browser.nix { };
   pixOptimizer = pinnedPkgs.callPackage ../packages/pix-optimizer.nix { };
   toon = pinnedPkgs.callPackage ../packages/toon.nix { };
   pixTools = pinnedPkgs.callPackage ../packages/pix-tools.nix { };
@@ -381,9 +375,6 @@ in
     ./pi-coding-agent/pi-herdr-subagents.nix
   ];
 
-  options.programs.pi-coding-agent.terminalBrowser.enable =
-    lib.mkEnableOption "the x86_64-linux terminal-browser companion and Pi skill";
-
   options.programs.pi-coding-agent.localUpdater = {
     enable = lib.mkEnableOption "the Linux user timer for deterministic local updates with one-shot Pi recovery";
 
@@ -536,11 +527,6 @@ in
     assertions = [
       {
         assertion =
-          !(cfg.enable && terminalBrowser.enable) || pkgs.stdenv.hostPlatform.system == "x86_64-linux";
-        message = "programs.pi-coding-agent.terminalBrowser supports only validated platform x86_64-linux";
-      }
-      {
-        assertion =
           !(cfg.enable && mcpPlugin.enable && mcpPlugin.enableMcpIntegration && config.programs.mcp.enable)
           || disabledMcpServerNames == [ ];
         message = "pi-mcp-adapter cannot safely integrate disabled programs.mcp servers: ${lib.concatStringsSep ", " disabledMcpServerNames}";
@@ -559,15 +545,6 @@ in
     ];
 
     programs.mcp.enable = lib.mkIf (cfg.enable && mcpPlugin.enable) (lib.mkDefault true);
-
-    programs.herdr.settings.terminal.kitty_graphics = lib.mkIf (
-      terminalBrowserHerdrEnabled && herdrUsesCanonicalKittyGraphics
-    ) (lib.mkDefault true);
-
-    # A null package has no evaluable version, so retain the Herdr 0.8-compatible key.
-    programs.herdr.settings.experimental.kitty_graphics = lib.mkIf (
-      terminalBrowserHerdrEnabled && !herdrUsesCanonicalKittyGraphics
-    ) (lib.mkDefault true);
 
     home.activation.localUpdaterState =
       lib.mkIf (cfg.enable && localUpdater.enable && pkgs.stdenv.hostPlatform.isLinux)
@@ -650,7 +627,6 @@ in
         [ pinnedPkgs.oscclip ]
         ++ lib.optional optimizerPlugin.enable pinnedPkgs.rtk
         ++ lib.optional optimizerPlugin.enable toon
-        ++ lib.optional terminalBrowser.enable terminalBrowserPackage
       );
       sessionVariables = lib.mkIf cfg.enable (
         {
@@ -684,13 +660,7 @@ in
         dev-journal = lib.mkDefault ../config/extensions/dev-journal;
         lazy-tools = lib.mkDefault ../config/extensions/lazy-tools;
       };
-      skills = lib.mapAttrs (_: lib.mkDefault) (
-        repoSkills
-        // patchedMattSkills
-        // lib.optionalAttrs (cfg.enable && terminalBrowser.enable) {
-          terminal-browser = ../config/skills/terminal-browser;
-        }
-      );
+      skills = lib.mapAttrs (_: lib.mkDefault) (repoSkills // patchedMattSkills);
     };
 
     home.file = lib.mkIf cfg.enable {
