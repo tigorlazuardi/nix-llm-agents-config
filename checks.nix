@@ -47,6 +47,20 @@ let
       }
     else
       null;
+  terminalBrowserWithHerdr09 =
+    if validatedTerminalBrowserPlatform then
+      evaluate {
+        programs.pi-coding-agent.terminalBrowser.enable = true;
+        programs.herdr = {
+          enable = true;
+          package = pkgs.herdr.overrideAttrs (_: {
+            version = "0.9.0";
+            __intentionallyOverridingVersion = true;
+          });
+        };
+      }
+    else
+      null;
   terminalBrowserWithoutPi = evaluate {
     programs.pi-coding-agent = {
       enable = false;
@@ -463,8 +477,12 @@ in
           terminalBrowserEnabled.config.programs.pi-coding-agent.skills.terminal-browser
           == ./config/skills/terminal-browser
         && builtins.elem expectedTerminalBrowser terminalBrowserEnabled.config.home.packages
-        && terminalBrowserEnabled.config.programs.herdr.settings.terminal.kitty_graphics
+        && !((terminalBrowserEnabled.config.programs.herdr.settings.terminal or { }) ? kitty_graphics)
         && terminalBrowserEnabled.config.programs.herdr.settings.experimental.kitty_graphics
+        && terminalBrowserWithHerdr09.config.programs.herdr.settings.terminal.kitty_graphics
+        && !(
+          (terminalBrowserWithHerdr09.config.programs.herdr.settings.experimental or { }) ? kitty_graphics
+        )
         &&
           terminalBrowserEnabled.config.home.file."${terminalBrowserEnabled.config.programs.pi-coding-agent.configDir}/skills".source.entries.terminal-browser
           == ./config/skills/terminal-browser

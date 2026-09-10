@@ -12,6 +12,10 @@ let
   cfg = config.programs.pi-coding-agent;
   localUpdater = cfg.localUpdater;
   terminalBrowser = cfg.terminalBrowser;
+  herdrPackage = config.programs.herdr.package;
+  terminalBrowserHerdrEnabled = cfg.enable && terminalBrowser.enable && config.programs.herdr.enable;
+  herdrUsesCanonicalKittyGraphics =
+    herdrPackage != null && lib.versionAtLeast (lib.getVersion herdrPackage) "0.9";
   repoSkills = lib.mapAttrs (name: _: ../config/skills + "/${name}") (
     # ponytail: temporarily exclude tuxedo-todo; remove name check to restore it.
     lib.filterAttrs (
@@ -557,12 +561,12 @@ in
     programs.mcp.enable = lib.mkIf (cfg.enable && mcpPlugin.enable) (lib.mkDefault true);
 
     programs.herdr.settings.terminal.kitty_graphics = lib.mkIf (
-      cfg.enable && terminalBrowser.enable && config.programs.herdr.enable
+      terminalBrowserHerdrEnabled && herdrUsesCanonicalKittyGraphics
     ) (lib.mkDefault true);
 
-    # Herdr 0.8.2 reads only the legacy location; remove after requiring Herdr 0.9+.
+    # A null package has no evaluable version, so retain the Herdr 0.8-compatible key.
     programs.herdr.settings.experimental.kitty_graphics = lib.mkIf (
-      cfg.enable && terminalBrowser.enable && config.programs.herdr.enable
+      terminalBrowserHerdrEnabled && !herdrUsesCanonicalKittyGraphics
     ) (lib.mkDefault true);
 
     home.activation.localUpdaterState =
