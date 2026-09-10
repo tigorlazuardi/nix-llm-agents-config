@@ -8,13 +8,14 @@ description: Visible human review and co-browsing in a terminal companion pane, 
 Use terminal-browser only for a visible, human-in-the-loop tab. Route autonomous testing, debugging, visual QA, and unattended browser work to browser-goblin.
 
 1. Verify Herdr and kitty graphics are available. If pane splitting or graphics support is absent, report that prerequisite explicitly and stop.
-2. Open the shared page beside the user:
+2. If Herdr is remote, warn before opening: visible rendering may be severely laggy even when local graphical Herdr and plain SSH are smooth, and reducing pane width did not help in the observed setup. Recommend local graphical Herdr or plain SSH; continue remotely only when the human accepts the lag.
+3. Open the shared page beside the user:
    ```sh
    terminal-browser open --split right <url>
    ```
-3. Announce agent control before acting. The human and browser-goblin must leave this tab untouched until release.
-4. Use `terminal-browser action -- snapshot`, then `click`, `fill`, or `eval` as needed. Keep every action on the same visible tab; inspect `terminal-browser ls` when target selection is ambiguous.
-5. Run `terminal-browser action done` after the final action or immediately after a failure. Announce that control is released.
+4. Announce agent control before acting. The human and browser-goblin must leave this tab untouched until release.
+5. Use `terminal-browser action -- snapshot`, then `click`, `fill`, or `eval` as needed. Keep every action on the same visible tab; inspect `terminal-browser ls` when target selection is ambiguous.
+6. Run `terminal-browser action done` after the final action or immediately after a failure. Announce that control is released.
 
 Ctrl+G on a selected element sends its DOM, React, and source context to the detected agent pane. Treat that handoff as the user's requested target, then follow the ownership sequence above.
 
