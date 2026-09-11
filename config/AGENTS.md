@@ -19,6 +19,7 @@ Agents execute small–medium work directly when scope is clear and reversible. 
 Process routing:
 - Long-lived processes (dev servers, watchers, log streams) → create a dedicated Herdr tab with `herdr_layout`, then run and control them through `herdr_pane`.
 - Finite background commands whose completion should wake the agent → use `bash` with `run_in_background=true`.
+- `nixos-rebuild switch` → load Herdr/elevation tools, then execute the exact command through `sudo_task`; do not probe direct `sudo` first.
 
 Mode router:
 - Small–medium coherent scope → main executes autonomously; no mode invocation required.
