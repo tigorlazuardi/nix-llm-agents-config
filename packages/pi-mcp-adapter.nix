@@ -18,12 +18,14 @@ buildNpmPackage {
     hash = lock.hash;
   };
 
-  # Upstream lock can omit integrity on nested registry dependencies.
+  # Upstream lock can omit integrity and spell the same pkg.pr.new dependency with different URLs.
   postPatch = ''
     ${lib.getExe nodejs} -e '
       const fs = require("fs");
       const manifest = JSON.parse(fs.readFileSync("package.json", "utf8"));
       delete manifest.devDependencies;
+      const core = "@modelcontextprotocol/core";
+      manifest.overrides = { ...(manifest.overrides || {}), [core]: manifest.dependencies[core] };
       fs.writeFileSync("package.json", JSON.stringify(manifest, null, 2) + "\n");
     '
     cp ${./pi-mcp-adapter-package-lock.json} package-lock.json
