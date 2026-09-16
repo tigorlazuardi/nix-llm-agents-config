@@ -762,7 +762,7 @@ in
     assert
       !(
         disabled.config.home.file
-        ? "${disabled.config.programs.pi-coding-agent.configDir}/pi-vcc-config.json"
+          ? "${disabled.config.programs.pi-coding-agent.configDir}/pi-vcc-config.json"
       );
     assert !(disabled.config.xdg.configFile ? "mcp/mcp.json");
     assert
@@ -778,12 +778,12 @@ in
     assert
       !(
         disabled.config.home.file
-        ? "${disabled.config.programs.pi-coding-agent.configDir}/extensions/artifact-preview"
+          ? "${disabled.config.programs.pi-coding-agent.configDir}/extensions/artifact-preview"
       );
     assert
       !(
         disabled.config.home.file
-        ? "${disabled.config.programs.pi-coding-agent.configDir}/extensions/dev-journal"
+          ? "${disabled.config.programs.pi-coding-agent.configDir}/extensions/dev-journal"
       );
     assert
       !(disabled.config.home.file ? "${disabled.config.programs.pi-coding-agent.configDir}/prompts");
@@ -808,24 +808,24 @@ in
     assert
       !(
         pluginsDisabled.config.home.file
-        ? "${pluginsDisabled.config.programs.pi-coding-agent.configDir}/mcp.json"
+          ? "${pluginsDisabled.config.programs.pi-coding-agent.configDir}/mcp.json"
       );
     assert
       !(
         pluginsDisabled.config.home.file
-        ? "${pluginsDisabled.config.programs.pi-coding-agent.configDir}/optimizer.json"
+          ? "${pluginsDisabled.config.programs.pi-coding-agent.configDir}/optimizer.json"
       );
     assert !(pluginsDisabled.config.home.sessionVariables ? PI_VCC_CONFIG_PATH);
     assert !(pluginsDisabled.config.home.sessionVariables ? PLAYWRIGHT_EXECUTABLE_PATH);
     assert
       !(
         pluginsDisabled.config.home.file
-        ? "${pluginsDisabled.config.programs.pi-coding-agent.configDir}/pi-vcc-config.json"
+          ? "${pluginsDisabled.config.programs.pi-coding-agent.configDir}/pi-vcc-config.json"
       );
     assert
       !(
         pluginsDisabled.config.home.file
-        ? "${pluginsDisabled.config.programs.pi-coding-agent.configDir}/agents/orchestrator.md"
+          ? "${pluginsDisabled.config.programs.pi-coding-agent.configDir}/agents/orchestrator.md"
       );
     assert overridden.config.programs.pi-coding-agent.package == overridePackage;
     assert builtins.elem overridePackage overridden.config.home.packages;
