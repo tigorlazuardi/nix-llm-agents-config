@@ -468,8 +468,8 @@ in
     assert default.config.programs.pi-coding-agent.package == expectedPackage;
     assert
       default.config.programs.pi-coding-agent.settings == {
-        defaultProvider = "openai-codex";
-        defaultModel = "gpt-5.6-sol";
+        defaultProvider = "zai";
+        defaultModel = "glm-5.3-flash";
         defaultThinkingLevel = "medium";
         quietStartup = true;
         theme = "dark";
@@ -687,10 +687,13 @@ in
     assert builtins.length (builtins.attrNames default.config.programs.pi-coding-agent.agents) == 7;
     assert !(builtins.hasAttr "frontier-implementer" default.config.programs.pi-coding-agent.agents);
     assert !(builtins.hasAttr "frontier-reviewer" default.config.programs.pi-coding-agent.agents);
-    assert default.config.programs.pi-coding-agent.agents.implementer.model == "gpt-5.6-sol";
-    assert default.config.programs.pi-coding-agent.agents.reviewer.model == "gpt-5.6-sol";
+    assert
+      default.config.programs.pi-coding-agent.agents.implementer.model == "openai-codex/gpt-5.6-sol";
+    assert default.config.programs.pi-coding-agent.agents.reviewer.model == "openai-codex/gpt-5.6-sol";
     assert default.config.programs.pi-coding-agent.agents.reviewer.effort == "high";
-    assert default.config.programs.pi-coding-agent.agents.standards-reviewer.model == "gpt-5.6-terra";
+    assert
+      default.config.programs.pi-coding-agent.agents.standards-reviewer.model
+      == "openai-codex/gpt-5.6-terra";
     assert default.config.programs.pi-coding-agent.agents.standards-reviewer.effort == "high";
     assert
       default.config.home.file."${default.config.programs.pi-coding-agent.configDir}/agents/orchestrator.md".text

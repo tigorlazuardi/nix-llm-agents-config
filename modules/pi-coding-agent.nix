@@ -265,8 +265,8 @@ let
     builtins.filter (plugin: cfg.plugins.${plugin.name}.enable) pluginPackages
   );
   defaultSettings = {
-    defaultProvider = "openai-codex";
-    defaultModel = "gpt-5.6-sol";
+    defaultProvider = "zai";
+    defaultModel = "glm-5.3-flash";
     defaultThinkingLevel = "medium";
     quietStartup = true;
     theme = "dark";
