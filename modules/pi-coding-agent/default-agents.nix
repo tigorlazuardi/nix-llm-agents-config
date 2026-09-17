@@ -2,8 +2,8 @@
   implementer = {
     description = "Sol implementation worker";
     prompt = ../../config/agents/implementer.md;
-    model = "openai-codex/gpt-5.6-sol";
-    effort = "medium";
+    model = "zai/glm-5.3-flash";
+    effort = "high";
     tools.allow = [
       "read"
       "bash"
@@ -16,8 +16,8 @@
   orchestrator = {
     description = "Deterministic black-box one-shot state machine";
     prompt = ../../config/agents/orchestrator.md;
-    model = "openai-codex/gpt-5.6-terra";
-    effort = "medium";
+    model = "zai/glm-5.3-flash";
+    effort = "high";
     tools.allow = [
       "read"
       "bash"
@@ -27,7 +27,7 @@
   planner = {
     description = "Sol planner and SCOPE/ADR drafter";
     prompt = ../../config/agents/planner.md;
-    model = "openai-codex/gpt-5.6-sol";
+    model = "zai/glm-5.3";
     effort = "high";
     tools.allow = [
       "read"
@@ -40,7 +40,7 @@
   reviewer = {
     description = "Sol reviewer; spec axis";
     prompt = ../../config/agents/reviewer.md;
-    model = "openai-codex/gpt-5.6-sol";
+    model = "zai/glm-5.3";
     effort = "high";
     tools.allow = [
       "read"
@@ -53,7 +53,7 @@
   standards-reviewer = {
     description = "Terra reviewer; standards axis";
     prompt = ../../config/agents/reviewer.md;
-    model = "openai-codex/gpt-5.6-terra";
+    model = "zai/glm-5.3";
     effort = "high";
     tools.allow = [
       "read"
@@ -66,8 +66,8 @@
   scout = {
     description = "Fast read-only code locator; Luna leaf";
     prompt = ../../config/agents/scout.md;
-    model = "openai-codex/gpt-5.6-luna";
-    effort = "medium";
+    model = "zai/glm-5.3-flash";
+    effort = "high";
     tools.allow = [
       "read"
       "grep"
@@ -78,8 +78,8 @@
   support = {
     description = "Terra docs, research, and synthesis";
     prompt = ../../config/agents/support.md;
-    model = "openai-codex/gpt-5.6-terra";
-    effort = "medium";
+    model = "zai/glm-5.3-flash";
+    effort = "high";
     tools.allow = [
       "read"
       "bash"

@@ -255,8 +255,8 @@ let
     ---
     name: "orchestrator"
     description: "Deterministic black-box one-shot state machine"
-    model: "openai-codex/gpt-5.6-terra"
-    thinking: "medium"
+    model: "zai/glm-5.3-flash"
+    thinking: "high"
     tools: "read, bash, subagent"
     system-prompt: replace
     session-mode: standalone
@@ -698,13 +698,10 @@ in
     assert builtins.length (builtins.attrNames default.config.programs.pi-coding-agent.agents) == 7;
     assert !(builtins.hasAttr "frontier-implementer" default.config.programs.pi-coding-agent.agents);
     assert !(builtins.hasAttr "frontier-reviewer" default.config.programs.pi-coding-agent.agents);
-    assert
-      default.config.programs.pi-coding-agent.agents.implementer.model == "openai-codex/gpt-5.6-sol";
-    assert default.config.programs.pi-coding-agent.agents.reviewer.model == "openai-codex/gpt-5.6-sol";
+    assert default.config.programs.pi-coding-agent.agents.implementer.model == "zai/glm-5.3-flash";
+    assert default.config.programs.pi-coding-agent.agents.reviewer.model == "zai/glm-5.3";
     assert default.config.programs.pi-coding-agent.agents.reviewer.effort == "high";
-    assert
-      default.config.programs.pi-coding-agent.agents.standards-reviewer.model
-      == "openai-codex/gpt-5.6-terra";
+    assert default.config.programs.pi-coding-agent.agents.standards-reviewer.model == "zai/glm-5.3";
     assert default.config.programs.pi-coding-agent.agents.standards-reviewer.effort == "high";
     assert
       default.config.home.file."${default.config.programs.pi-coding-agent.configDir}/agents/orchestrator.md".text
