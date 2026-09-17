@@ -11,6 +11,11 @@ lock_file=$state_dir/update.lock
 summary=$state_dir/summary.md
 private_log=$state_dir/run.log
 prompt_file=${LOCAL_UPDATE_RECOVERY_PROMPT:?LOCAL_UPDATE_RECOVERY_PROMPT is required}
+recovery_model=${LOCAL_UPDATE_RECOVERY_MODEL:-}
+recovery_model_args=()
+if [ -n "$recovery_model" ]; then
+  recovery_model_args=(--model "$recovery_model")
+fi
 
 journal() { printf 'local-update: %s\n' "$1"; }
 fail() { journal "failed: $1"; exit 1; }
@@ -121,7 +126,7 @@ journal 'Pi recovery started'
 if ! (
   cd "$repo_dir"
   PI_OFFLINE=1 PI_TELEMETRY=0 pi --print --no-session --approve \
-    --model openai-codex/gpt-5.6-sol --thinking high \
+    "${recovery_model_args[@]}" --thinking high \
     --no-extensions --no-skills --no-prompt-templates --no-context-files \
     --tools read,bash,edit,write,grep,find,ls \
     "$(cat "$prompt_file")"

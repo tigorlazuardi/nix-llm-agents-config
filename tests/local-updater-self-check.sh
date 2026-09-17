@@ -48,9 +48,14 @@ printf '%s\n' pi >>"$TEST_EVENTS"
 printf '%s\n' pi >>"$PI_COUNT"
 printf '%s\n' "$*" >>"$PI_CALLS"
 args=" $* "
-for required in ' --print ' ' --no-session ' ' --approve ' ' --model openai-codex/gpt-5.6-sol ' ' --thinking high ' ' --no-extensions ' ' --no-skills ' ' --no-prompt-templates ' ' --no-context-files ' ' --tools read,bash,edit,write,grep,find,ls '; do
+for required in ' --print ' ' --no-session ' ' --approve ' ' --thinking high ' ' --no-extensions ' ' --no-skills ' ' --no-prompt-templates ' ' --no-context-files ' ' --tools read,bash,edit,write,grep,find,ls '; do
   case "$args" in *"$required"*) ;; *) exit 2 ;; esac
 done
+if [ -n "${EXPECTED_RECOVERY_MODEL_FLAG:-}" ]; then
+  case "$args" in *" $EXPECTED_RECOVERY_MODEL_FLAG "*) ;; *) exit 2 ;; esac
+else
+  case "$args" in *' --model '*) exit 2 ;; esac
+fi
 case "$args" in
   *'Never modify Git remotes'*'Never invoke scripts/local-update.sh'*) ;;
   *) exit 2 ;;
@@ -99,6 +104,17 @@ recovery_output=$(bash "$tmp/local-update.sh")
 [ ! -e "$LOCAL_UPDATE_STATE_DIR/repository/fail-input" ]
 [ "$(git --git-dir="$remote" log -1 --format=%s main)" = repair ]
 case "$recovery_output" in *RAW_OUTPUT_MUST_STAY_PRIVATE*) exit 1 ;; esac
+
+# A configured recovery model is forwarded verbatim as --model; unset stays omitted.
+push_failure
+: >"$PI_CALLS"
+: >"$PI_COUNT"
+export LOCAL_UPDATE_STATE_DIR="$tmp/pinned-model-state" TEST_EVENTS="$tmp/pinned-model-events"
+export EXPECTED_RECOVERY_MODEL_FLAG='--model openai-codex/gpt-5.6-sol'
+LOCAL_UPDATE_RECOVERY_MODEL='openai-codex/gpt-5.6-sol' bash "$tmp/local-update.sh" >/dev/null
+[ "$(cat "$TEST_EVENTS")" = $'inputs\nplugins\npi\nnix-fmt\nnix-flake\ninputs\nplugins' ]
+[ "$(wc -l <"$PI_COUNT")" -eq 1 ]
+unset EXPECTED_RECOVERY_MODEL_FLAG
 
 # A Pi failure or unpushed local state is discarded; deterministic verification remains failed.
 push_failure

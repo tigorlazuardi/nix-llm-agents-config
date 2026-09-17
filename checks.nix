@@ -39,6 +39,13 @@ let
   darwinEvaluation = builtins.tryEval darwin.config.home.activationPackage.drvPath;
   disabled = evaluate { programs.pi-coding-agent.enable = false; };
   localUpdaterEnabled = evaluate { programs.pi-coding-agent.localUpdater.enable = true; };
+  localUpdaterRecoveryModel = "openai-codex/gpt-5.6-sol";
+  localUpdaterRecoveryModelConfigured = evaluate {
+    programs.pi-coding-agent.localUpdater = {
+      enable = true;
+      recoveryModel = localUpdaterRecoveryModel;
+    };
+  };
   localUpdaterSshConfigFile = "/run/user/1000/ssh config'quoted";
   localUpdaterSshConfigured = evaluate {
     programs.pi-coding-agent.localUpdater = {
@@ -452,6 +459,10 @@ in
       localUpdaterEnabled.config.systemd.user.services.pi-coding-agent-local-update.Service.Environment;
     assert builtins.elem "PI_OFFLINE=1"
       localUpdaterEnabled.config.systemd.user.services.pi-coding-agent-local-update.Service.Environment;
+    assert
+      !builtins.elem "LOCAL_UPDATE_RECOVERY_MODEL=${localUpdaterRecoveryModel}" localUpdaterEnabled.config.systemd.user.services.pi-coding-agent-local-update.Service.Environment;
+    assert builtins.elem "LOCAL_UPDATE_RECOVERY_MODEL=${localUpdaterRecoveryModel}"
+      localUpdaterRecoveryModelConfigured.config.systemd.user.services.pi-coding-agent-local-update.Service.Environment;
     assert builtins.elem "PI_TELEMETRY=0"
       localUpdaterEnabled.config.systemd.user.services.pi-coding-agent-local-update.Service.Environment;
     assert

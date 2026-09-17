@@ -387,6 +387,16 @@ in
         The path is passed to packaged OpenSSH with `-F`; its contents remain outside the Nix store.
       '';
     };
+
+    recoveryModel = lib.mkOption {
+      type = lib.types.nullOr lib.types.str;
+      default = null;
+      description = ''
+        Explicit model for the recovery Pi invocation, forwarded as
+        `--model <value>`. When null, the invocation omits `--model` and
+        inherits the Pi settings default provider and model.
+      '';
+    };
   };
 
   options.programs.pi-coding-agent.plugins =
@@ -575,7 +585,10 @@ in
             ]
             ++ lib.optional (
               localUpdater.ssh.configFile != null
-            ) "GIT_SSH_COMMAND=${lib.getExe localUpdaterSshWrapper}";
+            ) "GIT_SSH_COMMAND=${lib.getExe localUpdaterSshWrapper}"
+            ++ lib.optional (
+              localUpdater.recoveryModel != null
+            ) "LOCAL_UPDATE_RECOVERY_MODEL=${localUpdater.recoveryModel}";
             TimeoutStartSec = "6h";
             UMask = "0077";
             ProtectSystem = "strict";
