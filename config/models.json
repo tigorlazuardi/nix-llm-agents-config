@@ -1,5 +1,10 @@
 {
   "providers": {
+    "zai": {
+      "compat": {
+        "sendSessionAffinityHeaders": true
+      }
+    },
     "openrouter": {
       "baseUrl": "https://openrouter.ai/api/v1",
       "api": "openai-completions",
