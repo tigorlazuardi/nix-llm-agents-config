@@ -28,14 +28,14 @@
     "owner": "sting8k",
     "repo": "pi-vcc",
     "tagPrefix": "v",
-    "version": "0.7.3",
-    "rev": "beb5b73f8a7aff4875198355e06b9cad9c347246",
-    "hash": "sha256-0ccTLbCP5tv5RoN2meQZTw+epEyMQUwhsKV7XRV2Q1Y=",
+    "version": "0.8.0",
+    "rev": "303e89dbaf69833012066d6f3d7dcbb8255be81e",
+    "hash": "sha256-cyGmKYPQW4apU9ec2HpWFE1SXTPCoscYV9wbD4e4uAs=",
     "removePaths": [
       "demo.gif"
     ],
     "check": "pi-vcc-load",
-    "src": "https://github.com/sting8k/pi-vcc/archive/beb5b73f8a7aff4875198355e06b9cad9c347246.tar.gz"
+    "src": "https://github.com/sting8k/pi-vcc/archive/303e89dbaf69833012066d6f3d7dcbb8255be81e.tar.gz"
   },
   "pi-prompt-template-model": {
     "strategy": "github",
