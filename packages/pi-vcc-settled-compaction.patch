@@ -1,4 +1,5 @@
 diff --git a/src/core/compact-args.ts b/src/core/compact-args.ts
+index 74f955b..cbfb222 100644
 --- a/src/core/compact-args.ts
 +++ b/src/core/compact-args.ts
 @@ -1,4 +1,5 @@
@@ -8,6 +9,7 @@ diff --git a/src/core/compact-args.ts b/src/core/compact-args.ts
  const KEEP_TOKEN_RE = /^keep:(\d+)$/;
  
 diff --git a/src/core/settings.ts b/src/core/settings.ts
+index a702b10..64fb910 100644
 --- a/src/core/settings.ts
 +++ b/src/core/settings.ts
 @@ -41,6 +41,15 @@ export interface PiVccSettings {
@@ -25,8 +27,8 @@ diff --git a/src/core/settings.ts b/src/core/settings.ts
 +  };
    /** Write debug snapshot to /tmp/pi-vcc-debug.json on each compaction. */
    debug: boolean;
- }
-@@ -49,6 +58,11 @@ export const DEFAULT_SETTINGS: PiVccSettings = {
+   /**
+@@ -66,6 +75,11 @@ export const DEFAULT_SETTINGS: PiVccSettings = {
    overrideDefaultCompaction: true,
    smartKeepTail: true,
    continueAfterThresholdCompact: true,
@@ -36,11 +38,11 @@ diff --git a/src/core/settings.ts b/src/core/settings.ts
 +    modelThresholdTokens: {},
 +  },
    debug: false,
- };
- 
-@@ -60,10 +74,39 @@ const readJson = (path: string): Record<string, unknown> | null => {
-   }
- };
+   skipForProviders: [],
+   skipCustomTypes: [],
+@@ -83,14 +97,40 @@ const readJson = (path: string): Record<string, unknown> | null => {
+ const coerceStringArray = (v: unknown): string[] =>
+   Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
  
 +const isPositiveInteger = (value: unknown): value is number =>
 +  typeof value === "number" && Number.isSafeInteger(value) && value > 0;
@@ -68,19 +70,20 @@ diff --git a/src/core/settings.ts b/src/core/settings.ts
  export function loadSettings(): PiVccSettings {
    const parsed = readJson(settingsPath());
 -  if (!parsed || typeof parsed !== "object") return { ...DEFAULT_SETTINGS };
--  return { ...DEFAULT_SETTINGS, ...(parsed as Partial<PiVccSettings>) };
 +  if (!parsed || typeof parsed !== "object") {
 +    return { ...DEFAULT_SETTINGS, autoCompaction: { ...DEFAULT_SETTINGS.autoCompaction } };
 +  }
-+  return {
-+    ...DEFAULT_SETTINGS,
-+    ...(parsed as Partial<PiVccSettings>),
-+    autoCompaction: normalizeAutoCompaction(parsed.autoCompaction),
-+  };
+   const merged = { ...DEFAULT_SETTINGS, ...(parsed as Partial<PiVccSettings>) };
+   // A blind spread would leak a malformed array value (e.g. a bare string,
+   // where .includes becomes substring matching) into the provider check.
+   merged.skipForProviders = coerceStringArray(parsed.skipForProviders);
+   merged.skipCustomTypes = coerceStringArray(parsed.skipCustomTypes);
++  merged.autoCompaction = normalizeAutoCompaction(parsed.autoCompaction);
+   return merged;
  }
  
- /**
 diff --git a/src/hooks/before-compact.ts b/src/hooks/before-compact.ts
+index f977b50..dec7331 100644
 --- a/src/hooks/before-compact.ts
 +++ b/src/hooks/before-compact.ts
 @@ -3,13 +3,20 @@ import { convertToLlm, VERSION } from "@earendil-works/pi-coding-agent";
@@ -279,10 +282,10 @@ diff --git a/src/hooks/before-compact.ts b/src/hooks/before-compact.ts
      pendingFollowUpPrompt = null;
      if (!isPiVcc && !settings.overrideDefaultCompaction) return;
 +    const effectiveReason = isSettledThreshold ? "threshold" : reason;
- 
-     const calibrationCut = buildOwnCut(branchEntries as any[], 0);
-     const calibrationMessageChars = calibrationCut.ok
-@@ -724,7 +839,7 @@ export const registerBeforeCompactHook = (pi: ExtensionAPI, piVersion: string =
+     // Provider-level opt-out (#27): defer to the provider's own compaction
+     // (e.g. remote compaction via pi-codex-compaction). Checked at call time
+     // because the model can change mid-session via /model. Explicit /pi-vcc
+@@ -742,7 +857,7 @@ export const registerBeforeCompactHook = (pi: ExtensionAPI, piVersion: string =
        smartKeepAdjusted: smartKeep.smartAdjusted,
        smartFromKeep: smartKeep.fromKeep,
        budgetCut: ownCut.ok ? ownCut.budgetCut : undefined,
@@ -291,7 +294,7 @@ diff --git a/src/hooks/before-compact.ts b/src/hooks/before-compact.ts
        willRetry,
      };
  
-@@ -778,7 +893,7 @@ export const registerBeforeCompactHook = (pi: ExtensionAPI, piVersion: string =
+@@ -796,7 +911,7 @@ export const registerBeforeCompactHook = (pi: ExtensionAPI, piVersion: string =
      dbg(config, {
        usedOwnCut: true,
        budgetCut: ownCut.budgetCut,
@@ -300,7 +303,7 @@ diff --git a/src/hooks/before-compact.ts b/src/hooks/before-compact.ts
        messagesToSummarize: agentMessages.length,
        messagesPreviewHead: agentMessages.slice(0, 3).map((m: any) => ({ role: m.role, preview: previewContent(m.content) })),
        messagesPreviewTail: agentMessages.slice(-3).map((m: any) => ({ role: m.role, preview: previewContent(m.content) })),
-@@ -800,11 +915,12 @@ export const registerBeforeCompactHook = (pi: ExtensionAPI, piVersion: string =
+@@ -818,11 +933,12 @@ export const registerBeforeCompactHook = (pi: ExtensionAPI, piVersion: string =
        sections: [...summary.matchAll(/^\[(.+?)\]/gm)].map((m) => m[1]),
        sourceMessageCount: agentMessages.length,
        previousSummaryUsed: Boolean(preparation.previousSummary),
@@ -315,7 +318,7 @@ diff --git a/src/hooks/before-compact.ts b/src/hooks/before-compact.ts
  
      return {
        compaction: {
-@@ -827,14 +943,15 @@ export const registerBeforeCompactHook = (pi: ExtensionAPI, piVersion: string =
+@@ -850,14 +966,15 @@ export const registerBeforeCompactHook = (pi: ExtensionAPI, piVersion: string =
      if (willRetry) return;
      const stats = lastStats;
      if (!stats) return;
@@ -333,8 +336,9 @@ diff --git a/src/hooks/before-compact.ts b/src/hooks/before-compact.ts
        scheduleAutoContinue(pi);
      }
    });
-diff --git a/pivcc-patched/tests/settled-compaction.test.ts b/tests/settled-compaction.test.ts
+diff --git a/tests/settled-compaction.test.ts b/tests/settled-compaction.test.ts
 new file mode 100644
+index 0000000..b531791
 --- /dev/null
 +++ b/tests/settled-compaction.test.ts
 @@ -0,0 +1,219 @@
