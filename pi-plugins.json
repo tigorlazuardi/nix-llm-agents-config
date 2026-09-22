@@ -42,12 +42,12 @@
     "owner": "nicobailon",
     "repo": "pi-prompt-template-model",
     "track": "main",
-    "version": "unstable-2026-08-28",
-    "rev": "accfa7817f78942d918e436405cb4f1a90afa23a",
-    "hash": "sha256-dYFJ3Vtm2q3TCqbk9YLuhDis5dWL2MNe65yA8YRHW8E=",
+    "version": "unstable-2026-09-22",
+    "rev": "6da205917e549cbe8e855c1d241c616ae1fb1627",
+    "hash": "sha256-F0GXAqoYdD4ciiDSyNRL2WYqU5w8FVWaJ81yyLwV+jQ=",
     "check": "prompt-templates",
     "lockFile": "packages/pi-prompt-template-model-package-lock.json",
-    "npmDepsHash": "sha256-PqpzXzUjOodSFIRSE2wCoaexHKBQiUhZJGZXN5sCj1U=",
+    "npmDepsHash": "sha256-JknpeL7lFpucpeKDpBGkAO/fDo9sFcs6uL3h3WgDzXo=",
     "manifestTransform": {
       "delete": [
         "devDependencies"
