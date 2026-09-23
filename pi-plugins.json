@@ -264,10 +264,10 @@
   "pi-web-access": {
     "strategy": "npm",
     "package": "pi-web-access",
-    "version": "0.30.0",
-    "src": "https://registry.npmjs.org/pi-web-access/-/pi-web-access-0.30.0.tgz",
-    "hash": "sha256-9Hu0mgbpSl0dyrBmPgG259HWJ452yAamD8gSBShXXlQ=",
-    "npmDepsHash": "sha256-BwwaTIszSIqm+cnA8GZor9qoKjXKmbg0vyLC8BXN3jI=",
+    "version": "0.31.0",
+    "src": "https://registry.npmjs.org/pi-web-access/-/pi-web-access-0.31.0.tgz",
+    "hash": "sha256-njQbx0vKVaP51RoHkFmjrcMcY4RpkfJdfY5+kQMsvyE=",
+    "npmDepsHash": "sha256-+lAbvPWyGmEffqJ4YkR4/aycmvlYK65zYn/HodLrRbM=",
     "manifestTransform": {
       "delete": [
         "devDependencies",
