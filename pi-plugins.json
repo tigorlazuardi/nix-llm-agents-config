@@ -320,9 +320,9 @@
   "pi-cache-optimizer": {
     "strategy": "npm",
     "package": "pi-cache-optimizer",
-    "version": "2.8.10",
-    "src": "https://registry.npmjs.org/pi-cache-optimizer/-/pi-cache-optimizer-2.8.10.tgz",
-    "hash": "sha256-jPffA4utdEMeioE8lYgcR9jJCpzZf7p1TKQiR9J9Rr4=",
+    "version": "2.8.11",
+    "src": "https://registry.npmjs.org/pi-cache-optimizer/-/pi-cache-optimizer-2.8.11.tgz",
+    "hash": "sha256-/6aBxH1Aeta9bvf4gNInKRGlm3yG6iZkyKjM8HhBcC4=",
     "check": "pi-cache-optimizer-load"
   },
   "pi-timestamps": {
