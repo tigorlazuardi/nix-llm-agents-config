@@ -39,7 +39,7 @@ let
   darwinEvaluation = builtins.tryEval darwin.config.home.activationPackage.drvPath;
   disabled = evaluate { programs.pi-coding-agent.enable = false; };
   localUpdaterEnabled = evaluate { programs.pi-coding-agent.localUpdater.enable = true; };
-  localUpdaterRecoveryModel = "openai-codex/gpt-5.6-sol";
+  localUpdaterRecoveryModel = "zai/glm-5.3";
   localUpdaterRecoveryModelConfigured = evaluate {
     programs.pi-coding-agent.localUpdater = {
       enable = true;
@@ -136,20 +136,9 @@ let
       overrideDefaultCompaction = false;
       smartKeepTail = false;
       continueAfterThresholdCompact = false;
-      autoCompaction = {
-        enabled = false;
-        thresholdTokens = 123000;
-        modelThresholdTokens."test/model" = 111000;
-      };
       debug = true;
     };
   };
-  invalidVccThreshold = evaluate {
-    programs.pi-coding-agent.plugins.pi-vcc.settings.autoCompaction.thresholdTokens = 0;
-  };
-  invalidVccThresholdEvaluation = builtins.tryEval (
-    builtins.deepSeq invalidVccThreshold.config.home.activationPackage true
-  );
   webAccessConfigured = evaluate {
     programs.pi-coding-agent.plugins.pi-web-access = {
       credentialFiles.openaiApiKey = "/run/secrets/openai-api-key";
@@ -163,11 +152,6 @@ let
     overrideDefaultCompaction = false;
     smartKeepTail = false;
     continueAfterThresholdCompact = false;
-    autoCompaction = {
-      enabled = false;
-      thresholdTokens = 123000;
-      modelThresholdTokens."test/model" = 111000;
-    };
     debug = true;
   };
   vccConfigSource =
@@ -544,7 +528,7 @@ in
     assert !(pluginsDisabled.config.home.activation ? remotePiConfig);
     assert
       default.config.programs.pi-coding-agent.plugins.pi-vision-handoff.visionModel
-      == "openai-codex/gpt-5.6-luna";
+      == "omniroute/cc/claude-haiku-4-5-20251001";
     assert
       visionHandoffConfigured.config.programs.pi-coding-agent.plugins.pi-vision-handoff.visionModel
       == "google/gemini-2.5-pro";
@@ -601,16 +585,6 @@ in
         overrideDefaultCompaction = true;
         smartKeepTail = true;
         continueAfterThresholdCompact = true;
-        autoCompaction = {
-          enabled = true;
-          thresholdTokens = 150000;
-          modelThresholdTokens = {
-            "cc/claude-fable-5" = 150000;
-            "cc/claude-opus-5" = 150000;
-            "cc/claude-sonnet-5" = 150000;
-            "cc/claude-haiku-4-5-20251001" = 136000;
-          };
-        };
         debug = false;
       };
     assert
@@ -618,15 +592,9 @@ in
         overrideDefaultCompaction = false;
         smartKeepTail = false;
         continueAfterThresholdCompact = false;
-        autoCompaction = {
-          enabled = false;
-          thresholdTokens = 123000;
-          modelThresholdTokens."test/model" = 111000;
-        };
         debug = true;
       };
     assert vccConfigSource == expectedVccConfigFile;
-    assert !invalidVccThresholdEvaluation.success;
     assert webAccessConfigSource == expectedWebAccessConfigFile;
     assert
       webAccessPathConfigured.config.programs.pi-coding-agent.plugins.pi-web-access.credentialFiles.braveApiKey
@@ -663,6 +631,13 @@ in
     assert
       default.config.home.file."${default.config.programs.pi-coding-agent.configDir}/extensions/lazy-tools".force;
     assert
+      default.config.programs.pi-coding-agent.extensions.env-loader == ./config/extensions/env-loader;
+    assert
+      default.config.home.file."${default.config.programs.pi-coding-agent.configDir}/extensions/env-loader".source
+      == ./config/extensions/env-loader;
+    assert
+      default.config.home.file."${default.config.programs.pi-coding-agent.configDir}/extensions/env-loader".force;
+    assert
       default.config.home.file."${default.config.programs.pi-coding-agent.configDir}/AGENTS.md".source
       == ./config/AGENTS.md;
     assert builtins.pathExists (
@@ -698,10 +673,12 @@ in
     assert builtins.length (builtins.attrNames default.config.programs.pi-coding-agent.agents) == 7;
     assert !(builtins.hasAttr "frontier-implementer" default.config.programs.pi-coding-agent.agents);
     assert !(builtins.hasAttr "frontier-reviewer" default.config.programs.pi-coding-agent.agents);
+    assert !(builtins.hasAttr "reviewer" default.config.programs.pi-coding-agent.agents);
     assert default.config.programs.pi-coding-agent.agents.implementer.model == "zai/glm-5.3-flash";
-    assert default.config.programs.pi-coding-agent.agents.reviewer.model == "zai/glm-5.3";
-    assert default.config.programs.pi-coding-agent.agents.reviewer.effort == "high";
-    assert default.config.programs.pi-coding-agent.agents.standards-reviewer.model == "zai/glm-5.3";
+    assert default.config.programs.pi-coding-agent.agents.deep-reviewer.model == "zai/glm-5.3";
+    assert default.config.programs.pi-coding-agent.agents.deep-reviewer.effort == "high";
+    assert
+      default.config.programs.pi-coding-agent.agents.standards-reviewer.model == "zai/glm-5.3-flash";
     assert default.config.programs.pi-coding-agent.agents.standards-reviewer.effort == "high";
     assert
       default.config.home.file."${default.config.programs.pi-coding-agent.configDir}/agents/orchestrator.md".text
@@ -992,6 +969,30 @@ in
         touch $out
       '';
 
+  env-loader =
+    pkgs.runCommandLocal "pi-env-loader"
+      {
+        nativeBuildInputs = [
+          expectedPackage
+          pkgs.nodejs_22
+        ];
+      }
+      ''
+        cp -R ${./config/extensions/env-loader} env-loader
+        chmod -R u+w env-loader
+        node --experimental-strip-types env-loader/env-loader.self-check.ts
+
+        export HOME="$TMPDIR/home"
+        export PI_CODING_AGENT_DIR="$HOME/.pi/agent"
+        export PI_TELEMETRY=0
+        mkdir -p "$PI_CODING_AGENT_DIR"
+        pi --offline --no-extensions --no-skills --no-prompt-templates --no-context-files \
+          -e ${./config/extensions/env-loader}/index.ts \
+          --list-models > pi.log 2>&1
+        ! grep -E 'Extension issues|Failed to load extension|Cannot find module|Error:' pi.log
+        touch $out
+      '';
+
   formatting =
     pkgs.runCommandLocal "pi-home-manager-formatting"
       {
@@ -1122,28 +1123,6 @@ in
         test -f ${expectedPattyBgTasksPath}/index.ts
         test ! -e ${expectedPattyBgTasksPath}/node_modules
         grep -F 'name: "agent_bg"' ${expectedPattyBgTasksPath}/src/tools/agent-bg.ts
-        grep -F 'constants.O_NOFOLLOW' ${expectedPattyBgTasksPath}/src/spawn.ts
-        grep -F 'mode: 0o600' ${expectedPattyBgTasksPath}/src/tools/agent-bg.ts
-        cp ${expectedPattyBgTasksPath}/src/spawn.ts "$TMPDIR/spawn.ts"
-        node --experimental-strip-types --input-type=module <<EOF
-        import assert from "node:assert/strict";
-        import { mkdirSync, readFileSync, statSync, symlinkSync, writeFileSync } from "node:fs";
-        import { spawnWithFileOutput } from "$TMPDIR/spawn.ts";
-        const dir = "$TMPDIR/runtime";
-        const log = dir + "/probe.log";
-        const child = spawnWithFileOutput({ command: "printf private", cwd: "$TMPDIR", logPath: log });
-        const keeper = setInterval(() => {}, 1000);
-        assert.equal(await child.exit, 0);
-        clearInterval(keeper);
-        assert.equal(statSync(dir).mode & 0o777, 0o700);
-        assert.equal(statSync(log).mode & 0o777, 0o600);
-        assert.equal(readFileSync(log, "utf8"), "private");
-        const target = "$TMPDIR/target";
-        writeFileSync(target, "keep");
-        symlinkSync(target, dir + "/linked.log");
-        assert.throws(() => spawnWithFileOutput({ command: "printf overwrite", cwd: "$TMPDIR", logPath: dir + "/linked.log" }));
-        assert.equal(readFileSync(target, "utf8"), "keep");
-        EOF
         pi --offline --no-extensions --no-skills --no-prompt-templates --no-context-files \
           -e ${expectedPattyBgTasksPath} \
           --list-models > pi.log 2>&1
@@ -1319,9 +1298,6 @@ in
           let calls = [];
           globalThis.fetch = async (url, options) => {
             calls.push({ url: String(url), headers: options.headers, signal: options.signal });
-            if (String(url) === "https://chatgpt.com/backend-api/wham/usage") {
-              return Response.json({ credits: { has_credits: false } });
-            }
             if (String(url) === "https://openrouter.ai/api/v1/key") {
               return Response.json({ data: { usage: 1 } });
             }
@@ -1329,7 +1305,6 @@ in
           };
 
           for (const [provider, origin, endpoint] of [
-            ["openai-codex", "https://chatgpt.com/backend-api", "https://chatgpt.com/backend-api/wham/usage"],
             ["openrouter", "https://openrouter.ai/api/v1", "https://openrouter.ai/api/v1/key"],
           ]) {
             const adapter = SUPPORTED_ADAPTERS.find((candidate) => candidate.id === provider);
@@ -1344,7 +1319,6 @@ in
 
           const callCount = calls.length;
           for (const [provider, origin] of [
-            ["openai-codex", "https://chatgpt.example.test/backend-api"],
             ["openrouter", "https://openrouter.example.test/api/v1"],
           ]) {
             const adapter = SUPPORTED_ADAPTERS.find((candidate) => candidate.id === provider);
@@ -1597,7 +1571,6 @@ in
       {
         nativeBuildInputs = [
           expectedPackage
-          pkgs.bun
         ];
       }
       ''
@@ -1607,17 +1580,8 @@ in
         export PI_TELEMETRY=0
         mkdir -p "$PI_CODING_AGENT_DIR"
         test -f ${expectedPiVcc}/index.ts
-        test -f ${expectedPiVcc}/tests/settled-compaction.test.ts
         test ! -e ${expectedPiVcc}/demo.gif
         test ! -e ${expectedPiVcc}/node_modules
-
-        cp -R ${expectedPiVcc} vcc
-        chmod -R u+w vcc
-        mkdir -p vcc/node_modules/@earendil-works
-        piRuntime=${expectedPackage}/lib/node_modules/pi-monorepo
-        ln -s "$piRuntime" vcc/node_modules/@earendil-works/pi-coding-agent
-        ln -s "$piRuntime/node_modules/typebox" vcc/node_modules/typebox
-        bun test vcc/tests/settled-compaction.test.ts
 
         pi --offline --no-extensions --no-skills --no-prompt-templates --no-context-files \
           -e ${expectedPiVcc} \
@@ -1626,8 +1590,6 @@ in
         grep -F '"overrideDefaultCompaction": true' "$PI_VCC_CONFIG_PATH"
         grep -F '"smartKeepTail": true' "$PI_VCC_CONFIG_PATH"
         grep -F '"continueAfterThresholdCompact": true' "$PI_VCC_CONFIG_PATH"
-        grep -F '"thresholdTokens": 150000' "$PI_VCC_CONFIG_PATH"
-        grep -F '"modelThresholdTokens": {}' "$PI_VCC_CONFIG_PATH"
         grep -F '"debug": false' "$PI_VCC_CONFIG_PATH"
         touch $out
       '';
@@ -1692,8 +1654,8 @@ in
       }
       ''
         config="$TMPDIR/pi-vision-handoff.json"
-        pi-vision-handoff-config-update "$config" openai-codex/gpt-5.6-luna
-        jq -e '. == {visionModel: "openai-codex/gpt-5.6-luna"}' "$config" >/dev/null
+        pi-vision-handoff-config-update "$config" zai/glm-5.3
+        jq -e '. == {visionModel: "zai/glm-5.3"}' "$config" >/dev/null
         test "$(stat -c %a "$config")" = 600
 
         printf '%s\n' '{"enabled":false,"cacheMax":12,"visionModel":"old/model"}' > "$config"

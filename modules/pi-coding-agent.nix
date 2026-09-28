@@ -449,7 +449,7 @@ in
 
         pi-vision-handoff.visionModel = lib.mkOption {
           type = lib.types.strMatching "[^/[:space:]]+/[^[:space:]]+";
-          default = "openai-codex/gpt-5.6-luna";
+          default = "omniroute/cc/claude-haiku-4-5-20251001";
           description = "Vision-capable provider/model used to describe images for text-only models.";
         };
 
@@ -468,28 +468,6 @@ in
             type = lib.types.bool;
             default = true;
             description = "Automatically continue the agent after threshold or overflow compaction.";
-          };
-          autoCompaction = {
-            enabled = lib.mkOption {
-              type = lib.types.bool;
-              default = true;
-              description = "Evaluate automatic compaction from settled-turn context usage.";
-            };
-            thresholdTokens = lib.mkOption {
-              type = lib.types.ints.positive;
-              default = 150000;
-              description = "Absolute settled context-token threshold, independent from Pi output reserve settings.";
-            };
-            modelThresholdTokens = lib.mkOption {
-              type = lib.types.attrsOf lib.types.ints.positive;
-              default = {
-                "cc/claude-fable-5" = 150000;
-                "cc/claude-opus-5" = 150000;
-                "cc/claude-sonnet-5" = 150000;
-                "cc/claude-haiku-4-5-20251001" = 136000;
-              };
-              description = "Absolute settled context-token thresholds keyed by Pi model ID.";
-            };
           };
           debug = lib.mkOption {
             type = lib.types.bool;
@@ -671,6 +649,7 @@ in
       extensions = {
         artifact-preview = lib.mkDefault ../config/extensions/artifact-preview;
         dev-journal = lib.mkDefault ../config/extensions/dev-journal;
+        env-loader = lib.mkDefault ../config/extensions/env-loader;
         lazy-tools = lib.mkDefault ../config/extensions/lazy-tools;
       };
       skills = lib.mapAttrs (_: lib.mkDefault) (repoSkills // patchedMattSkills);
@@ -683,6 +662,10 @@ in
       };
       "${cfg.configDir}/extensions/dev-journal" = {
         source = cfg.extensions.dev-journal;
+        force = true;
+      };
+      "${cfg.configDir}/extensions/env-loader" = {
+        source = cfg.extensions.env-loader;
         force = true;
       };
       "${cfg.configDir}/extensions/lazy-tools" = {
