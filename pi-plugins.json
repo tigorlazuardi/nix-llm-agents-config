@@ -296,9 +296,9 @@
   "supi-extras": {
     "strategy": "npm",
     "package": "@mrclrchtr/supi-extras",
-    "version": "7.3.0",
-    "src": "https://registry.npmjs.org/@mrclrchtr/supi-extras/-/supi-extras-7.3.0.tgz",
-    "hash": "sha256-HoiGov/wqFx8UvygNgvR8sIOV0aklSQEHSG84Bqlk7U=",
+    "version": "7.3.1",
+    "src": "https://registry.npmjs.org/@mrclrchtr/supi-extras/-/supi-extras-7.3.1.tgz",
+    "hash": "sha256-LfygS24KSjlmSlShD32vgAYBAe+QqE6p4AYg8scxhDE=",
     "check": "supi-extras-load"
   },
   "pi-usage": {
