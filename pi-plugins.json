@@ -62,10 +62,10 @@
     "owner": "nicobailon",
     "repo": "pi-mcp-adapter",
     "track": "main",
-    "version": "unstable-2026-09-27",
-    "rev": "3ce9716fe6982dfafdea947b316521acb1ebbc73",
-    "hash": "sha256-xVkIN2zmEnJyJUxxd50ymvf116ctvuu1c6NarH+ciEQ=",
-    "npmDepsHash": "sha256-gFtGtckFakJJTOxlXJTIg57erC6WK0nKYRg3Xsj0zH8=",
+    "version": "unstable-2026-09-28",
+    "rev": "b6e06a162d95322bb991b8b6214bb6fb10a90b7d",
+    "hash": "sha256-gzWJdYMz9gvSPE8ftTJpsqqmnlE6y0mcaIuELaaVWkM=",
+    "npmDepsHash": "sha256-XPUC9Q48vZbEZta5hyrW6CtVpOEaTa0yaNAAVI8cezM=",
     "lockFile": "packages/pi-mcp-adapter-package-lock.json",
     "manifestTransform": {
       "delete": [
