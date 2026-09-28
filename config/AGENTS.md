@@ -18,7 +18,8 @@ Agents execute small–medium work directly when scope is clear and reversible. 
 
 Process routing:
 - Long-lived processes (dev servers, watchers, log streams) → create a dedicated Herdr tab with `herdr_layout`, then run and control them through `herdr_pane`.
-- Finite background commands whose completion should wake the agent → use `bash` with `run_in_background=true`; never `tail` or log streaming there — streams belong in a Herdr pane or monitor.
+- Finite background commands whose completion should wake the agent → use `bash` with `run_in_background=true`.
+- `tail` is for files only — finite reads like `tail -n 50 file.log`. Never tail an output stream (`cmd | tail`, `tail -f`): it never exits and floods the session; live streams belong in a Herdr pane or the monitor tool.
 - Bounded execution only: `timeout` every long-running command — start short (30–60s); most finish in seconds, so escalate to minutes only for commands proven to run long (full builds, large test suites). Every loop carries a counter + `break`. Infinite loops without a timeout are forbidden.
 - Never wait via `until grep …; do sleep` polling — one missed pattern hangs the turn until timeout. Wait on the job's completion wake or read it with `jobs action='attach'`.
 - `nixos-rebuild switch` → load Herdr/elevation tools, then execute the exact command through `sudo_task`; do not probe direct `sudo` first.
