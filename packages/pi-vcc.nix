@@ -1,10 +1,15 @@
 {
-  applyPatches,
   fetchzip,
+  stdenvNoCC,
 }:
 let
   lock = (import ./pi-plugin-lock.nix)."pi-vcc";
-  source = fetchzip {
+in
+stdenvNoCC.mkDerivation {
+  pname = "pi-vcc";
+  version = lock.version;
+
+  src = fetchzip {
     pname = "pi-vcc";
     version = lock.version;
 
@@ -13,15 +18,17 @@ let
     postFetch = ''
       rm "$out/demo.gif"
     '';
-
-    meta = {
-      description = "Algorithmic conversation compactor for Pi";
-      homepage = "https://github.com/sting8k/pi-vcc";
-    };
   };
-in
-applyPatches {
-  name = "pi-vcc-${lock.version}";
-  src = source;
-  patches = [ ./pi-vcc-settled-compaction.patch ];
+
+  installPhase = ''
+    runHook preInstall
+    mkdir -p "$out"
+    cp -R . "$out/"
+    runHook postInstall
+  '';
+
+  meta = {
+    description = "Algorithmic conversation compactor for Pi";
+    homepage = "https://github.com/sting8k/pi-vcc";
+  };
 }

@@ -15,8 +15,6 @@ stdenvNoCC.mkDerivation {
     hash = lock.hash;
   };
 
-  patches = [ ./pi-patty-bg-tasks-hardening.patch ];
-
   installPhase = ''
     runHook preInstall
     mkdir -p "$out/lib/node_modules/pi-patty-bg-tasks"
