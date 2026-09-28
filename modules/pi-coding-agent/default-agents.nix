@@ -1,6 +1,19 @@
 {
+  deep-reviewer = {
+    description = "Deep reviewer; spec axis";
+    prompt = ../../config/agents/reviewer.md;
+    model = "zai/glm-5.3";
+    effort = "high";
+    tools.allow = [
+      "read"
+      "grep"
+      "find"
+      "bash"
+      "write"
+    ];
+  };
   implementer = {
-    description = "Sol implementation worker";
+    description = "Implementation worker";
     prompt = ../../config/agents/implementer.md;
     model = "zai/glm-5.3-flash";
     effort = "high";
@@ -25,7 +38,7 @@
     ];
   };
   planner = {
-    description = "Sol planner and SCOPE/ADR drafter";
+    description = "Planner and SCOPE/ADR drafter";
     prompt = ../../config/agents/planner.md;
     model = "zai/glm-5.3";
     effort = "high";
@@ -37,23 +50,10 @@
       "write"
     ];
   };
-  reviewer = {
-    description = "Sol reviewer; spec axis";
-    prompt = ../../config/agents/reviewer.md;
-    model = "zai/glm-5.3";
-    effort = "high";
-    tools.allow = [
-      "read"
-      "grep"
-      "find"
-      "bash"
-      "write"
-    ];
-  };
   standards-reviewer = {
-    description = "Terra reviewer; standards axis";
+    description = "Standards reviewer; standards axis";
     prompt = ../../config/agents/reviewer.md;
-    model = "zai/glm-5.3";
+    model = "zai/glm-5.3-flash";
     effort = "high";
     tools.allow = [
       "read"
@@ -64,7 +64,7 @@
     ];
   };
   scout = {
-    description = "Fast read-only code locator; Luna leaf";
+    description = "Fast read-only code locator";
     prompt = ../../config/agents/scout.md;
     model = "zai/glm-5.3-flash";
     effort = "high";
@@ -76,7 +76,7 @@
     ];
   };
   support = {
-    description = "Terra docs, research, and synthesis";
+    description = "Docs, research, and synthesis";
     prompt = ../../config/agents/support.md;
     model = "zai/glm-5.3-flash";
     effort = "high";

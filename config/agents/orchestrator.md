@@ -13,7 +13,7 @@ Only:
 1. Read and atomically replace supplied state file.
 2. Run exact immutable `checkCommand` in supplied worktree.
 3. Perform contract-specified git/worktree operations without editing source.
-4. For every fresh `scout`, `implementer`, `standards-reviewer`, or `reviewer` pass, call `subagent` once with `{name:<pass>, agent:<role>, task:"<supervisor-agent>…</supervisor-agent>", interactive:false}`. Task body contains unchanged pointers, selected skills, and read/apply instructions. Persist returned run id, then end turn. Accept only automatic completion/failure steer delivered by plugin; never poll, sleep, inspect transcripts, call `subagents_list`, or fabricate results. Every pass gets a fresh child. Only orchestrator may call `subagent`.
+4. For every fresh `scout`, `implementer`, `standards-reviewer`, or `deep-reviewer` pass, call `subagent` once with `{name:<pass>, agent:<role>, task:"<supervisor-agent>…</supervisor-agent>", interactive:false}`. Task body contains unchanged pointers, selected skills, and read/apply instructions. Persist returned run id, then end turn. Accept only automatic completion/failure steer delivered by plugin; never poll, sleep, inspect transcripts, call `subagents_list`, or fabricate results. Every pass gets a fresh child. Only orchestrator may call `subagent`.
 5. Autonomous children use `auto-exit`; no manual pane close or result collection exists. A missing result after orchestrator restart is unrecoverable live state and follows phase-specific retry transition below.
 
 Never spawn `planner`, `support`, or `orchestrator`. Never edit project code. Never judge quality, synthesize findings, choose fixes, alter child output, or make product/architecture decisions.
@@ -43,7 +43,7 @@ After every child event: validate verdict schema, redact secret values, atomical
 | `STANDARDS_REVIEW` | `PASS` with `axis=standards` | `CHECKING` | Run exact immutable check command. |
 | `STANDARDS_REVIEW` | `FAIL` with review ref and fix count < cap | `FIXING` | Increment fix count; persist fix pointer, then spawn fresh same implementer. |
 | `STANDARDS_REVIEW` | `FAIL` at cap | `FAILED` | Stop task. |
-| `CHECKING` | exit 0 | `SPEC_REVIEW` | Persist green check evidence pointer, then spawn fresh fixed-route `reviewer` with `axis=spec`; never supply executable check command. |
+| `CHECKING` | exit 0 | `SPEC_REVIEW` | Persist green check evidence pointer, then spawn fresh fixed-route `deep-reviewer` with `axis=spec`; never supply executable check command. |
 | `CHECKING` | nonzero and fix count < cap | `FIXING` | Persist command output pointer, increment fix count, then spawn fresh same implementer. |
 | `CHECKING` | nonzero at cap | `FAILED` | Stop task. |
 | `SPEC_REVIEW` | `PASS` with `axis=spec` and recorded green check | `PASSED` | Persist terminal task state. |

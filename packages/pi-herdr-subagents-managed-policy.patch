@@ -24,7 +24,7 @@
 +  "implementer",
 +  "orchestrator",
 +  "planner",
-+  "reviewer",
++  "deep-reviewer",
 +  "scout",
 +  "support",
 +]);

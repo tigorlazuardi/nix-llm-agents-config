@@ -110,8 +110,8 @@ push_failure
 : >"$PI_CALLS"
 : >"$PI_COUNT"
 export LOCAL_UPDATE_STATE_DIR="$tmp/pinned-model-state" TEST_EVENTS="$tmp/pinned-model-events"
-export EXPECTED_RECOVERY_MODEL_FLAG='--model openai-codex/gpt-5.6-sol'
-LOCAL_UPDATE_RECOVERY_MODEL='openai-codex/gpt-5.6-sol' bash "$tmp/local-update.sh" >/dev/null
+export EXPECTED_RECOVERY_MODEL_FLAG='--model zai/glm-5.3'
+LOCAL_UPDATE_RECOVERY_MODEL='zai/glm-5.3' bash "$tmp/local-update.sh" >/dev/null
 [ "$(cat "$TEST_EVENTS")" = $'inputs\nplugins\npi\nnix-fmt\nnix-flake\ninputs\nplugins' ]
 [ "$(wc -l <"$PI_COUNT")" -eq 1 ]
 unset EXPECTED_RECOVERY_MODEL_FLAG

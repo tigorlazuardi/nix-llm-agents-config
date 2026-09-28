@@ -1,7 +1,7 @@
 ---
 description: Review changes for bugs, security, error handling
 argument-hint: "[scope]"
-subagent: reviewer
+subagent: deep-reviewer
 fresh: true
 ---
 Review the changes. Scope: ${1:-git diff, then git diff --cached; if both empty, review last commit via git show}.

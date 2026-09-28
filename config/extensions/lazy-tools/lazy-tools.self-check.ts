@@ -1,14 +1,13 @@
 import assert from "node:assert/strict";
 import lazyTools from "./index.ts";
 
-type Group = "browser" | "subagents" | "research" | "herdr" | "background" | "mesh" | "journal" | "artifact";
-const core = ["read", "bash", "ask_user", "rename_herdr_tab", "todo"];
+type Group = "browser" | "subagents" | "research" | "herdr" | "mesh" | "journal" | "artifact";
+const core = ["read", "bash", "bash_bg", "agent_bg", "job_decide", "jobs", "monitor", "ask_user", "rename_herdr_tab", "todo"];
 const grouped: Record<Group, string[]> = {
   browser: ["browser_open"],
   subagents: ["subagent", "subagent_interrupt", "subagents_list", "subagent_resume"],
   research: ["web_search", "mcp", "mcpScript"],
   herdr: ["herdr_layout", "sudo_task"],
-  background: ["jobs"],
   mesh: ["agent_send"],
   journal: ["dev_journal"],
   artifact: ["host_artifact"],
@@ -16,6 +15,7 @@ const grouped: Record<Group, string[]> = {
 const paths: Record<string, string> = {
   read: "<builtin:read>",
   bash: "/nix/store/pi-patty-bg-tasks/index.ts",
+  bash_bg: "/nix/store/pi-patty-bg-tasks/index.ts",
   ask_user: "/nix/store/pi-ask-herdr/index.ts",
   rename_herdr_tab: "/nix/store/pi-herdr-rename/index.ts",
   browser_open: "/nix/store/browser-goblin/index.ts",
@@ -29,6 +29,9 @@ const paths: Record<string, string> = {
   herdr_layout: "/nix/store/pi-herdr/index.ts",
   sudo_task: "/nix/store/pi-herdr-sudo-task/index.ts",
   jobs: "/nix/store/pi-patty-bg-tasks/index.ts",
+  agent_bg: "/nix/store/pi-patty-bg-tasks/index.ts",
+  job_decide: "/nix/store/pi-patty-bg-tasks/index.ts",
+  monitor: "/nix/store/pi-patty-bg-tasks/index.ts",
   agent_send: "/nix/store/remote-pi/index.ts",
   dev_journal: "/config/extensions/dev-journal/index.ts",
   host_artifact: "/config/extensions/artifact-preview/index.ts",

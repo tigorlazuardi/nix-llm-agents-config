@@ -24,13 +24,13 @@ No package namespace or fallback model. Strict minimum tool allowlist. Only `bui
 
 | Agent | Model | Thinking | Source role |
 |---|---|---|---|
-| `build-lead` | `cx/gpt-5.6-sol` | high | writer |
-| `build-worker` | `cx/gpt-5.6-terra` | high | writer |
-| `scout` | `cx/gpt-5.6-luna` | high | read-only |
-| `quick-reviewer` | `cx/gpt-5.6-sol` | medium | read-only |
-| `deep-reviewer` | `cx/gpt-5.6-sol` | high | read-only |
-| `housekeeper` | `cx/gpt-5.6-luna` | medium | no project-source writes |
-| `note-taker` | `cx/gpt-5.6-sol` | medium | report writer |
+| `build-lead` | `zai/glm-5.3` | high | writer |
+| `build-worker` | `zai/glm-5.3-flash` | high | writer |
+| `scout` | `zai/glm-5.3-flash` | high | read-only |
+| `quick-reviewer` | `zai/glm-5.3-flash` | medium | read-only |
+| `deep-reviewer` | `zai/glm-5.3` | high | read-only |
+| `housekeeper` | `zai/glm-5.3-flash` | medium | no project-source writes |
+| `note-taker` | `zai/glm-5.3-flash` | medium | report writer |
 
 Main performs tracker/SCM delivery mutations. Among rendered agents, provider/tracker/SCM/deployment tools belong only to housekeeper. Builders/reviewers receive no outward mutation tools. Housekeeper alone receives deployment watch/trigger capability and, only when configured, notifier capability.
 
