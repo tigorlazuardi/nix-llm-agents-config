@@ -21,6 +21,17 @@ let
     };
 
   default = evaluate { };
+
+  debug-idle =
+    pkgs.runCommandLocal "debug-idle"
+      {
+        enable = toString default.config.programs.pi-coding-agent.idleCompact.enable;
+        ext = toString (default.config.programs.pi-coding-agent.extensions or { } ? pi-idle-compact);
+      }
+      ''
+        echo "enable=$enable ext=$ext" > $out
+      '';
+
   darwin = home-manager.lib.homeManagerConfiguration {
     pkgs = nixpkgs-unstable.legacyPackages.aarch64-darwin;
     modules = [
@@ -637,6 +648,17 @@ in
       == ./config/extensions/env-loader;
     assert
       default.config.home.file."${default.config.programs.pi-coding-agent.configDir}/extensions/env-loader".force;
+    assert default.config.programs.pi-coding-agent.idleCompact.enable;
+    assert default.config.programs.pi-coding-agent.idleCompact.thresholdTokens == 150000;
+    assert default.config.programs.pi-coding-agent.idleCompact.delayMs == 5000;
+    assert
+      default.config.programs.pi-coding-agent.extensions.pi-idle-compact
+      == ./config/extensions/pi-idle-compact;
+    assert
+      default.config.home.file."${default.config.programs.pi-coding-agent.configDir}/extensions/pi-idle-compact".source
+      == ./config/extensions/pi-idle-compact;
+    assert default.config.home.sessionVariables.PI_IDLE_COMPACT_THRESHOLD_TOKENS == "150000";
+    assert default.config.home.sessionVariables.PI_IDLE_COMPACT_DELAY_MS == "5000";
     assert
       default.config.home.file."${default.config.programs.pi-coding-agent.configDir}/AGENTS.md".source
       == ./config/AGENTS.md;
@@ -988,6 +1010,30 @@ in
         mkdir -p "$PI_CODING_AGENT_DIR"
         pi --offline --no-extensions --no-skills --no-prompt-templates --no-context-files \
           -e ${./config/extensions/env-loader}/index.ts \
+          --list-models > pi.log 2>&1
+        ! grep -E 'Extension issues|Failed to load extension|Cannot find module|Error:' pi.log
+        touch $out
+      '';
+
+  pi-idle-compact =
+    pkgs.runCommandLocal "pi-idle-compact"
+      {
+        nativeBuildInputs = [
+          expectedPackage
+          pkgs.nodejs_22
+        ];
+      }
+      ''
+        cp -R ${./config/extensions/pi-idle-compact} pi-idle-compact
+        chmod -R u+w pi-idle-compact
+        node --experimental-strip-types pi-idle-compact/pi-idle-compact.self-check.ts
+
+        export HOME="$TMPDIR/home"
+        export PI_CODING_AGENT_DIR="$HOME/.pi/agent"
+        export PI_TELEMETRY=0
+        mkdir -p "$PI_CODING_AGENT_DIR"
+        pi --offline --no-extensions --no-skills --no-prompt-templates --no-context-files \
+          -e ${./config/extensions/pi-idle-compact}/index.ts \
           --list-models > pi.log 2>&1
         ! grep -E 'Extension issues|Failed to load extension|Cannot find module|Error:' pi.log
         touch $out

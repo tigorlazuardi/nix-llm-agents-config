@@ -11,6 +11,7 @@
 let
   cfg = config.programs.pi-coding-agent;
   localUpdater = cfg.localUpdater;
+  idleCompact = cfg.idleCompact;
   repoSkills = lib.mapAttrs (name: _: ../config/skills + "/${name}") (
     # ponytail: temporarily exclude tuxedo-todo; remove name check to restore it.
     lib.filterAttrs (name: type: type == "directory" && name != "tuxedo-todo") (
@@ -399,6 +400,29 @@ in
     };
   };
 
+  options.programs.pi-coding-agent.idleCompact = {
+    enable = lib.mkEnableOption "idle-debounced auto-compaction via the pi-idle-compact extension";
+
+    thresholdTokens = lib.mkOption {
+      type = lib.types.int;
+      default = 150000;
+      description = ''
+        Context token count at or above which a settled agent arms the
+        compaction timer. Exported to the extension as PI_IDLE_COMPACT_THRESHOLD_TOKENS.
+      '';
+    };
+
+    delayMs = lib.mkOption {
+      type = lib.types.int;
+      default = 5000;
+      description = ''
+        Idle debounce after agent_settled before compacting. Any agent activity
+        cancels the pending compact; compaction is also skipped while patty
+        background jobs are pending. Exported as PI_IDLE_COMPACT_DELAY_MS.
+      '';
+    };
+  };
+
   options.programs.pi-coding-agent.plugins =
     lib.recursiveUpdate
       (lib.mapAttrs (_: default: { enable = mkPluginOptions default; }) pluginDefaults)
@@ -627,6 +651,10 @@ in
         // lib.optionalAttrs vccPlugin.enable {
           PI_VCC_CONFIG_PATH = lib.mkDefault "${cfg.configDir}/pi-vcc-config.json";
         }
+        // lib.optionalAttrs idleCompact.enable {
+          PI_IDLE_COMPACT_THRESHOLD_TOKENS = lib.mkDefault (toString idleCompact.thresholdTokens);
+          PI_IDLE_COMPACT_DELAY_MS = lib.mkDefault (toString idleCompact.delayMs);
+        }
         // lib.optionalAttrs cfg.plugins.browser-goblin.enable {
           # ponytail: reuse browser-goblin's Nix Chromium for project Playwright; override per project when needed.
           PLAYWRIGHT_EXECUTABLE_PATH = lib.mkDefault cfg.plugins.browser-goblin.executablePath;
@@ -636,6 +664,7 @@ in
 
     programs.pi-coding-agent = {
       enable = lib.mkDefault true;
+      idleCompact.enable = lib.mkDefault true;
       package = lib.mkIf cfg.enable (lib.mkDefault pinnedPkgs.pi-coding-agent);
       settings = lib.mkMerge [
         (lib.mapAttrsRecursive (_: lib.mkDefault) defaultSettings)
@@ -646,12 +675,17 @@ in
       keybindings = lib.mapAttrsRecursive (_: lib.mkDefault) defaultKeybindings;
       models = lib.mapAttrsRecursive (_: lib.mkDefault) defaultModels;
       context = lib.mkDefault ../config/AGENTS.md;
-      extensions = {
-        artifact-preview = lib.mkDefault ../config/extensions/artifact-preview;
-        dev-journal = lib.mkDefault ../config/extensions/dev-journal;
-        env-loader = lib.mkDefault ../config/extensions/env-loader;
-        lazy-tools = lib.mkDefault ../config/extensions/lazy-tools;
-      };
+      extensions = lib.mkMerge [
+        {
+          artifact-preview = lib.mkDefault ../config/extensions/artifact-preview;
+          dev-journal = lib.mkDefault ../config/extensions/dev-journal;
+          env-loader = lib.mkDefault ../config/extensions/env-loader;
+          lazy-tools = lib.mkDefault ../config/extensions/lazy-tools;
+        }
+        (lib.mkIf idleCompact.enable {
+          pi-idle-compact = lib.mkDefault ../config/extensions/pi-idle-compact;
+        })
+      ];
       skills = lib.mapAttrs (_: lib.mkDefault) (repoSkills // patchedMattSkills);
     };
 
@@ -666,6 +700,10 @@ in
       };
       "${cfg.configDir}/extensions/env-loader" = {
         source = cfg.extensions.env-loader;
+        force = true;
+      };
+      "${cfg.configDir}/extensions/pi-idle-compact" = lib.mkIf idleCompact.enable {
+        source = cfg.extensions.pi-idle-compact;
         force = true;
       };
       "${cfg.configDir}/extensions/lazy-tools" = {
