@@ -355,9 +355,9 @@
   "pi-vision-handoff": {
     "strategy": "npm",
     "package": "pi-vision-handoff",
-    "version": "0.10.6",
-    "src": "https://registry.npmjs.org/pi-vision-handoff/-/pi-vision-handoff-0.10.6.tgz",
-    "hash": "sha256-VrQIWXfOjtW8gw1PkscvuxLCoAIwMHS+WW+F1iw6bzM=",
+    "version": "0.10.7",
+    "src": "https://registry.npmjs.org/pi-vision-handoff/-/pi-vision-handoff-0.10.7.tgz",
+    "hash": "sha256-vjMnm5JCGJ55iFh6pP76FF9fvC+AVH5dUoXEpyzP6sQ=",
     "check": "vision-handoff-load"
   }
 }
