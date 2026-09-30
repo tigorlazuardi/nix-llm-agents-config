@@ -36,10 +36,6 @@
       "name": "omniroute",
       "baseUrl": "https://omniroute.tigor.web.id/v1",
       "apiKey": "omniroute-no-api-key",
-      "compat": {
-        "forceAdaptiveThinking": true,
-        "sendSessionAffinityHeaders": true
-      },
       "models": [
         {
           "id": "cc/claude-fable-5",
@@ -50,7 +46,10 @@
           "input": [
             "text",
             "image"
-          ]
+          ],
+          "compat": {
+            "forceAdaptiveThinking": true
+          }
         },
         {
           "id": "cc/claude-opus-5",
@@ -61,7 +60,10 @@
           "input": [
             "text",
             "image"
-          ]
+          ],
+          "compat": {
+            "forceAdaptiveThinking": true
+          }
         },
         {
           "id": "cc/claude-sonnet-5",
@@ -72,7 +74,10 @@
           "input": [
             "text",
             "image"
-          ]
+          ],
+          "compat": {
+            "forceAdaptiveThinking": true
+          }
         },
         {
           "id": "cc/claude-haiku-4-5-20251001",
@@ -83,17 +88,25 @@
           "input": [
             "text",
             "image"
-          ]
+          ],
+          "compat": {
+            "forceAdaptiveThinking": true
+          }
         },
         {
           "id": "worker",
           "reasoning": true,
           "contextWindow": 288000,
           "maxTokens": 128000,
+          "api": "openai-completions",
           "input": [
             "text",
             "image"
-          ]
+          ],
+          "compat": {
+            "supportsDeveloperRole": false,
+            "sendSessionAffinityHeaders": true
+          }
         }
       ]
     }
