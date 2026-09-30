@@ -14,6 +14,10 @@ const GROUP_MARKERS: Record<Group, readonly string[]> = {
   artifact: ["artifact-preview"],
 };
 const ALWAYS_ACTIVE = new Set(["bash", "bash_bg", "ask_user", "rename_herdr_tab", "todo", "load_tools"]);
+// Permanently hidden every session — NOT deferrable via load_tools. Models mistake
+// agent_bg for a subagent/delegation tool and misfire it; background pi -p work goes
+// through the subagents group instead.
+const HIDDEN_TOOLS = new Set(["agent_bg"]);
 
 export default function (pi: ExtensionAPI) {
   const childAllowedTools = process.env.PI_SUBAGENT_ALLOWED_TOOLS
@@ -57,7 +61,8 @@ export default function (pi: ExtensionAPI) {
   pi.on("session_start", () => {
     const deferred = new Set(GROUP_NAMES.flatMap(groupTools));
     const active = pi.getActiveTools().filter((name) =>
-      childAllowedTools ? childAllowedTools.has(name) : !deferred.has(name));
+      !HIDDEN_TOOLS.has(name)
+      && (childAllowedTools ? childAllowedTools.has(name) : !deferred.has(name)));
     pi.setActiveTools([...new Set([
       ...active,
       ...(childAllowedTools ? [] : ["load_tools"]),

@@ -59,20 +59,21 @@ lazyTools({
 
 assert(loader && sessionStart);
 sessionStart();
-assert.deepEqual(active, [...core, "load_tools"]);
+assert(!active.includes("agent_bg"));
+assert.deepEqual(active, [...core.filter((name) => name !== "agent_bg"), "load_tools"]);
 assert(!active.includes("mcpScript"));
 let researchLoaded = false;
 for (const group of Object.keys(grouped) as Group[]) {
   if (!researchLoaded) assert(!active.includes("mcpScript"));
   await loader.execute(group, { group });
   for (const tool of grouped[group]) assert(active.includes(tool));
-  for (const tool of core) assert(active.includes(tool));
+  for (const tool of core) if (tool !== "agent_bg") assert(active.includes(tool));
   if (group === "research") researchLoaded = true;
   assert.equal(active.includes("mcpScript"), researchLoaded);
 }
 
-process.env.PI_SUBAGENT_ALLOWED_TOOLS = "read,bash,subagent,caller_ping,subagent_done";
-let childActive = ["read", "bash", "subagent", "caller_ping", "subagent_done"];
+process.env.PI_SUBAGENT_ALLOWED_TOOLS = "read,bash,agent_bg,subagent,caller_ping,subagent_done";
+let childActive = ["read", "bash", "agent_bg", "subagent", "caller_ping", "subagent_done"];
 let childLoader: typeof loader;
 let childSessionStart: typeof sessionStart;
 lazyTools({
@@ -90,6 +91,7 @@ lazyTools({
 } as never);
 assert(childLoader && childSessionStart);
 childSessionStart();
+assert(!childActive.includes("agent_bg"));
 assert.deepEqual(childActive, ["read", "bash", "subagent", "caller_ping", "subagent_done"]);
 await childLoader.execute("browser", { group: "browser" });
 assert.deepEqual(childActive, ["read", "bash", "subagent", "caller_ping", "subagent_done"]);
