@@ -274,8 +274,8 @@ let
     builtins.filter (plugin: cfg.plugins.${plugin.name}.enable) pluginPackages
   );
   defaultSettings = {
-    defaultProvider = "zai";
-    defaultModel = "glm-5.3-flash";
+    defaultProvider = "omniroute";
+    defaultModel = "worker";
     defaultThinkingLevel = "medium";
     quietStartup = true;
     theme = "dark";

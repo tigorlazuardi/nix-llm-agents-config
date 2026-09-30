@@ -24,7 +24,7 @@ const implementer = loadAgentDefaults("implementer");
 assert.equal(implementer?.source, "global");
 assert.equal(implementer?.tools, "read, bash, edit, write, grep, find");
 assert.equal(implementer?.spawning, false);
-assert.equal(implementer?.model, "zai/glm-5.3-flash");
+assert.equal(implementer?.model, "omniroute/worker");
 assert.equal(implementer?.thinking, "high");
 assert.equal(implementer?.sessionMode, "standalone");
 assert.equal(implementer?.systemPromptMode, "replace");
@@ -35,7 +35,7 @@ assert.equal(
 );
 const orchestrator = loadAgentDefaults("orchestrator");
 assert.equal(orchestrator?.source, "global");
-assert.equal(orchestrator?.model, "zai/glm-5.3-flash");
+assert.equal(orchestrator?.model, "omniroute/worker");
 assert.equal(orchestrator?.thinking, "high");
 assert.equal(orchestrator?.tools, "read, bash, subagent");
 assert.equal(orchestrator?.spawning, true);
