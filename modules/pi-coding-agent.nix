@@ -1,6 +1,7 @@
 {
   mattpocock-skills,
   nixpkgs-unstable,
+  pi-messaging-relay,
 }:
 {
   config,
@@ -125,6 +126,13 @@ let
   supiContext = pinnedPkgs.callPackage ../packages/supi-context.nix { };
   supiExtras = pinnedPkgs.callPackage ../packages/supi-extras.nix { };
   pluginPackages = [
+    {
+      name = "pi-messaging-relay";
+      package = "${pi-messaging-relay.packages.${pkgs.stdenv.hostPlatform.system}.pi-messaging-relay-extension
+      }";
+      # consumer library: needs a reachable relay server + pairing flow; hosts opt in.
+      default = false;
+    }
     {
       name = "diet-lsp";
       package = "${dietLsp}";
@@ -440,6 +448,12 @@ in
           };
         };
 
+        pi-messaging-relay.url = lib.mkOption {
+          type = lib.types.strMatching "https?://[^/?#[:space:]]+[^[:space:]]*";
+          default = "http://127.0.0.1:43127";
+          description = "Relay origin the client extension connects to. Loopback-only per the relay's service contract; override when the server runs on another host.";
+        };
+
         remote-pi.relayUrl = lib.mkOption {
           type = lib.types.strMatching "https?://[^/?#[:space:]]+[^[:space:]]*";
           default = "https://remote-pi.tigor.web.id";
@@ -650,6 +664,9 @@ in
         }
         // lib.optionalAttrs vccPlugin.enable {
           PI_VCC_CONFIG_PATH = lib.mkDefault "${cfg.configDir}/pi-vcc-config.json";
+        }
+        // lib.optionalAttrs cfg.plugins.pi-messaging-relay.enable {
+          PI_MESSAGING_RELAY_URL = lib.mkDefault cfg.plugins.pi-messaging-relay.url;
         }
         // lib.optionalAttrs idleCompact.enable {
           PI_IDLE_COMPACT_THRESHOLD_TOKENS = lib.mkDefault (toString idleCompact.thresholdTokens);

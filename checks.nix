@@ -50,6 +50,9 @@ let
   darwinEvaluation = builtins.tryEval darwin.config.home.activationPackage.drvPath;
   disabled = evaluate { programs.pi-coding-agent.enable = false; };
   localUpdaterEnabled = evaluate { programs.pi-coding-agent.localUpdater.enable = true; };
+  messagingRelayEnabled = evaluate {
+    programs.pi-coding-agent.plugins.pi-messaging-relay.enable = true;
+  };
   localUpdaterRecoveryModel = "zai/glm-5.3";
   localUpdaterRecoveryModelConfigured = evaluate {
     programs.pi-coding-agent.localUpdater = {
@@ -659,6 +662,15 @@ in
       == ./config/extensions/pi-idle-compact;
     assert default.config.home.sessionVariables.PI_IDLE_COMPACT_THRESHOLD_TOKENS == "150000";
     assert default.config.home.sessionVariables.PI_IDLE_COMPACT_DELAY_MS == "5000";
+    assert !default.config.programs.pi-coding-agent.plugins.pi-messaging-relay.enable;
+    assert !(default.config.home.sessionVariables ? PI_MESSAGING_RELAY_URL);
+    assert messagingRelayEnabled.config.programs.pi-coding-agent.plugins.pi-messaging-relay.enable;
+    assert builtins.any (
+      p: builtins.match ".*pi-messaging-relay-extension.*" p != null
+    ) messagingRelayEnabled.config.programs.pi-coding-agent.settings.packages;
+    assert
+      messagingRelayEnabled.config.home.sessionVariables.PI_MESSAGING_RELAY_URL
+      == "http://127.0.0.1:43127";
     assert
       default.config.home.file."${default.config.programs.pi-coding-agent.configDir}/AGENTS.md".source
       == ./config/AGENTS.md;

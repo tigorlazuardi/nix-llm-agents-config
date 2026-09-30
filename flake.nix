@@ -8,6 +8,8 @@
       flake = false;
     };
 
+    pi-messaging-relay.url = "github:tigorlazuardi/pi-messaging-relay";
+
     home-manager = {
       url = "github:nix-community/home-manager";
       inputs.nixpkgs.follows = "nixpkgs-unstable";
@@ -19,6 +21,7 @@
       nixpkgs-unstable,
       home-manager,
       mattpocock-skills,
+      pi-messaging-relay,
       ...
     }:
     let
@@ -35,7 +38,7 @@
           }) systems
         );
       piModule = import ./modules/pi-coding-agent.nix {
-        inherit mattpocock-skills nixpkgs-unstable;
+        inherit mattpocock-skills nixpkgs-unstable pi-messaging-relay;
       };
     in
     {
