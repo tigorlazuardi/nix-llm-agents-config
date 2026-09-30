@@ -37,7 +37,8 @@
       "baseUrl": "https://omniroute.tigor.web.id/v1",
       "apiKey": "omniroute-no-api-key",
       "compat": {
-        "forceAdaptiveThinking": true
+        "forceAdaptiveThinking": true,
+        "sendSessionAffinityHeaders": true
       },
       "models": [
         {
@@ -79,6 +80,16 @@
           "contextWindow": 200000,
           "maxTokens": 64000,
           "api": "anthropic-messages",
+          "input": [
+            "text",
+            "image"
+          ]
+        },
+        {
+          "id": "worker",
+          "reasoning": true,
+          "contextWindow": 288000,
+          "maxTokens": 128000,
           "input": [
             "text",
             "image"
