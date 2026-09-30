@@ -484,6 +484,7 @@ in
         theme = "dark";
         hideThinkingBlock = false;
         showCacheMissNotices = false;
+        projectServers = "allow";
         compaction = {
           enabled = true;
           reserveTokens = 128000;

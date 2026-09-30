@@ -281,6 +281,9 @@ let
     theme = "dark";
     hideThinkingBlock = false;
     showCacheMissNotices = false;
+    # pi-mcp-adapter: allow project-scoped MCP servers in trusted headless
+    # sessions without the per-server approval prompt (user decision: trust).
+    projectServers = "allow";
     compaction = {
       enabled = true;
       reserveTokens = 128000;
