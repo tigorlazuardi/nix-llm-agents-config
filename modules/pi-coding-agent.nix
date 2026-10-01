@@ -86,6 +86,9 @@ let
   pattyBgTasks = pinnedPkgs.callPackage ../packages/pi-patty-bg-tasks.nix { };
   remotePi = pinnedPkgs.callPackage ../packages/remote-pi.nix { };
   remotePiConfigUpdater = pinnedPkgs.callPackage ../packages/remote-pi-config-updater.nix { };
+  messagingRelayConfigUpdater =
+    pinnedPkgs.callPackage ../packages/pi-messaging-relay-config-updater.nix
+      { };
   visionHandoffConfigUpdater =
     pinnedPkgs.callPackage ../packages/pi-vision-handoff-config-updater.nix
       { };
@@ -454,7 +457,24 @@ in
         pi-messaging-relay.url = lib.mkOption {
           type = lib.types.strMatching "https?://[^/?#[:space:]]+[^[:space:]]*";
           default = "http://127.0.0.1:43127";
-          description = "Relay origin the client extension connects to. Loopback-only per the relay's service contract; override when the server runs on another host.";
+          description = "Relay origin written into the client config file. The extension accepts HTTP loopback origins only; override when the server listens on another loopback port.";
+        };
+
+        pi-messaging-relay.secretFile = lib.mkOption {
+          type = lib.types.nullOr (
+            lib.types.addCheck lib.types.str (
+              value: lib.isString value && lib.hasPrefix "/" value && !lib.hasPrefix "/nix/store/" value
+            )
+          );
+          default = null;
+          description = ''
+            Optional absolute host path to the relay shared secret, read verbatim
+            (no trimming, 1-512 bytes) into the client config file at activation
+            time. The path is passed through and never copied into or read from
+            the Nix store; rotate by rewriting the file and re-running the
+            activation. When null, the rendered config carries only the url and
+            connects to relays running with authentication off.
+          '';
         };
 
         remote-pi.relayUrl = lib.mkOption {
@@ -654,6 +674,19 @@ in
       ''
     );
 
+    home.activation.messagingRelayConfig =
+      lib.mkIf (cfg.enable && cfg.plugins.pi-messaging-relay.enable)
+        (
+          lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+            run ${lib.getExe messagingRelayConfigUpdater} \
+              ${lib.escapeShellArg "${config.home.homeDirectory}/.config/pi/pi-messaging-relay.json"} \
+              ${lib.escapeShellArg cfg.plugins.pi-messaging-relay.url} \
+              ${lib.optionalString (cfg.plugins.pi-messaging-relay.secretFile != null) (
+                lib.escapeShellArg cfg.plugins.pi-messaging-relay.secretFile
+              )}
+          ''
+        );
+
     home = {
       packages = lib.mkIf cfg.enable (
         [ pinnedPkgs.oscclip ]
@@ -667,9 +700,6 @@ in
         }
         // lib.optionalAttrs vccPlugin.enable {
           PI_VCC_CONFIG_PATH = lib.mkDefault "${cfg.configDir}/pi-vcc-config.json";
-        }
-        // lib.optionalAttrs cfg.plugins.pi-messaging-relay.enable {
-          PI_MESSAGING_RELAY_URL = lib.mkDefault cfg.plugins.pi-messaging-relay.url;
         }
         // lib.optionalAttrs idleCompact.enable {
           PI_IDLE_COMPACT_THRESHOLD_TOKENS = lib.mkDefault (toString idleCompact.thresholdTokens);

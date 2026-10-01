@@ -665,13 +665,35 @@ in
     assert default.config.home.sessionVariables.PI_IDLE_COMPACT_DELAY_MS == "5000";
     assert !default.config.programs.pi-coding-agent.plugins.pi-messaging-relay.enable;
     assert !(default.config.home.sessionVariables ? PI_MESSAGING_RELAY_URL);
+    assert !default.config.home.activation ? messagingRelayConfig;
     assert messagingRelayEnabled.config.programs.pi-coding-agent.plugins.pi-messaging-relay.enable;
     assert builtins.any (
       p: builtins.match ".*pi-messaging-relay-extension.*" p != null
     ) messagingRelayEnabled.config.programs.pi-coding-agent.settings.packages;
+    assert !(messagingRelayEnabled.config.home.sessionVariables ? PI_MESSAGING_RELAY_URL);
     assert
-      messagingRelayEnabled.config.home.sessionVariables.PI_MESSAGING_RELAY_URL
+      messagingRelayEnabled.config.programs.pi-coding-agent.plugins.pi-messaging-relay.url
       == "http://127.0.0.1:43127";
+    assert messagingRelayEnabled.config.home.activation ? messagingRelayConfig;
+    assert
+      messagingRelayEnabled.config.programs.pi-coding-agent.plugins.pi-messaging-relay.secretFile == null;
+    assert (
+      let
+        relaySecret = evaluate {
+          programs.pi-coding-agent.plugins.pi-messaging-relay = {
+            enable = true;
+            url = "http://127.0.0.1:49999";
+            secretFile = "/run/secrets/pi-messaging-relay-secret";
+          };
+        };
+      in
+      relaySecret.config.programs.pi-coding-agent.plugins.pi-messaging-relay.secretFile
+      == "/run/secrets/pi-messaging-relay-secret"
+      && builtins.match ".*49999.*" relaySecret.config.home.activation.messagingRelayConfig.data != null
+      &&
+        builtins.match ".*/run/secrets/pi-messaging-relay-secret.*" relaySecret.config.home.activation.messagingRelayConfig.data
+        != null
+    );
     assert
       default.config.home.file."${default.config.programs.pi-coding-agent.configDir}/AGENTS.md".source
       == ./config/AGENTS.md;

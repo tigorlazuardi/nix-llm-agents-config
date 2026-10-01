@@ -9,7 +9,7 @@ const GROUP_MARKERS: Record<Group, readonly string[]> = {
   subagents: ["pi-herdr-subagents"],
   research: ["pi-web-access", "pi-mcp-adapter"],
   herdr: ["pi-herdr"],
-  mesh: ["remote-pi"],
+  mesh: ["remote-pi", "pi-messaging-relay"],
   journal: ["dev-journal"],
   artifact: ["artifact-preview"],
 };
