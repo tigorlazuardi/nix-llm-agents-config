@@ -457,7 +457,7 @@ in
         pi-messaging-relay.url = lib.mkOption {
           type = lib.types.strMatching "https?://[^/?#[:space:]]+[^[:space:]]*";
           default = "http://127.0.0.1:43127";
-          description = "Relay origin written into the client config file. The extension accepts HTTP loopback origins only; override when the server listens on another loopback port.";
+          description = "Relay origin written into the client config file. The extension accepts HTTP loopback origins or HTTPS origins; override to an HTTPS relay when the server is exposed through a reverse proxy.";
         };
 
         pi-messaging-relay.secretFile = lib.mkOption {

@@ -26,9 +26,11 @@ writeShellApplication {
     secret_file=''${3:-}
 
     jq -ne --arg url "$url" '$url |
-      test("^http://127\\.0\\.0\\.1:[0-9]+/?$") or test("^http://\\[::1\\]:[0-9]+/?$")' \
+      test("^http://127\\.0\\.0\\.1(:[0-9]+)?/?$")
+      or test("^http://\\[::1\\](:[0-9]+)?/?$")
+      or test("^https://[^/@?#:]+(:[0-9]+)?/?$")' \
       >/dev/null || {
-      echo "invalid relay client url (HTTP loopback origin only): $url" >&2
+      echo "invalid relay client url (HTTP loopback or HTTPS origin only): $url" >&2
       exit 2
     }
 
