@@ -742,7 +742,7 @@ in
         source = ../config/templates/drain;
         force = true;
       };
-      "${cfg.configDir}/mcp.json" = lib.mkIf (mcpPlugin.enable && renderedMcpConfig != { }) {
+      "${cfg.configDir}/mcp-adapter.json" = lib.mkIf (mcpPlugin.enable && renderedMcpConfig != { }) {
         source = jsonFormat.generate "pi-mcp-adapter.json" renderedMcpConfig;
       };
       # ponytail: immutable config disables /optimizer persistence; change module options and switch.

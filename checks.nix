@@ -353,7 +353,7 @@ let
   expectedWritingForAgents = default.config.programs.pi-coding-agent.skills.writing-for-agents;
   expectedModels = builtins.fromJSON (builtins.readFile ./config/models.json);
   secretWrappedMcpConfig =
-    secretWrappedMcp.config.home.file."${secretWrappedMcp.config.programs.pi-coding-agent.configDir}/mcp.json".source;
+    secretWrappedMcp.config.home.file."${secretWrappedMcp.config.programs.pi-coding-agent.configDir}/mcp-adapter.json".source;
   webAccessConfigSource =
     webAccessConfigured.config.home.file."${webAccessConfigured.config.programs.pi-coding-agent.configDir}/web-search.json".source;
   expectedWebAccessConfigFile = (pkgs.formats.json { }).generate "web-search.json" {
@@ -762,7 +762,9 @@ in
     assert
       default.config.home.file."${default.config.programs.pi-coding-agent.configDir}/templates/drain".force;
     assert
-      !(default.config.home.file ? "${default.config.programs.pi-coding-agent.configDir}/mcp.json");
+      !(
+        default.config.home.file ? "${default.config.programs.pi-coding-agent.configDir}/mcp-adapter.json"
+      );
     assert !(default.config.xdg.configFile ? "mcp/mcp.json");
     assert builtins.elem expectedPackage default.config.home.packages;
     assert
@@ -781,7 +783,9 @@ in
     assert
       !(disabled.config.home.file ? "${disabled.config.programs.pi-coding-agent.configDir}/AGENTS.md");
     assert
-      !(disabled.config.home.file ? "${disabled.config.programs.pi-coding-agent.configDir}/mcp.json");
+      !(
+        disabled.config.home.file ? "${disabled.config.programs.pi-coding-agent.configDir}/mcp-adapter.json"
+      );
     assert
       !(
         disabled.config.home.file
@@ -831,7 +835,7 @@ in
     assert
       !(
         pluginsDisabled.config.home.file
-          ? "${pluginsDisabled.config.programs.pi-coding-agent.configDir}/mcp.json"
+          ? "${pluginsDisabled.config.programs.pi-coding-agent.configDir}/mcp-adapter.json"
       );
     assert
       !(
@@ -1533,7 +1537,7 @@ in
         export PI_CODING_AGENT_DIR="$HOME/.pi/agent"
         export PI_TELEMETRY=0
         mkdir -p "$PI_CODING_AGENT_DIR"
-        cp "$mcp_config" "$PI_CODING_AGENT_DIR/mcp.json"
+        cp "$mcp_config" "$PI_CODING_AGENT_DIR/mcp-adapter.json"
         pi --offline --no-extensions --no-skills --no-prompt-templates --no-context-files \
           -e ${expectedMcpAdapterPath} \
           --list-models > pi.log 2>&1
