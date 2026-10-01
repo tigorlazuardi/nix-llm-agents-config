@@ -37,62 +37,89 @@ const paths: Record<string, string> = {
   host_artifact: "/config/extensions/artifact-preview/index.ts",
   todo: "/nix/store/pi-todo-herdr/index.ts",
 };
-let active = [...core, ...Object.values(grouped).flat()];
-let loader: { execute: (_id: string, params: { group: Group }) => Promise<unknown> } | undefined;
-let sessionStart: (() => void) | undefined;
 const tools = Object.entries(paths).map(([name, path]) => ({ name, description: "", sourceInfo: { path } }));
 
-lazyTools({
-  registerTool(definition: typeof loader) {
-    loader = definition;
-    tools.push({ name: "load_tools", description: "", sourceInfo: { path: "/config/extensions/lazy-tools/index.ts" } });
-  },
-  on(event: string, handler: () => void) {
-    if (event === "session_start") sessionStart = handler;
-  },
-  getAllTools: () => tools,
-  getActiveTools: () => active,
-  setActiveTools(names: string[]) {
-    active = names;
-  },
-} as never);
+type Harness = {
+  active: string[];
+  loader: { execute: (_id: string, params: { group: Group }) => Promise<unknown> };
+  sessionStart: (event: { reason: string }) => void;
+  toolCall: (event: { toolName: string }) => { block: boolean; reason?: string } | undefined;
+};
 
-assert(loader && sessionStart);
-sessionStart();
-assert(!active.includes("agent_bg"));
-assert.deepEqual(active, [...core.filter((name) => name !== "agent_bg"), "load_tools"]);
-assert(!active.includes("mcpScript"));
-let researchLoaded = false;
-for (const group of Object.keys(grouped) as Group[]) {
-  if (!researchLoaded) assert(!active.includes("mcpScript"));
-  await loader.execute(group, { group });
-  for (const tool of grouped[group]) assert(active.includes(tool));
-  for (const tool of core) if (tool !== "agent_bg") assert(active.includes(tool));
-  if (group === "research") researchLoaded = true;
-  assert.equal(active.includes("mcpScript"), researchLoaded);
+function harness(initialActive: string[]): Harness {
+  const state: Harness = {
+    active: initialActive,
+    loader: undefined as never,
+    sessionStart: undefined as never,
+    toolCall: undefined as never,
+  };
+  lazyTools({
+    registerTool(definition: typeof state.loader) {
+      state.loader = definition;
+      tools.push({ name: "load_tools", description: "", sourceInfo: { path: "/config/extensions/lazy-tools/index.ts" } });
+    },
+    on(event: string, handler: (payload?: unknown) => unknown) {
+      if (event === "session_start") state.sessionStart = handler as Harness["sessionStart"];
+      if (event === "tool_call") state.toolCall = handler as Harness["toolCall"];
+    },
+    getAllTools: () => tools,
+    getActiveTools: () => state.active,
+    setActiveTools(names: string[]) {
+      state.active = names;
+    },
+  } as never);
+  assert(state.loader && state.sessionStart && state.toolCall);
+  return state;
 }
 
+// --- Fresh session: deferred tools hidden, model cannot call them at all.
+const fresh = harness([...core, ...Object.values(grouped).flat()]);
+fresh.sessionStart({ reason: "startup" });
+assert(!fresh.active.includes("agent_bg"));
+assert.deepEqual(fresh.active, [...core.filter((name) => name !== "agent_bg"), "load_tools"]);
+assert(!fresh.active.includes("mcpScript"));
+let researchLoaded = false;
+for (const group of Object.keys(grouped) as Group[]) {
+  if (!researchLoaded) assert(!fresh.active.includes("mcpScript"));
+  await fresh.loader.execute("x", { group });
+  for (const tool of grouped[group]) assert(fresh.active.includes(tool));
+  for (const tool of core) if (tool !== "agent_bg") assert(fresh.active.includes(tool));
+  if (group === "research") researchLoaded = true;
+  assert.equal(fresh.active.includes("mcpScript"), researchLoaded);
+}
+// Loaded tools are unlocked: gate must not block them.
+assert(!fresh.toolCall({ toolName: "browser_open" })?.block);
+assert(!fresh.toolCall({ toolName: "bash" })?.block);
+
+// --- Reload: transcript-restored tools stay active but gated until load_tools.
+const reloaded = harness([...core.filter((name) => name !== "agent_bg"), "browser_open", "web_search", "load_tools"]);
+reloaded.sessionStart({ reason: "reload" });
+assert(reloaded.active.includes("browser_open"));
+assert(reloaded.active.includes("load_tools"));
+const blockedBrowser = reloaded.toolCall({ toolName: "browser_open" });
+assert.equal(blockedBrowser?.block, true);
+assert.match(blockedBrowser?.reason ?? "", /load_tools/);
+assert.match(blockedBrowser?.reason ?? "", /browser/);
+await reloaded.loader.execute("x", { group: "browser" });
+assert(!reloaded.toolCall({ toolName: "browser_open" })?.block);
+// Other groups stay gated after loading only one group.
+assert.equal(reloaded.toolCall({ toolName: "web_search" })?.block, true);
+
+// --- Resume: same gating contract as reload.
+const resumed = harness([...core.filter((name) => name !== "agent_bg"), "browser_open", "load_tools"]);
+resumed.sessionStart({ reason: "resume" });
+assert(resumed.active.includes("browser_open"));
+assert.equal(resumed.toolCall({ toolName: "browser_open" })?.block, true);
+await resumed.loader.execute("x", { group: "browser" });
+assert(!resumed.toolCall({ toolName: "browser_open" })?.block);
+
+// --- Subagent children: fixed allowed set, no gating.
 process.env.PI_SUBAGENT_ALLOWED_TOOLS = "read,bash,agent_bg,subagent,caller_ping,subagent_done";
-let childActive = ["read", "bash", "agent_bg", "subagent", "caller_ping", "subagent_done"];
-let childLoader: typeof loader;
-let childSessionStart: typeof sessionStart;
-lazyTools({
-  registerTool(definition: typeof loader) {
-    childLoader = definition;
-  },
-  on(event: string, handler: () => void) {
-    if (event === "session_start") childSessionStart = handler;
-  },
-  getAllTools: () => tools,
-  getActiveTools: () => childActive,
-  setActiveTools(names: string[]) {
-    childActive = names;
-  },
-} as never);
-assert(childLoader && childSessionStart);
-childSessionStart();
-assert(!childActive.includes("agent_bg"));
-assert.deepEqual(childActive, ["read", "bash", "subagent", "caller_ping", "subagent_done"]);
-await childLoader.execute("browser", { group: "browser" });
-assert.deepEqual(childActive, ["read", "bash", "subagent", "caller_ping", "subagent_done"]);
+const child = harness(["read", "bash", "agent_bg", "subagent", "caller_ping", "subagent_done"]);
+child.sessionStart({ reason: "startup" });
+assert(!child.active.includes("agent_bg"));
+assert.deepEqual(child.active, ["read", "bash", "subagent", "caller_ping", "subagent_done"]);
+await child.loader.execute("x", { group: "browser" });
+assert.deepEqual(child.active, ["read", "bash", "subagent", "caller_ping", "subagent_done"]);
+assert(!child.toolCall({ toolName: "browser_open" })?.block);
 delete process.env.PI_SUBAGENT_ALLOWED_TOOLS;

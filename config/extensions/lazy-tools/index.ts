@@ -29,6 +29,15 @@ export default function (pi: ExtensionAPI) {
       && (!childAllowedTools || childAllowedTools.has(tool.name))
       && GROUP_MARKERS[group].some((marker) => tool.sourceInfo.path.includes(marker)))
     .map((tool) => tool.name);
+  const groupOfTool = (name: string): Group | undefined => {
+    for (const group of GROUP_NAMES) {
+      if (groupTools(group).includes(name)) return group;
+    }
+    return undefined;
+  };
+  // Groups unlocked via load_tools in this session. resume/fork/reload build a fresh
+  // extension instance, so previously loaded groups reset to locked.
+  const unlocked = new Set<Group>();
 
   pi.registerTool({
     name: "load_tools",
@@ -44,6 +53,7 @@ export default function (pi: ExtensionAPI) {
       const active = pi.getActiveTools();
       const added = matches.filter((name) => !active.includes(name));
       pi.setActiveTools([...new Set([...active, ...added])]);
+      unlocked.add(group);
       return {
         content: [{
           type: "text",
@@ -58,14 +68,39 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
-  pi.on("session_start", () => {
+  // Reject calls to deferred tools that are visible but not loaded yet. The agent loop
+  // answers calls to inactive tools with an opaque "Tool not found" before any tool_call
+  // hook runs, so deferred tools must stay active to receive this rejection.
+  pi.on("tool_call", (event) => {
+    if (childAllowedTools) return;
+    const group = groupOfTool(event.toolName);
+    if (!group || unlocked.has(group)) return;
+    return {
+      block: true,
+      reason: `Tool "${event.toolName}" is deferred and not loaded in this session. Call the load_tools tool with group "${group}" first, then retry.`,
+    };
+  });
+
+  pi.on("session_start", (event) => {
+    const active = pi.getActiveTools();
+    if (childAllowedTools) {
+      pi.setActiveTools(active.filter((name) =>
+        !HIDDEN_TOOLS.has(name) && childAllowedTools.has(name)));
+      return;
+    }
+    if (event.reason === "resume" || event.reason === "fork" || event.reason === "reload") {
+      // Keep transcript-restored tools active so the model can call them and get the
+      // "load first" rejection above instead of "Tool not found" + bash fallback.
+      pi.setActiveTools([...new Set([
+        ...active.filter((name) => !HIDDEN_TOOLS.has(name)),
+        "load_tools",
+      ])]);
+      return;
+    }
     const deferred = new Set(GROUP_NAMES.flatMap(groupTools));
-    const active = pi.getActiveTools().filter((name) =>
-      !HIDDEN_TOOLS.has(name)
-      && (childAllowedTools ? childAllowedTools.has(name) : !deferred.has(name)));
     pi.setActiveTools([...new Set([
-      ...active,
-      ...(childAllowedTools ? [] : ["load_tools"]),
+      ...active.filter((name) => !HIDDEN_TOOLS.has(name) && !deferred.has(name)),
+      "load_tools",
     ])]);
   });
 }
