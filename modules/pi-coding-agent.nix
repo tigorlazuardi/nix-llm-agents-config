@@ -65,7 +65,6 @@ let
   vccPlugin = cfg.plugins.pi-vcc;
   webAccessPlugin = cfg.plugins.pi-web-access;
   visionHandoffPlugin = cfg.plugins.pi-vision-handoff;
-  remotePiPlugin = cfg.plugins.remote-pi;
   mkPluginOptions =
     default:
     lib.mkOption {
@@ -84,8 +83,6 @@ let
   askHerdr = pinnedPkgs.callPackage ../packages/pi-ask-herdr.nix { };
   herdrRename = pinnedPkgs.callPackage ../packages/pi-herdr-rename.nix { };
   pattyBgTasks = pinnedPkgs.callPackage ../packages/pi-patty-bg-tasks.nix { };
-  remotePi = pinnedPkgs.callPackage ../packages/remote-pi.nix { };
-  remotePiConfigUpdater = pinnedPkgs.callPackage ../packages/remote-pi-config-updater.nix { };
   messagingRelayConfigUpdater =
     pinnedPkgs.callPackage ../packages/pi-messaging-relay-config-updater.nix
       { };
@@ -180,11 +177,6 @@ let
     {
       name = "pi-patty-bg-tasks";
       package = "${pattyBgTasks}/lib/node_modules/pi-patty-bg-tasks";
-      default = true;
-    }
-    {
-      name = "remote-pi";
-      package = "${remotePi}/lib/node_modules/remote-pi";
       default = true;
     }
     {
@@ -477,12 +469,6 @@ in
           '';
         };
 
-        remote-pi.relayUrl = lib.mkOption {
-          type = lib.types.strMatching "https?://[^/?#[:space:]]+[^[:space:]]*";
-          default = "https://remote-pi.tigor.web.id";
-          description = "Canonical HTTP(S) relay URL merged into mutable ~/.pi/remote/config.json. Consumers may override this for another relay.";
-        };
-
         browser-goblin.executablePath = lib.mkOption {
           type = lib.types.str;
           # ponytail: reuse system browser instead of agent-browser downloads; override for other Chromium builds.
@@ -654,16 +640,6 @@ in
           };
           Install.WantedBy = [ "timers.target" ];
         };
-
-    # ponytail: fixed repository and schedule; make configurable when a second deployment exists.
-    # ponytail: merge only relay key so Remote Pi can keep mutating pairing and user config.
-    home.activation.remotePiConfig = lib.mkIf (cfg.enable && remotePiPlugin.enable) (
-      lib.hm.dag.entryAfter [ "writeBoundary" ] ''
-        run ${lib.getExe remotePiConfigUpdater} \
-          ${lib.escapeShellArg "${config.home.homeDirectory}/.pi/remote/config.json"} \
-          ${lib.escapeShellArg remotePiPlugin.relayUrl}
-      ''
-    );
 
     # ponytail: merge only managed default so /vision-handoff can persist every other setting.
     home.activation.visionHandoffConfig = lib.mkIf (cfg.enable && visionHandoffPlugin.enable) (

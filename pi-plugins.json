@@ -138,16 +138,6 @@
     "hash": "sha256-KFXFMqXgZE5em9hvJLyVNtn04whp9TYESKTKB5QWf3E=",
     "check": "pi-patty-bg-tasks-load"
   },
-  "remote-pi": {
-    "strategy": "npm",
-    "package": "remote-pi",
-    "version": "0.7.0",
-    "src": "https://registry.npmjs.org/remote-pi/-/remote-pi-0.7.0.tgz",
-    "hash": "sha256-YhImMDS77zPxcDpkpaFPhHDyAxqI2VjADmIjSm7EIKM=",
-    "npmDepsHash": "sha256-cDhgcLZd7urYouDPhlS6E8ZRP29GHChCu78BEgPm5Sk=",
-    "lockFile": "packages/remote-pi-package-lock.json",
-    "check": "remote-pi-load"
-  },
   "browser-goblin": {
     "strategy": "npm",
     "package": "browser-goblin",

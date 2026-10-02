@@ -86,9 +86,6 @@ let
       }
     ];
   };
-  remotePiConfigured = evaluate {
-    programs.pi-coding-agent.plugins.remote-pi.relayUrl = "https://relay.consumer.example";
-  };
   visionHandoffConfigured = evaluate {
     programs.pi-coding-agent.plugins.pi-vision-handoff.visionModel = "google/gemini-2.5-pro";
   };
@@ -100,12 +97,6 @@ let
   );
   visionHandoffActivation = default.config.home.activation.visionHandoffConfig.data;
   expectedVisionHandoffConfigPath = "${default.config.programs.pi-coding-agent.configDir}/extensions/pi-vision-handoff.json";
-  invalidRemotePiRelayUrl = evaluate {
-    programs.pi-coding-agent.plugins.remote-pi.relayUrl = "https://?";
-  };
-  invalidRemotePiRelayUrlEvaluation = builtins.tryEval (
-    builtins.deepSeq invalidRemotePiRelayUrl.config.home.activationPackage true
-  );
   relayConfigured = evaluate {
     services.remote-pi-relay = {
       enable = true;
@@ -177,7 +168,6 @@ let
       pi-mcp-adapter.enable = false;
       pix-optimizer.enable = false;
       pi-vcc.enable = false;
-      remote-pi.enable = false;
       pi-herdr-subagents.enable = false;
       pi-vision-handoff.enable = false;
       pi-todo-herdr.enable = false;
@@ -287,9 +277,6 @@ let
   expectedHerdrRenamePath = "${expectedHerdrRename}/lib/node_modules/pi-herdr-rename";
   expectedPattyBgTasks = pkgs.callPackage ./packages/pi-patty-bg-tasks.nix { };
   expectedPattyBgTasksPath = "${expectedPattyBgTasks}/lib/node_modules/pi-patty-bg-tasks";
-  expectedRemotePi = pkgs.callPackage ./packages/remote-pi.nix { };
-  expectedRemotePiPath = "${expectedRemotePi}/lib/node_modules/remote-pi";
-  expectedRemotePiConfigUpdater = pkgs.callPackage ./packages/remote-pi-config-updater.nix { };
   expectedRemotePiRelay = pkgs.callPackage ./packages/remote-pi-relay.nix { };
   expectedVimMode = pkgs.callPackage ./packages/pi-vimmode.nix { };
   expectedVimModePath = "${expectedVimMode}/lib/node_modules/pi-vimmode";
@@ -371,8 +358,6 @@ in
   pi-ask-herdr = expectedAskHerdr;
   pi-herdr-rename = expectedHerdrRename;
   pi-patty-bg-tasks = expectedPattyBgTasks;
-  remote-pi = expectedRemotePi;
-  remote-pi-config-updater = expectedRemotePiConfigUpdater;
   remote-pi-relay = expectedRemotePiRelay;
   pi-vimmode = expectedVimMode;
   pi-usage = expectedUsage;
@@ -500,7 +485,6 @@ in
           expectedAskHerdrPath
           expectedHerdrRenamePath
           expectedPattyBgTasksPath
-          expectedRemotePiPath
           expectedVimModePath
           expectedUsagePath
           expectedCacheOptimizerPath
@@ -529,18 +513,8 @@ in
     assert !(builtins.elem expectedToon pluginsDisabled.config.home.packages);
     assert !default.config.programs.pi-coding-agent.plugins.diet-lsp.enable;
     assert default.config.programs.pi-coding-agent.plugins.command-code.enable;
-    assert default.config.programs.pi-coding-agent.plugins.remote-pi.enable;
-    assert
-      default.config.programs.pi-coding-agent.plugins.remote-pi.relayUrl
-      == "https://remote-pi.tigor.web.id";
-    assert
-      remotePiConfigured.config.programs.pi-coding-agent.plugins.remote-pi.relayUrl
-      == "https://relay.consumer.example";
-    assert !invalidRemotePiRelayUrlEvaluation.success;
     assert !(default.config.home.sessionVariables ? REMOTE_PI_RELAY);
-    assert default.config.home.activation ? remotePiConfig;
-    assert remotePiConfigured.config.home.activation ? remotePiConfig;
-    assert !(pluginsDisabled.config.home.activation ? remotePiConfig);
+    assert !(default.config.home.activation ? remotePiConfig);
     assert
       default.config.programs.pi-coding-agent.plugins.pi-vision-handoff.visionModel
       == "omniroute/cc/claude-haiku-4-5-20251001";
@@ -849,8 +823,6 @@ in
     assert
       !(builtins.elem expectedPiVccPath pluginsDisabled.config.programs.pi-coding-agent.settings.packages);
     assert
-      !(builtins.elem expectedRemotePiPath pluginsDisabled.config.programs.pi-coding-agent.settings.packages);
-    assert
       !(builtins.elem expectedHerdrSubagentsPath pluginsDisabled.config.programs.pi-coding-agent.settings.packages);
     assert
       !(builtins.elem expectedTodoHerdrPath pluginsDisabled.config.programs.pi-coding-agent.settings.packages);
@@ -890,7 +862,6 @@ in
         expectedAskHerdrPath
         expectedHerdrRenamePath
         expectedPattyBgTasksPath
-        expectedRemotePiPath
         expectedVimModePath
         expectedUsagePath
         expectedCacheOptimizerPath
@@ -1091,7 +1062,7 @@ in
         ];
       }
       ''
-        nixfmt --check ${./flake.nix} ${./checks.nix} ${./modules/pi-coding-agent.nix} ${./modules/remote-pi-relay.nix} ${./modules/pi-coding-agent/agents.nix} ${./modules/pi-coding-agent/default-agents.nix} ${./modules/pi-coding-agent/pi-herdr-subagents.nix} ${./packages/pi-diet-lsp.nix} ${./packages/pi-commandcode-provider.nix} ${./packages/pi-effort.nix} ${./packages/pi-timestamps.nix} ${./packages/pi-herdr.nix} ${./packages/pi-herdr-sudo-task.nix} ${./packages/pi-ask-herdr.nix} ${./packages/pi-herdr-rename.nix} ${./packages/pi-patty-bg-tasks.nix} ${./packages/remote-pi.nix} ${./packages/remote-pi-config-updater.nix} ${./packages/remote-pi-relay.nix} ${./packages/pi-vimmode.nix} ${./packages/pi-usage.nix} ${./packages/pi-cache-optimizer.nix} ${./packages/pi-mcp-adapter.nix} ${./packages/browser-goblin.nix} ${./packages/pix-optimizer.nix} ${./packages/pix-tools.nix} ${./packages/pi-vcc.nix} ${./packages/pi-prompt-template-model.nix} ${./packages/pi-todo-herdr.nix} ${./packages/pi-rules.nix} ${./packages/pi-web-access.nix} ${./packages/pi-herdr-subagents.nix} ${./packages/pi-vision-handoff.nix} ${./packages/pi-vision-handoff-config-updater.nix} ${./packages/supi-context.nix} ${./packages/supi-extras.nix} ${./packages/toon.nix}
+        nixfmt --check ${./flake.nix} ${./checks.nix} ${./modules/pi-coding-agent.nix} ${./modules/remote-pi-relay.nix} ${./modules/pi-coding-agent/agents.nix} ${./modules/pi-coding-agent/default-agents.nix} ${./modules/pi-coding-agent/pi-herdr-subagents.nix} ${./packages/pi-diet-lsp.nix} ${./packages/pi-commandcode-provider.nix} ${./packages/pi-effort.nix} ${./packages/pi-timestamps.nix} ${./packages/pi-herdr.nix} ${./packages/pi-herdr-sudo-task.nix} ${./packages/pi-ask-herdr.nix} ${./packages/pi-herdr-rename.nix} ${./packages/pi-patty-bg-tasks.nix} ${./packages/remote-pi-relay.nix} ${./packages/pi-vimmode.nix} ${./packages/pi-usage.nix} ${./packages/pi-cache-optimizer.nix} ${./packages/pi-mcp-adapter.nix} ${./packages/browser-goblin.nix} ${./packages/pix-optimizer.nix} ${./packages/pix-tools.nix} ${./packages/pi-vcc.nix} ${./packages/pi-prompt-template-model.nix} ${./packages/pi-todo-herdr.nix} ${./packages/pi-rules.nix} ${./packages/pi-web-access.nix} ${./packages/pi-herdr-subagents.nix} ${./packages/pi-vision-handoff.nix} ${./packages/pi-vision-handoff-config-updater.nix} ${./packages/supi-context.nix} ${./packages/supi-extras.nix} ${./packages/toon.nix}
         WORKFLOW=${./.github/workflows/daily-update.yml} UPDATER=${./scripts/daily-update.sh} REGISTRY=${./pi-plugins.json} CHECKS=${./checks.nix} MISSING_INTEGRITY_FIXTURE=${./tests/fixtures/npm-lock-missing-integrity.json} CONTROL_RESOLVED_FIXTURE=${./tests/fixtures/npm-lock-control-resolved.json} bash ${./tests/daily-updater-self-check.sh}
         RUNNER=${./scripts/local-update.sh} PROMPT=${./scripts/local-update-recovery.md} bash ${./tests/local-updater-self-check.sh}
         touch $out
@@ -1210,70 +1181,6 @@ in
         grep -F 'name: "agent_bg"' ${expectedPattyBgTasksPath}/src/tools/agent-bg.ts
         pi --offline --no-extensions --no-skills --no-prompt-templates --no-context-files \
           -e ${expectedPattyBgTasksPath} \
-          --list-models > pi.log 2>&1
-        ! grep -E 'Extension issues|Failed to load extension|Cannot find module|Error:' pi.log
-        touch $out
-      '';
-
-  remote-pi-config =
-    pkgs.runCommandLocal "remote-pi-config"
-      {
-        nativeBuildInputs = [
-          expectedRemotePiConfigUpdater
-          pkgs.jq
-        ];
-      }
-      ''
-        config="$TMPDIR/remote/config.json"
-        mkdir -p "$(dirname "$config")"
-        printf '%s\n' '{"relay":"https://old.example","paired":true,"nested":{"keep":1}}' > "$config"
-        chmod 0644 "$config"
-        before=$(stat -c %i "$config")
-
-        remote-pi-config-update "$config" https://relay.consumer.example
-        jq -e '.relay == "https://relay.consumer.example/" and .paired == true and .nested.keep == 1' "$config"
-        test "$(stat -c %a "$config")" = 600
-        test "$(stat -c %i "$config")" != "$before"
-
-        unchanged=$(stat -c %i "$config")
-        remote-pi-config-update "$config" https://relay.consumer.example
-        test "$(stat -c %i "$config")" = "$unchanged"
-
-        cp "$config" valid.json
-        printf '%s\n' 'not-json' > "$config"
-        if remote-pi-config-update "$config" https://relay.consumer.example; then exit 1; fi
-        grep -Fx not-json "$config"
-        cp valid.json "$config"
-        if remote-pi-config-update "$config" 'https://?'; then exit 1; fi
-        cmp valid.json "$config"
-
-        new="$TMPDIR/new/config.json"
-        remote-pi-config-update "$new" http://127.0.0.1:8506
-        jq -e '. == {"relay":"http://127.0.0.1:8506/"}' "$new"
-        test "$(stat -c %a "$new")" = 600
-        touch $out
-      '';
-
-  remote-pi-load =
-    pkgs.runCommandLocal "remote-pi-load"
-      {
-        nativeBuildInputs = [
-          expectedPackage
-          pkgs.nodejs_22
-        ];
-      }
-      ''
-        export HOME="$TMPDIR/home"
-        export PI_CODING_AGENT_DIR="$HOME/.pi/agent"
-        export PI_TELEMETRY=0
-        mkdir -p "$PI_CODING_AGENT_DIR"
-
-        test -f ${expectedRemotePiPath}/dist/index.js
-        test -x ${expectedRemotePi}/bin/remote-pi
-        test -x ${expectedRemotePi}/bin/pi-supervisord
-        node -e 'import("${expectedRemotePiPath}/dist/index.js")'
-        pi --offline --no-extensions --no-skills --no-prompt-templates --no-context-files \
-          -e ${expectedRemotePiPath} \
           --list-models > pi.log 2>&1
         ! grep -E 'Extension issues|Failed to load extension|Cannot find module|Error:' pi.log
         touch $out

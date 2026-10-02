@@ -1,14 +1,13 @@
 import assert from "node:assert/strict";
 import lazyTools from "./index.ts";
 
-type Group = "browser" | "subagents" | "research" | "herdr" | "mesh" | "journal" | "artifact";
-const core = ["read", "bash", "bash_bg", "agent_bg", "job_decide", "jobs", "monitor", "ask_user", "rename_herdr_tab", "todo"];
+type Group = "browser" | "subagents" | "research" | "herdr" | "journal" | "artifact";
+const core = ["read", "bash", "bash_bg", "agent_bg", "job_decide", "jobs", "monitor", "ask_user", "rename_herdr_tab", "todo", "agent_send", "list_peers"];
 const grouped: Record<Group, string[]> = {
   browser: ["browser_open"],
   subagents: ["subagent", "subagent_interrupt", "subagents_list", "subagent_resume"],
   research: ["web_search", "mcp", "mcpScript"],
   herdr: ["herdr_layout", "sudo_task"],
-  mesh: ["agent_send", "list_peers"],
   journal: ["dev_journal"],
   artifact: ["host_artifact"],
 };
@@ -32,7 +31,7 @@ const paths: Record<string, string> = {
   agent_bg: "/nix/store/pi-patty-bg-tasks/index.ts",
   job_decide: "/nix/store/pi-patty-bg-tasks/index.ts",
   monitor: "/nix/store/pi-patty-bg-tasks/index.ts",
-  agent_send: "/nix/store/remote-pi/index.ts",
+  agent_send: "/nix/store/pi-messaging-relay-extension/index.ts",
   list_peers: "/nix/store/pi-messaging-relay-extension/index.ts",
   dev_journal: "/config/extensions/dev-journal/index.ts",
   host_artifact: "/config/extensions/artifact-preview/index.ts",
