@@ -122,21 +122,6 @@
           }
         },
         {
-          "id": "worker",
-          "reasoning": true,
-          "contextWindow": 288000,
-          "maxTokens": 128000,
-          "api": "openai-completions",
-          "input": [
-            "text",
-            "image"
-          ],
-          "compat": {
-            "supportsDeveloperRole": false,
-            "sendSessionAffinityHeaders": true
-          }
-        },
-        {
           "id": "personal/worker",
           "reasoning": true,
           "contextWindow": 288000,

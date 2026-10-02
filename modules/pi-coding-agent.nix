@@ -270,7 +270,7 @@ let
   );
   defaultSettings = {
     defaultProvider = "omniroute";
-    defaultModel = "worker";
+    defaultModel = "personal/worker";
     defaultThinkingLevel = "medium";
     quietStartup = true;
     theme = "dark";

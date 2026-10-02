@@ -243,7 +243,7 @@ let
     ---
     name: "orchestrator"
     description: "Deterministic black-box one-shot state machine"
-    model: "omniroute/worker"
+    model: "omniroute/personal/worker"
     thinking: "high"
     tools: "read, bash, subagent"
     system-prompt: replace
@@ -463,7 +463,7 @@ in
     assert
       default.config.programs.pi-coding-agent.settings == {
         defaultProvider = "omniroute";
-        defaultModel = "worker";
+        defaultModel = "personal/worker";
         defaultThinkingLevel = "medium";
         quietStartup = true;
         theme = "dark";
@@ -705,11 +705,13 @@ in
     assert !(builtins.hasAttr "frontier-implementer" default.config.programs.pi-coding-agent.agents);
     assert !(builtins.hasAttr "frontier-reviewer" default.config.programs.pi-coding-agent.agents);
     assert !(builtins.hasAttr "reviewer" default.config.programs.pi-coding-agent.agents);
-    assert default.config.programs.pi-coding-agent.agents.implementer.model == "omniroute/worker";
+    assert
+      default.config.programs.pi-coding-agent.agents.implementer.model == "omniroute/personal/worker";
     assert default.config.programs.pi-coding-agent.agents.deep-reviewer.model == "zai/glm-5.3";
     assert default.config.programs.pi-coding-agent.agents.deep-reviewer.effort == "high";
     assert
-      default.config.programs.pi-coding-agent.agents.standards-reviewer.model == "omniroute/worker";
+      default.config.programs.pi-coding-agent.agents.standards-reviewer.model
+      == "omniroute/personal/worker";
     assert default.config.programs.pi-coding-agent.agents.standards-reviewer.effort == "high";
     assert
       default.config.home.file."${default.config.programs.pi-coding-agent.configDir}/agents/orchestrator.md".text
