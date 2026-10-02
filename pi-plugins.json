@@ -270,15 +270,18 @@
   "supi-context": {
     "strategy": "npm",
     "package": "@mrclrchtr/supi-context",
-    "version": "7.4.0",
-    "src": "https://registry.npmjs.org/@mrclrchtr/supi-context/-/supi-context-7.4.0.tgz",
-    "hash": "sha256-SK2+h0zjGe1Mjy0jmqQoumG3yjLLJHDE5ESr8H/c8ZM=",
-    "npmDepsHash": "sha256-uh/nKiFNZukjTap37YIQ+/Rvt2ZjMYSz29D93GShzqQ=",
+    "version": "8.0.1",
+    "src": "https://registry.npmjs.org/@mrclrchtr/supi-context/-/supi-context-8.0.1.tgz",
+    "hash": "sha256-Xa+vB9adF/rT+Q3z8qmgCCYoodQALm8PtFfPznUFGJg=",
+    "npmDepsHash": "sha256-yWhIsdD2lAB62sU3m8xtLHh7d5PnZv/FkZrvgdNKWo8=",
     "manifestTransform": {
       "delete": [
         "peerDependencies",
         "peerDependenciesMeta"
-      ]
+      ],
+      "dependencyOverrides": {
+        "typebox": "*"
+      }
     },
     "lockFile": "packages/supi-context-package-lock.json",
     "check": "supi-context-load"
