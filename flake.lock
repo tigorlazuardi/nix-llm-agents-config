@@ -96,11 +96,11 @@
         "nixpkgs": "nixpkgs"
       },
       "locked": {
-        "lastModified": 1790897751,
-        "narHash": "sha256-xdevAK6Ft7yjZkLX32FOnZTS32xgoEJbtE9laFxCFlk=",
+        "lastModified": 1790902478,
+        "narHash": "sha256-VGGsfboKVw6BRIo4Njw676AwYE9yfs/k6vWqXsLhdcI=",
         "owner": "tigorlazuardi",
         "repo": "pi-messaging-relay",
-        "rev": "5fc960cb97dd8faf1df5b5e75dd5e6d411bb8a90",
+        "rev": "0e5eed8b04166e133f16529fdea1a1df44375b87",
         "type": "github"
       },
       "original": {
