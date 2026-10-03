@@ -464,7 +464,7 @@ in
       default.config.programs.pi-coding-agent.settings == {
         defaultProvider = "omniroute";
         defaultModel = "personal/worker";
-        defaultThinkingLevel = "medium";
+        defaultThinkingLevel = "high";
         quietStartup = true;
         theme = "dark";
         hideThinkingBlock = false;
