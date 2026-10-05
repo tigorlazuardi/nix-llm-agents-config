@@ -188,7 +188,7 @@ assert.equal(await call("git status"), undefined);
 // deny-list blocks without a network call (fetch is still the throwing stub)
 const denied = await call("cat ~/.env");
 assert.equal(denied?.block, true);
-assert.match(denied?.reason ?? "", /secret material/);
+assert.match(denied?.reason ?? "", /^command blocked: touches secret material/);
 
 // judge round-trip: unsafe command with confident yes -> block
 const yesBody = {
@@ -217,7 +217,7 @@ globalThis.fetch = (async () => {
 }) as typeof fetch;
 const unreachable = await call("make test");
 assert.equal(unreachable?.block, true);
-assert.match(unreachable?.reason ?? "", /unavailable.*fail-safe/);
+assert.match(unreachable?.reason ?? "", /safety check unavailable/);
 
 // fail-safe: judge says truncated -> block even with all-no answers
 globalThis.fetch = (async () =>

@@ -126,17 +126,17 @@ const RM_CATASTROPHIC =
 
 export function denyReason(command: string): string | null {
 	if (WHILE_TRUE.test(command)) {
-		return "blocked by bash-judge (deny-list): unbounded `while true/:` loop with no exit condition";
+		return "unbounded `while true/:` loop with no exit condition";
 	}
 	if (RM_CATASTROPHIC.test(command)) {
-		return "blocked by bash-judge (deny-list): rm -rf aimed at / or ~";
+		return "rm -rf aimed at / or ~";
 	}
 	const lowered = command.toLowerCase();
 	for (const marker of SECRET_MARKERS) {
 		const hit = typeof marker === "string" ? lowered.includes(marker) : marker.test(command);
 		if (hit) {
 			const label = typeof marker === "string" ? marker : marker.source.replaceAll("\\.", ".");
-			return `blocked by bash-judge (deny-list): command touches secret material (${label})`;
+			return `touches secret material (${label})`;
 		}
 	}
 	return null;
@@ -209,7 +209,7 @@ export function evaluateAnswers(
 	threshold: number,
 ): string | null {
 	if (usage?.truncated || (usage?.state_tokens_dropped ?? 0) > 0) {
-		return "blocked by bash-judge: command too long for the judge model context (fail-safe)";
+		return "command too long to judge safely (truncated context)";
 	}
 	const labels: Record<string, string> = {
 		loop: "unbounded run",
@@ -222,7 +222,7 @@ export function evaluateAnswers(
 			([qid, answer]) => `${qid}=yes (${labels[qid] ?? qid}, conf ${answer.answer_confidence})`,
 		);
 	if (flags.length === 0) return null;
-	return `blocked by bash-judge: ${flags.join(", ")}`;
+	return flags.join(", ");
 }
 
 async function callJudge(
@@ -290,11 +290,7 @@ export default function (pi: ExtensionAPI) {
 
 		const result = await callJudge(config, command);
 		if (!result.ok) {
-			return decide(
-				ctx,
-				config.mode,
-				`blocked by bash-judge: judge unavailable (${result.error}) — fail-safe`,
-			);
+			return decide(ctx, config.mode, `safety check unavailable (${result.error})`);
 		}
 		return decide(ctx, config.mode, evaluateAnswers(result.answers, result.usage, config.threshold));
 	}
@@ -309,14 +305,16 @@ export default function (pi: ExtensionAPI) {
 			return undefined;
 		}
 		if (mode === "log") {
-			// Shadow rollout: footer status persists the last verdict, notify makes
-			// each would-be block unmissable (setStatus alone is easy to miss and
-			// can be a no-op in RPC-driven sessions).
-			ctx.ui.setStatus("bash-judge", `shadow: ${reason}`);
+			// Shadow rollout: USER sees the full mechanism detail; the agent sees
+			// nothing — command runs, conversation stays clean.
+			ctx.ui.setStatus("bash-judge", `bash-judge shadow: ${reason}`);
 			ctx.ui.notify(`bash-judge shadow: ${reason}`, "warning");
 			return undefined;
 		}
-		return { block: true, reason };
+		// Enforcement: the agent gets ONLY the violation, never the mechanism
+		// (no judge name, no deny-list, no fail-safe internals) — it just needs
+		// to know the command was blocked and why, so it can adapt.
+		return { block: true, reason: `command blocked: ${reason}` };
 	}
 
 	pi.on("tool_call", (event, ctx) => handler(event, ctx as JudgeCtx));
