@@ -130,13 +130,13 @@
     "hash": "sha256-kJG33jskQGWP6MH+OizscjKGgqt8TQQ3CsgyL9gPeww=",
     "check": "pi-ask-herdr-load"
   },
-  "pi-patty-bg-tasks": {
+  "pi-bg": {
     "strategy": "npm",
-    "package": "pi-patty-bg-tasks",
-    "version": "1.1.6",
-    "src": "https://registry.npmjs.org/pi-patty-bg-tasks/-/pi-patty-bg-tasks-1.1.6.tgz",
-    "hash": "sha256-KFXFMqXgZE5em9hvJLyVNtn04whp9TYESKTKB5QWf3E=",
-    "check": "pi-patty-bg-tasks-load"
+    "package": "@alexlikevibe/pi-bg",
+    "version": "2.2.0",
+    "src": "https://registry.npmjs.org/@alexlikevibe/pi-bg/-/pi-bg-2.2.0.tgz",
+    "hash": "sha256-9n6DrNtBaDXmBUndraymGtbLDteyb12FZ0b01VIPDEg=",
+    "check": "pi-bg-load"
   },
   "browser-goblin": {
     "strategy": "npm",

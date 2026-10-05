@@ -5,18 +5,19 @@
 import assert from "node:assert/strict";
 import { BG_ARM_TOOLS, isArmTool, isTerminalBgNotice, readIntEnv, shouldAttemptCompact } from "./index.ts";
 
-// isArmTool: patty background-arming tools only.
+// isArmTool: pi-bg background-arming tools only.
 for (const tool of ["bash_bg", "agent_bg", "monitor"]) {
 	assert.ok(isArmTool(tool), `${tool} must arm`);
 }
-for (const tool of ["bash", "jobs", "job_decide", "bash_bg_typo"]) {
+for (const tool of ["bash", "jobs", "agent_bg_typo"]) {
 	assert.ok(!isArmTool(tool), `${tool} must NOT arm`);
 }
 
-// Terminal notices: patty job-finished customType (EVENT.jobFinished) and
-// timeout path. Non-terminal stream/stall notices must NOT disarm.
-assert.ok(isTerminalBgNotice("job-finished"));
-assert.ok(isTerminalBgNotice("bg-timeout"));
+// Terminal notices: pi-bg task-notification customType (EVENT.taskNotification)
+// is the one terminal job notice. Non-terminal stream/stall notices must NOT disarm.
+assert.ok(isTerminalBgNotice("task-notification"));
+assert.ok(!isTerminalBgNotice("job-finished"));
+assert.ok(!isTerminalBgNotice("bg-timeout"));
 assert.ok(!isTerminalBgNotice("bg-monitor-event"));
 assert.ok(!isTerminalBgNotice("bg-stall"));
 assert.ok(!isTerminalBgNotice(undefined));
@@ -42,7 +43,7 @@ assert.equal(probe("nonsense"), 5000);
 assert.equal(probe("-3"), 5000);
 assert.equal(probe("0"), 5000);
 
-// Arm set stays in sync with the documented patty tool names.
+// Arm set stays in sync with the documented pi-bg tool names.
 assert.deepEqual([...BG_ARM_TOOLS].sort(), ["agent_bg", "bash_bg", "monitor"]);
 
 console.log("pi-idle-compact self-check: OK");

@@ -275,8 +275,8 @@ let
   expectedAskHerdrPath = "${expectedAskHerdr}/lib/node_modules/pi-ask-herdr";
   expectedHerdrRename = pkgs.callPackage ./packages/pi-herdr-rename.nix { };
   expectedHerdrRenamePath = "${expectedHerdrRename}/lib/node_modules/pi-herdr-rename";
-  expectedPattyBgTasks = pkgs.callPackage ./packages/pi-patty-bg-tasks.nix { };
-  expectedPattyBgTasksPath = "${expectedPattyBgTasks}/lib/node_modules/pi-patty-bg-tasks";
+  expectedPiBg = pkgs.callPackage ./packages/pi-bg.nix { };
+  expectedPiBgPath = "${expectedPiBg}/lib/node_modules/pi-bg";
   expectedRemotePiRelay = pkgs.callPackage ./packages/remote-pi-relay.nix { };
   expectedVimMode = pkgs.callPackage ./packages/pi-vimmode.nix { };
   expectedVimModePath = "${expectedVimMode}/lib/node_modules/pi-vimmode";
@@ -357,7 +357,7 @@ in
   pi-herdr-sudo-task = expectedHerdrSudoTask;
   pi-ask-herdr = expectedAskHerdr;
   pi-herdr-rename = expectedHerdrRename;
-  pi-patty-bg-tasks = expectedPattyBgTasks;
+  pi-bg = expectedPiBg;
   remote-pi-relay = expectedRemotePiRelay;
   pi-vimmode = expectedVimMode;
   pi-usage = expectedUsage;
@@ -484,7 +484,7 @@ in
           expectedHerdrSudoTaskPath
           expectedAskHerdrPath
           expectedHerdrRenamePath
-          expectedPattyBgTasksPath
+          expectedPiBgPath
           expectedVimModePath
           expectedUsagePath
           expectedCacheOptimizerPath
@@ -863,7 +863,7 @@ in
         expectedHerdrSudoTaskPath
         expectedAskHerdrPath
         expectedHerdrRenamePath
-        expectedPattyBgTasksPath
+        expectedPiBgPath
         expectedVimModePath
         expectedUsagePath
         expectedCacheOptimizerPath
@@ -1064,7 +1064,7 @@ in
         ];
       }
       ''
-        nixfmt --check ${./flake.nix} ${./checks.nix} ${./modules/pi-coding-agent.nix} ${./modules/remote-pi-relay.nix} ${./modules/pi-coding-agent/agents.nix} ${./modules/pi-coding-agent/default-agents.nix} ${./modules/pi-coding-agent/pi-herdr-subagents.nix} ${./packages/pi-diet-lsp.nix} ${./packages/pi-commandcode-provider.nix} ${./packages/pi-effort.nix} ${./packages/pi-timestamps.nix} ${./packages/pi-herdr.nix} ${./packages/pi-herdr-sudo-task.nix} ${./packages/pi-ask-herdr.nix} ${./packages/pi-herdr-rename.nix} ${./packages/pi-patty-bg-tasks.nix} ${./packages/remote-pi-relay.nix} ${./packages/pi-vimmode.nix} ${./packages/pi-usage.nix} ${./packages/pi-cache-optimizer.nix} ${./packages/pi-mcp-adapter.nix} ${./packages/browser-goblin.nix} ${./packages/pix-optimizer.nix} ${./packages/pix-tools.nix} ${./packages/pi-vcc.nix} ${./packages/pi-prompt-template-model.nix} ${./packages/pi-todo-herdr.nix} ${./packages/pi-rules.nix} ${./packages/pi-web-access.nix} ${./packages/pi-herdr-subagents.nix} ${./packages/pi-vision-handoff.nix} ${./packages/pi-vision-handoff-config-updater.nix} ${./packages/supi-context.nix} ${./packages/supi-extras.nix} ${./packages/toon.nix}
+        nixfmt --check ${./flake.nix} ${./checks.nix} ${./modules/pi-coding-agent.nix} ${./modules/remote-pi-relay.nix} ${./modules/pi-coding-agent/agents.nix} ${./modules/pi-coding-agent/default-agents.nix} ${./modules/pi-coding-agent/pi-herdr-subagents.nix} ${./packages/pi-diet-lsp.nix} ${./packages/pi-commandcode-provider.nix} ${./packages/pi-effort.nix} ${./packages/pi-timestamps.nix} ${./packages/pi-herdr.nix} ${./packages/pi-herdr-sudo-task.nix} ${./packages/pi-ask-herdr.nix} ${./packages/pi-herdr-rename.nix} ${./packages/pi-herdr-rename.nix} ${./packages/pi-bg.nix} ${./packages/remote-pi-relay.nix} ${./packages/pi-vimmode.nix} ${./packages/pi-usage.nix} ${./packages/pi-cache-optimizer.nix} ${./packages/pi-mcp-adapter.nix} ${./packages/browser-goblin.nix} ${./packages/pix-optimizer.nix} ${./packages/pix-tools.nix} ${./packages/pi-vcc.nix} ${./packages/pi-prompt-template-model.nix} ${./packages/pi-todo-herdr.nix} ${./packages/pi-rules.nix} ${./packages/pi-web-access.nix} ${./packages/pi-herdr-subagents.nix} ${./packages/pi-vision-handoff.nix} ${./packages/pi-vision-handoff-config-updater.nix} ${./packages/supi-context.nix} ${./packages/supi-extras.nix} ${./packages/toon.nix}
         WORKFLOW=${./.github/workflows/daily-update.yml} UPDATER=${./scripts/daily-update.sh} REGISTRY=${./pi-plugins.json} CHECKS=${./checks.nix} MISSING_INTEGRITY_FIXTURE=${./tests/fixtures/npm-lock-missing-integrity.json} CONTROL_RESOLVED_FIXTURE=${./tests/fixtures/npm-lock-control-resolved.json} bash ${./tests/daily-updater-self-check.sh}
         RUNNER=${./scripts/local-update.sh} PROMPT=${./scripts/local-update-recovery.md} bash ${./tests/local-updater-self-check.sh}
         touch $out
@@ -1165,8 +1165,8 @@ in
     touch $out
   '';
 
-  pi-patty-bg-tasks-load =
-    pkgs.runCommandLocal "pi-patty-bg-tasks-load"
+  pi-bg-load =
+    pkgs.runCommandLocal "pi-bg-load"
       {
         nativeBuildInputs = [
           expectedPackage
@@ -1178,11 +1178,11 @@ in
         export PI_CODING_AGENT_DIR="$HOME/.pi/agent"
         export PI_TELEMETRY=0
         mkdir -p "$PI_CODING_AGENT_DIR"
-        test -f ${expectedPattyBgTasksPath}/index.ts
-        test ! -e ${expectedPattyBgTasksPath}/node_modules
-        grep -F 'name: "agent_bg"' ${expectedPattyBgTasksPath}/src/tools/agent-bg.ts
+        test -f ${expectedPiBgPath}/index.ts
+        test ! -e ${expectedPiBgPath}/node_modules
+        grep -F 'name: "agent_bg"' ${expectedPiBgPath}/src/tools/agent-bg.ts
         pi --offline --no-extensions --no-skills --no-prompt-templates --no-context-files \
-          -e ${expectedPattyBgTasksPath} \
+          -e ${expectedPiBgPath} \
           --list-models > pi.log 2>&1
         ! grep -E 'Extension issues|Failed to load extension|Cannot find module|Error:' pi.log
         touch $out

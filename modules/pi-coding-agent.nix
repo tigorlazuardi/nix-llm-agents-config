@@ -82,7 +82,7 @@ let
   herdrSudoTask = pinnedPkgs.callPackage ../packages/pi-herdr-sudo-task.nix { };
   askHerdr = pinnedPkgs.callPackage ../packages/pi-ask-herdr.nix { };
   herdrRename = pinnedPkgs.callPackage ../packages/pi-herdr-rename.nix { };
-  pattyBgTasks = pinnedPkgs.callPackage ../packages/pi-patty-bg-tasks.nix { };
+  piBg = pinnedPkgs.callPackage ../packages/pi-bg.nix { };
   messagingRelayConfigUpdater =
     pinnedPkgs.callPackage ../packages/pi-messaging-relay-config-updater.nix
       { };
@@ -175,8 +175,8 @@ let
       default = true;
     }
     {
-      name = "pi-patty-bg-tasks";
-      package = "${pattyBgTasks}/lib/node_modules/pi-patty-bg-tasks";
+      name = "pi-bg";
+      package = "${piBg}/lib/node_modules/pi-bg";
       default = true;
     }
     {
@@ -423,7 +423,7 @@ in
       default = 5000;
       description = ''
         Idle debounce after agent_settled before compacting. Any agent activity
-        cancels the pending compact; compaction is also skipped while patty
+        cancels the pending compact; compaction is also skipped while pi-bg
         background jobs are pending. Exported as PI_IDLE_COMPACT_DELAY_MS.
       '';
     };

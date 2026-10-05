@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import lazyTools from "./index.ts";
 
 type Group = "browser" | "subagents" | "research" | "herdr" | "journal" | "artifact";
-const core = ["read", "bash", "bash_bg", "agent_bg", "job_decide", "jobs", "monitor", "ask_user", "rename_herdr_tab", "todo", "agent_send", "list_peers"];
+const core = ["read", "bash", "bash_bg", "agent_bg", "jobs", "monitor", "ask_user", "rename_herdr_tab", "todo", "agent_send", "list_peers"];
 const grouped: Record<Group, string[]> = {
   browser: ["browser_open"],
   subagents: ["subagent", "subagent_interrupt", "subagents_list", "subagent_resume"],
@@ -13,8 +13,8 @@ const grouped: Record<Group, string[]> = {
 };
 const paths: Record<string, string> = {
   read: "<builtin:read>",
-  bash: "/nix/store/pi-patty-bg-tasks/index.ts",
-  bash_bg: "/nix/store/pi-patty-bg-tasks/index.ts",
+  bash: "/nix/store/pi-bg/index.ts",
+  bash_bg: "/nix/store/pi-bg/index.ts",
   ask_user: "/nix/store/pi-ask-herdr/index.ts",
   rename_herdr_tab: "/nix/store/pi-herdr-rename/index.ts",
   browser_open: "/nix/store/browser-goblin/index.ts",
@@ -27,10 +27,9 @@ const paths: Record<string, string> = {
   mcpScript: "/nix/store/pi-mcp-adapter/index.ts",
   herdr_layout: "/nix/store/pi-herdr/index.ts",
   sudo_task: "/nix/store/pi-herdr-sudo-task/index.ts",
-  jobs: "/nix/store/pi-patty-bg-tasks/index.ts",
-  agent_bg: "/nix/store/pi-patty-bg-tasks/index.ts",
-  job_decide: "/nix/store/pi-patty-bg-tasks/index.ts",
-  monitor: "/nix/store/pi-patty-bg-tasks/index.ts",
+  jobs: "/nix/store/pi-bg/index.ts",
+  agent_bg: "/nix/store/pi-bg/index.ts",
+  monitor: "/nix/store/pi-bg/index.ts",
   agent_send: "/nix/store/pi-messaging-relay-extension/index.ts",
   list_peers: "/nix/store/pi-messaging-relay-extension/index.ts",
   dev_journal: "/config/extensions/dev-journal/index.ts",

@@ -13,13 +13,13 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
  *    tokens >= threshold, arm a delay timer.
  * 2. Any activity (agent_start / turn_start / user input) cancels the timer.
  * 3. On fire, compaction is skipped while background jobs are still pending
- *    (bash_bg / agent_bg / monitor arms; patty's terminal `job-finished`
+ *    (bash_bg / agent_bg / monitor arms; pi-bg's terminal `task-notification`
  *    notices disarm). The next settle cycle re-arms.
  * 4. `session_before_compact` cancels native mid-run "threshold" compaction
  *    while jobs are pending (pi re-checks after tools finish). Manual /compact
  *    and "overflow" emergencies are never cancelled.
  *
- * ponytail: patty foreground->background flips (Ctrl+Shift+B, `bg-manual`) are
+ * ponytail: pi-bg foreground->background flips (Ctrl+Shift+B, `/bg`) are
  * not counted as arms; the settle + before_compact guards still apply. Track
  * them if races ever point here. Restart resets the pending count.
  */
@@ -27,8 +27,8 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 /** Tools whose execution arms a background job. */
 export const BG_ARM_TOOLS = new Set(["bash_bg", "agent_bg", "monitor"]);
 
-/** Patty customTypes that mean a job reached a terminal state. */
-export const BG_TERMINAL_NOTICES = new Set(["job-finished", "bg-timeout"]);
+/** pi-bg customTypes that mean a job reached a terminal state. */
+export const BG_TERMINAL_NOTICES = new Set(["task-notification"]);
 
 export function isArmTool(toolName: string): boolean {
 	return BG_ARM_TOOLS.has(toolName);
