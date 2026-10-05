@@ -470,6 +470,9 @@ in
         hideThinkingBlock = false;
         showCacheMissNotices = false;
         projectServers = "allow";
+        extensions = [
+          "-builtin:mcp"
+        ];
         compaction = {
           enabled = true;
           reserveTokens = 128000;

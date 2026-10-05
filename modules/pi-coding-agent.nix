@@ -280,6 +280,12 @@ let
     # pi-mcp-adapter: allow project-scoped MCP servers in trusted headless
     # sessions without the per-server approval prompt (user decision: trust).
     projectServers = "allow";
+    # pi 1.0 ships a native built-in MCP extension; this config uses the
+    # lazy pi-mcp-adapter plugin instead. Disable the builtin so they do not
+    # run side by side. The adapter checks this entry before writing
+    # settings.json itself, so a read-only (home-manager) settings file no
+    # longer triggers its EROFS warning.
+    extensions = [ "-builtin:mcp" ];
     compaction = {
       enabled = true;
       reserveTokens = 128000;
