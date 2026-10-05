@@ -1124,15 +1124,28 @@ in
         nativeBuildInputs = [ pkgs.jq ];
         # Rendered config file (store path) — proves the HM wiring generates
         # valid JSON with the expected fields; disabled eval: no file at all.
-        configFile = enabled.config.home.file.".pi/agent/bash-judge.json".source;
+        configFile =
+          enabled.config.home.file."${enabled.config.programs.pi-coding-agent.configDir}/bash-judge.json".source;
         extEnabled =
           if enabled.config.programs.pi-coding-agent.extensions ? bash-judge then "yes" else "no";
         extDisabled =
           if disabled.config.programs.pi-coding-agent.extensions ? bash-judge then "yes" else "no";
         fileEnabled =
-          if enabled.config.home.file ? ".pi/agent/bash-judge.json" then "yes" else "no";
+          if
+            enabled.config.home.file
+            ? "${enabled.config.programs.pi-coding-agent.configDir}/bash-judge.json"
+          then
+            "yes"
+          else
+            "no";
         fileDisabled =
-          if disabled.config.home.file ? ".pi/agent/bash-judge.json" then "yes" else "no";
+          if
+            disabled.config.home.file
+            ? "${disabled.config.programs.pi-coding-agent.configDir}/bash-judge.json"
+          then
+            "yes"
+          else
+            "no";
       }
       ''
         echo "extEnabled=$extEnabled extDisabled=$extDisabled fileEnabled=$fileEnabled fileDisabled=$fileDisabled" > $out
