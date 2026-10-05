@@ -1135,16 +1135,14 @@ in
           if disabled.config.programs.pi-coding-agent.extensions ? bash-judge then "yes" else "no";
         fileEnabled =
           if
-            enabled.config.home.file
-            ? "${enabled.config.programs.pi-coding-agent.configDir}/bash-judge.json"
+            enabled.config.home.file ? "${enabled.config.programs.pi-coding-agent.configDir}/bash-judge.json"
           then
             "yes"
           else
             "no";
         fileDisabled =
           if
-            disabled.config.home.file
-            ? "${disabled.config.programs.pi-coding-agent.configDir}/bash-judge.json"
+            disabled.config.home.file ? "${disabled.config.programs.pi-coding-agent.configDir}/bash-judge.json"
           then
             "yes"
           else
