@@ -61,6 +61,7 @@ let
   };
   defaultModels = builtins.fromJSON (builtins.readFile ../config/models.json);
   mcpPlugin = cfg.plugins.pi-mcp-adapter;
+  bashJudgePlugin = cfg.plugins.bash-judge;
   optimizerPlugin = cfg.plugins.pix-optimizer;
   vccPlugin = cfg.plugins.pi-vcc;
   webAccessPlugin = cfg.plugins.pi-web-access;
@@ -208,6 +209,16 @@ let
       name = "pix-optimizer";
       package = "${pixOptimizer}/lib/node_modules/@xynogen/pix-optimizer";
       # ponytail: static AGENTS rules cover current behavior; opt in when optimizer proves net token savings.
+      default = false;
+    }
+    {
+      # bash-judge is a local extension (config/extensions/bash-judge), not an
+      # npm closure — the registry entry only generates its options and keeps
+      # "packages" clean; the extension itself links via extensions/home.file
+      # when enabled. default = false: requires an explicit baseUrl, so a host
+      # without the laya-judge service never half-enables it.
+      name = "bash-judge";
+      package = "";
       default = false;
     }
   ]
@@ -446,6 +457,44 @@ in
           };
         };
 
+        bash-judge.baseUrl = lib.mkOption {
+          type = lib.types.nullOr (lib.types.strMatching "https?://[^/?#[:space:]]+");
+          default = null;
+          description = ''
+            Origin of the laya-judge service (POST /v1/systemone). Required
+            when plugins.bash-judge.enable — enforced by module assertion.
+            Host value: http://127.0.0.1:8765.
+          '';
+        };
+
+        bash-judge.threshold = lib.mkOption {
+          type = lib.types.float;
+          default = 0.75;
+          description = ''
+            Minimum answer_confidence for a `yes` answer to count as a block.
+            Tuned against the homelab bash safety bench; re-tune the bench if
+            the judge questions change.
+          '';
+        };
+
+        bash-judge.timeoutMs = lib.mkOption {
+          type = lib.types.int;
+          default = 2500;
+          description = "Abort the judge call after this long; timeout blocks (fail-safe).";
+        };
+
+        bash-judge.mode = lib.mkOption {
+          type = lib.types.enum [
+            "block"
+            "log"
+          ];
+          default = "block";
+          description = ''
+            block = enforce verdicts; log = shadow mode, log would-be blocks
+            and pass everything (rollout).
+          '';
+        };
+
         pi-messaging-relay.url = lib.mkOption {
           type = lib.types.strMatching "https?://[^/?#[:space:]]+[^[:space:]]*";
           default = "http://127.0.0.1:43127";
@@ -573,6 +622,10 @@ in
         message = "pi-web-access credentialFiles contains unsupported keys; use provider API-key field names.";
       }
       {
+        assertion = !(bashJudgePlugin.enable && bashJudgePlugin.baseUrl == null);
+        message = "programs.pi-coding-agent.plugins.bash-judge.baseUrl is required when bash-judge is enabled (no default guess).";
+      }
+      {
         assertion =
           lib.intersectLists webAccessCredentialNames (builtins.attrNames webAccessPlugin.settings) == [ ];
         message = "pi-web-access credentials must use credentialFiles so secret values never enter the Nix store.";
@@ -685,6 +738,12 @@ in
           # ponytail: reuse browser-goblin's Nix Chromium for project Playwright; override per project when needed.
           PLAYWRIGHT_EXECUTABLE_PATH = lib.mkDefault cfg.plugins.browser-goblin.executablePath;
         }
+        // lib.optionalAttrs cfg.plugins.bash-judge.enable {
+          PI_BASH_JUDGE_BASE_URL = lib.mkDefault (bashJudgePlugin.baseUrl or "");
+          PI_BASH_JUDGE_THRESHOLD = lib.mkDefault (toString bashJudgePlugin.threshold);
+          PI_BASH_JUDGE_TIMEOUT_MS = lib.mkDefault (toString bashJudgePlugin.timeoutMs);
+          PI_BASH_JUDGE_MODE = lib.mkDefault bashJudgePlugin.mode;
+        }
       );
     };
 
@@ -711,6 +770,9 @@ in
         }
         (lib.mkIf idleCompact.enable {
           pi-idle-compact = lib.mkDefault ../config/extensions/pi-idle-compact;
+        })
+        (lib.mkIf cfg.plugins.bash-judge.enable {
+          bash-judge = lib.mkDefault ../config/extensions/bash-judge;
         })
       ];
       skills = lib.mapAttrs (_: lib.mkDefault) (repoSkills // patchedMattSkills);
@@ -739,6 +801,10 @@ in
       };
       "${cfg.configDir}/extensions/no-until-loop" = {
         source = cfg.extensions.no-until-loop;
+        force = true;
+      };
+      "${cfg.configDir}/extensions/bash-judge" = lib.mkIf cfg.plugins.bash-judge.enable {
+        source = cfg.extensions.bash-judge;
         force = true;
       };
       "${cfg.configDir}/prompts" = {

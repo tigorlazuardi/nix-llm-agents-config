@@ -1083,6 +1083,62 @@ in
         touch $out
       '';
 
+  bash-judge =
+    pkgs.runCommandLocal "pi-bash-judge"
+      {
+        nativeBuildInputs = [
+          expectedPackage
+          pkgs.nodejs_22
+        ];
+      }
+      ''
+        cp -R ${./config/extensions/bash-judge} bash-judge
+        chmod -R u+w bash-judge
+        node --experimental-strip-types bash-judge/bash-judge.self-check.ts
+
+        export HOME="$TMPDIR/home"
+        export PI_CODING_AGENT_DIR="$HOME/.pi/agent"
+        export PI_TELEMETRY=0
+        mkdir -p "$PI_CODING_AGENT_DIR"
+        pi --offline --no-extensions --no-skills --no-prompt-templates --no-context-files \
+          -e ${./config/extensions/bash-judge}/index.ts \
+          --list-models > pi.log 2>&1
+        ! grep -E 'Extension issues|Failed to load extension|Cannot find module|Error:' pi.log
+        touch $out
+      '';
+
+  # Module-level wiring: env vars render only when enabled; extension links
+  # only when enabled; disabled default touches nothing.
+  bash-judge-module =
+    let
+      enabled = evaluate {
+        programs.pi-coding-agent.plugins.bash-judge = {
+          enable = true;
+          baseUrl = "http://127.0.0.1:8765";
+        };
+      };
+      disabled = evaluate { };
+    in
+    pkgs.runCommandLocal "pi-bash-judge-module"
+      {
+        envUrl = toString (enabled.config.home.sessionVariables.PI_BASH_JUDGE_BASE_URL or "MISSING");
+        envMode = toString (enabled.config.home.sessionVariables.PI_BASH_JUDGE_MODE or "MISSING");
+        extEnabled =
+          if enabled.config.programs.pi-coding-agent.extensions ? bash-judge then "yes" else "no";
+        extDisabled =
+          if disabled.config.programs.pi-coding-agent.extensions ? bash-judge then "yes" else "no";
+        envDisabled =
+          if disabled.config.home.sessionVariables ? PI_BASH_JUDGE_BASE_URL then "yes" else "no";
+      }
+      ''
+        echo "url=$envUrl mode=$envMode extEnabled=$extEnabled extDisabled=$extDisabled envDisabled=$envDisabled" > $out
+        grep -q 'url=http://127.0.0.1:8765' $out
+        grep -q 'mode=block' $out
+        grep -q 'extEnabled=yes' $out
+        grep -q 'extDisabled=no' $out
+        grep -q 'envDisabled=no' $out
+      '';
+
   formatting =
     pkgs.runCommandLocal "pi-home-manager-formatting"
       {
