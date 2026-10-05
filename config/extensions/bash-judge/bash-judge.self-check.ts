@@ -5,21 +5,44 @@ import bashJudge, {
 	evaluateAnswers,
 	isAllowlisted,
 	readConfig,
+	setConfigPath,
 } from "./index.ts";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
-// --- readConfig: baseUrl is the activation switch ---------------------------
-assert.equal(readConfig({}), null);
-assert.equal(readConfig({ PI_BASH_JUDGE_BASE_URL: "" }), null);
-const cfg = readConfig({ PI_BASH_JUDGE_BASE_URL: "http://127.0.0.1:8765/" });
+// --- config file ------------------------------------------------------------
+const dir = mkdtempSync(join(tmpdir(), "bash-judge-"));
+const configPath = join(dir, "bash-judge.json");
+setConfigPath(configPath);
+
+// missing file -> config null with error
+assert.equal(readConfig().config, null);
+assert.match(readConfig().error ?? "", /ENOENT/);
+
+// broken JSON -> config null with error
+writeFileSync(configPath, "{not json");
+assert.equal(readConfig().config, null);
+
+// valid config: defaults applied, trailing slash stripped
+writeFileSync(configPath, JSON.stringify({ baseUrl: "http://127.0.0.1:8765/" }));
+const cfg = readConfig().config;
 assert.ok(cfg);
-assert.equal(cfg.baseUrl, "http://127.0.0.1:8765"); // trailing slash stripped
+assert.equal(cfg.baseUrl, "http://127.0.0.1:8765");
 assert.equal(cfg.threshold, 0.75);
 assert.equal(cfg.timeoutMs, 2500);
 assert.equal(cfg.mode, "block");
-assert.equal(
-	readConfig({ PI_BASH_JUDGE_BASE_URL: "http://x", PI_BASH_JUDGE_MODE: "log" })?.mode,
-	"log",
+
+// explicit fields win
+writeFileSync(
+	configPath,
+	JSON.stringify({ baseUrl: "http://x", threshold: 0.6, timeoutMs: 100, mode: "log" }),
 );
+const cfg2 = readConfig().config;
+assert.ok(cfg2);
+assert.equal(cfg2.threshold, 0.6);
+assert.equal(cfg2.mode, "log");
+writeFileSync(configPath, JSON.stringify({ baseUrl: "http://127.0.0.1:8765" }));
 
 // --- allowlist: tight read-only prefixes pass without judging ---------------
 for (const command of [
@@ -35,7 +58,9 @@ for (const command of [
 }
 for (const command of [
 	"cat /etc/hostname", // file reader — goes to the judge, not the allowlist
-	"git status; cat ~/.env", // compound smuggle — deny-list catches it later
+	"git status; cat ~/.env", // compound smuggle — not a pure git status
+	"git status && make", // compound smuggle via &&
+	"git status $(whoami)", // command substitution — not pure
 	"lsimport something", // prefix must be a whole word
 ]) {
 	assert.ok(!isAllowlisted(command), `should NOT allow: ${command}`);
@@ -99,20 +124,31 @@ assert.match(
 );
 
 // multi-flag reasons join
-const multi = evaluateAnswers(
-	{ loop: ans("yes", 0.8), destro: ans("yes", 0.9) },
-	{ truncated: false, state_tokens_dropped: 0 },
-	0.75,
-) ?? "";
+const multi =
+	evaluateAnswers(
+		{ loop: ans("yes", 0.8), destro: ans("yes", 0.9) },
+		{ truncated: false, state_tokens_dropped: 0 },
+		0.75,
+	) ?? "";
 assert.match(multi, /loop=yes/);
 assert.match(multi, /destro=yes/);
 
 // --- handler: harness the extension end to end -----------------------------
 type ToolCallResult = { block: boolean; reason?: string } | undefined;
-type Handler = (event: {
-	toolName: string;
-	input: unknown;
-}) => Promise<ToolCallResult>;
+type Handler = (
+	event: { toolName: string; input: unknown },
+	ctx: unknown,
+) => Promise<ToolCallResult>;
+
+const uiLog = { notify: [] as string[], status: [] as string[] };
+const makeCtx = () => ({
+	ui: {
+		notify: (message: string, _level: string) => uiLog.notify.push(message),
+		setStatus: (_key: string, value: string | undefined) =>
+			uiLog.status.push(value === undefined ? "(cleared)" : value),
+	},
+});
+
 let handler: Handler | undefined;
 bashJudge({
 	on(event: string, h: never) {
@@ -121,22 +157,27 @@ bashJudge({
 } as never);
 assert(handler);
 
-const env = (over: Record<string, string> = {}) => ({
-	PI_BASH_JUDGE_BASE_URL: "http://127.0.0.1:8765",
-	...over,
-});
-const judgeResponse = (answers: Record<string, { choice: string; answer_confidence: number }>, usage = { truncated: false, state_tokens_dropped: 0 }) =>
-	new Response(JSON.stringify({ answers, usage }), { status: 200 });
-
 const realFetch = globalThis.fetch;
-const call = async (command: string, over: Record<string, string> = {}) => {
-	process.env = { ...env(over) } as unknown as NodeJS.ProcessEnv;
-	try {
-		return await handler!({ toolName: "bash", input: { command } });
-	} finally {
-		process.env = {} as unknown as NodeJS.ProcessEnv;
-	}
-};
+const judgeResponse = (
+	answers: Record<string, { choice: string; answer_confidence: number }>,
+	usage = { truncated: false, state_tokens_dropped: 0 },
+) => new Response(JSON.stringify({ answers, usage }), { status: 200 });
+
+const call = (command: string) => handler!({ toolName: "bash", input: { command } }, makeCtx());
+
+// broken config at handler time -> ONE warning + self-disable, no network
+writeFileSync(configPath, "{broken");
+const brokenCall = await call("make test");
+assert.equal(brokenCall, undefined, "broken config must not block");
+assert.equal(uiLog.notify.length, 1, "warn exactly once");
+assert.match(uiLog.notify[0], /disabled.*bash-judge\.json/);
+const brokenAgain = await call("make test");
+assert.equal(brokenAgain, undefined);
+assert.equal(uiLog.notify.length, 1, "no repeat warnings");
+
+// heal the config -> gate activates again (lazy re-read after disable)
+writeFileSync(configPath, JSON.stringify({ baseUrl: "http://127.0.0.1:8765" }));
+uiLog.notify.length = 0;
 
 // allowlist short-circuits before any network call
 globalThis.fetch = async () => {
@@ -160,7 +201,7 @@ const judged = await call("rm -rf /home/homeserver/homelab/build");
 assert.equal(judged?.block, true);
 assert.match(judged?.reason ?? "", /destro=yes/);
 
-// judge round-trip: safe verdict -> pass
+// judge round-trip: safe verdict -> pass + footer status cleared
 const noBody = {
 	loop: { choice: "no", answer_confidence: 0.8 },
 	secret: { choice: "no", answer_confidence: 0.8 },
@@ -168,6 +209,7 @@ const noBody = {
 };
 globalThis.fetch = (async () => judgeResponse(noBody)) as typeof fetch;
 assert.equal(await call("systemctl status nginx"), undefined);
+assert.equal(uiLog.status.at(-1), "(cleared)");
 
 // fail-safe: judge unreachable -> block
 globalThis.fetch = (async () => {
@@ -182,38 +224,37 @@ globalThis.fetch = (async () =>
 	judgeResponse(noBody, { truncated: true, state_tokens_dropped: 0 })) as typeof fetch;
 assert.match((await call("echo long"))?.reason ?? "", /too long/);
 
-// fail-safe: env missing entirely -> block (broken deploy)
-process.env = {} as unknown as NodeJS.ProcessEnv;
-try {
-	const noEnv = await handler!({ toolName: "bash", input: { command: "make test" } });
-	assert.equal(noEnv?.block, true);
-	assert.match(noEnv?.reason ?? "", /BASE_URL is not set/);
-} finally {
-	process.env = {} as unknown as NodeJS.ProcessEnv;
-}
-
-// shadow mode: same verdicts, but everything passes with a log line
-const logs: string[] = [];
-const realLog = console.log;
-console.log = (message: string) => logs.push(message);
+// shadow mode: same verdicts, but everything passes with a footer status line.
+// Config is cached once read (immutable store file in production), so a mode
+// change needs a fresh extension load — write log config, spawn second handler.
+writeFileSync(
+	configPath,
+	JSON.stringify({ baseUrl: "http://127.0.0.1:8765", mode: "log" }),
+);
+let shadowHandler: Handler | undefined;
+bashJudge({
+	on(event: string, h: never) {
+		if (event === "tool_call") shadowHandler = h as Handler;
+	},
+} as never);
+assert(shadowHandler);
+const shadowCall = (command: string) =>
+	shadowHandler!({ toolName: "bash", input: { command } }, makeCtx());
+uiLog.status.length = 0;
 globalThis.fetch = (async () => judgeResponse(yesBody)) as typeof fetch;
-try {
-	assert.equal(await call("rm -rf /home/homeserver/homelab/build", { PI_BASH_JUDGE_MODE: "log" }), undefined);
-	assert.deepEqual(
-		logs.filter((line) => line.includes("bash-judge shadow") && line.includes("destro=yes")).length,
-		1,
-	);
-} finally {
-	console.log = realLog;
-}
+assert.equal(await shadowCall("rm -rf /home/homeserver/homelab/build"), undefined);
+assert.match(uiLog.status.at(-1) ?? "", /shadow.*destro=yes/);
 
 // non-bash tools and malformed input pass untouched
 globalThis.fetch = async () => {
 	throw new Error("must not be called");
 };
-assert.equal(await handler!({ toolName: "monitor", input: { command: "cat ~/.env" } }), undefined);
-assert.equal(await handler!({ toolName: "bash", input: {} }), undefined);
-assert.equal(await handler!({ toolName: "bash", input: { command: "   " } }), undefined);
+assert.equal(
+	await handler!({ toolName: "monitor", input: { command: "cat ~/.env" } }, makeCtx()),
+	undefined,
+);
+assert.equal(await handler!({ toolName: "bash", input: {} }, makeCtx()), undefined);
+assert.equal(await handler!({ toolName: "bash", input: { command: "   " } }, makeCtx()), undefined);
 
 globalThis.fetch = realFetch;
 console.log("bash-judge self-check passed");

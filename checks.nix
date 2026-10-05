@@ -1107,8 +1107,8 @@ in
         touch $out
       '';
 
-  # Module-level wiring: env vars render only when enabled; extension links
-  # only when enabled; disabled default touches nothing.
+  # Module-level wiring: config file renders only when enabled (no env vars);
+  # extension links only when enabled; disabled default touches nothing.
   bash-judge-module =
     let
       enabled = evaluate {
@@ -1121,22 +1121,28 @@ in
     in
     pkgs.runCommandLocal "pi-bash-judge-module"
       {
-        envUrl = toString (enabled.config.home.sessionVariables.PI_BASH_JUDGE_BASE_URL or "MISSING");
-        envMode = toString (enabled.config.home.sessionVariables.PI_BASH_JUDGE_MODE or "MISSING");
+        nativeBuildInputs = [ pkgs.jq ];
+        # Rendered config file (store path) — proves the HM wiring generates
+        # valid JSON with the expected fields; disabled eval: no file at all.
+        configFile = enabled.config.home.file.".pi/agent/bash-judge.json".source;
         extEnabled =
           if enabled.config.programs.pi-coding-agent.extensions ? bash-judge then "yes" else "no";
         extDisabled =
           if disabled.config.programs.pi-coding-agent.extensions ? bash-judge then "yes" else "no";
-        envDisabled =
-          if disabled.config.home.sessionVariables ? PI_BASH_JUDGE_BASE_URL then "yes" else "no";
+        fileEnabled =
+          if enabled.config.home.file ? ".pi/agent/bash-judge.json" then "yes" else "no";
+        fileDisabled =
+          if disabled.config.home.file ? ".pi/agent/bash-judge.json" then "yes" else "no";
       }
       ''
-        echo "url=$envUrl mode=$envMode extEnabled=$extEnabled extDisabled=$extDisabled envDisabled=$envDisabled" > $out
-        grep -q 'url=http://127.0.0.1:8765' $out
-        grep -q 'mode=block' $out
+        echo "extEnabled=$extEnabled extDisabled=$extDisabled fileEnabled=$fileEnabled fileDisabled=$fileDisabled" > $out
         grep -q 'extEnabled=yes' $out
         grep -q 'extDisabled=no' $out
-        grep -q 'envDisabled=no' $out
+        grep -q 'fileEnabled=yes' $out
+        grep -q 'fileDisabled=no' $out
+        test "$(jq -r .baseUrl "$configFile")" = "http://127.0.0.1:8765"
+        test "$(jq -r .mode "$configFile")" = "block"
+        test "$(jq -r .threshold "$configFile")" = "0.75"
       '';
 
   formatting =

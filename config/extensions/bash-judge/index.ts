@@ -10,20 +10,32 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
  *   2. laya typed-decision call: 3 binary questions (loop / secret / destro),
  *      block iff any `yes` with answer_confidence >= threshold.
  *
- * Fail-safe: judge unreachable, timeout, non-200, unparsable body, or a
- * command too long for the model context (usage.truncated) all BLOCK. A
- * safety gate that silently passes when confused is worse than no gate.
+ * Config lives in ~/.pi/agent/bash-judge.json (written by the HM module — no
+ * env vars). Missing/invalid config => ONE ctx.ui.notify warning, then the
+ * gate self-disables: bash calls pass unjudged. A mis-deployed gate degrades
+ * to a visible no-op; it must not wedge every shell call. Within a VALID
+ * config, failures fail-safe: judge unreachable/timeout/truncated => block
+ * (mode "log" downgrades to a footer status + pass, for rollout).
  *
- * ponytail: config via env vars (PI_BASH_JUDGE_*), wired by the HM module —
- * matches pi-idle-compact. Promote to structured settings when a second
- * consumer exists.
+ * All user-visible output goes through ctx.ui (notify / setStatus) — never
+ * console.*, so the pi TUI renders it properly.
+ *
+ * ponytail: fixed config path ~/.pi/agent/bash-judge.json; promote to a pi
+ * settings field when a second consumer exists.
  */
 
-// --- env config -------------------------------------------------------------
+import { readFileSync } from "node:fs";
+import { homedir } from "node:os";
 
-function envOr(env: NodeJS.ProcessEnv, name: string, fallback: string): string {
-	const value = env[name];
-	return value === undefined || value === "" ? fallback : value;
+// --- config file ------------------------------------------------------------
+
+export const DEFAULT_CONFIG_PATH = `${homedir()}/.pi/agent/bash-judge.json`;
+
+let configPath = DEFAULT_CONFIG_PATH;
+
+/** Test seam: point the reader at a temp file. */
+export function setConfigPath(path: string): void {
+	configPath = path;
 }
 
 export interface JudgeConfig {
@@ -33,14 +45,34 @@ export interface JudgeConfig {
 	mode: "block" | "log";
 }
 
-export function readConfig(env: NodeJS.ProcessEnv = process.env): JudgeConfig | null {
-	const baseUrl = env.PI_BASH_JUDGE_BASE_URL;
-	if (baseUrl === undefined || baseUrl === "") return null;
+export type ConfigResult = { config: JudgeConfig } | { config: null; error: string };
+
+export function readConfig(path: string = configPath): ConfigResult {
+	let raw: unknown;
+	try {
+		raw = JSON.parse(readFileSync(path, "utf8"));
+	} catch (error) {
+		return {
+			config: null,
+			error: error instanceof Error ? error.message : String(error),
+		};
+	}
+	const body = raw as {
+		baseUrl?: unknown;
+		threshold?: unknown;
+		timeoutMs?: unknown;
+		mode?: unknown;
+	};
+	if (typeof body.baseUrl !== "string" || body.baseUrl === "") {
+		return { config: null, error: "baseUrl missing in bash-judge.json" };
+	}
 	return {
-		baseUrl: baseUrl.replace(/\/+$/, ""),
-		threshold: Number.parseFloat(envOr(env, "PI_BASH_JUDGE_THRESHOLD", "0.75")),
-		timeoutMs: Number.parseInt(envOr(env, "PI_BASH_JUDGE_TIMEOUT_MS", "2500"), 10),
-		mode: envOr(env, "PI_BASH_JUDGE_MODE", "block") === "log" ? "log" : "block",
+		config: {
+			baseUrl: body.baseUrl.replace(/\/+$/, ""),
+			threshold: typeof body.threshold === "number" ? body.threshold : 0.75,
+			timeoutMs: typeof body.timeoutMs === "number" ? body.timeoutMs : 2500,
+			mode: body.mode === "log" ? "log" : "block",
+		},
 	};
 }
 
@@ -90,7 +122,7 @@ const WHILE_TRUE = /(?:^|[;&|(]\s*)while\s+(true|:)\s*;?\s*do/m;
 
 /** rm -rf pointed at the filesystem root or the home directory (scoped paths stay the judge's call). */
 const RM_CATASTROPHIC =
-	/rm\s+(-[a-zA-Z]*[rf][a-zA-Z]*\s+)+(\/(?=\s|$)|\/\*(?=\s|$)|~(?=\s|\/\*|$)|\$HOME(?=\s|\/?\s*$))/m;
+	/rm\s+(-[a-zA-Z]*[rf][a-zA-Z]*\s+)+((?=\/(\s|$))\/|\/\*(?=\s|$)|~(?=\s|\/\*|$)|\$HOME(?=\s|\/?\s*$))/m;
 
 export function denyReason(command: string): string | null {
 	if (WHILE_TRUE.test(command)) {
@@ -112,7 +144,13 @@ export function denyReason(command: string): string | null {
 
 export function isAllowlisted(command: string): boolean {
 	const trimmed = command.trim();
-	return ALLOW_PREFIXES.some((prefix) => trimmed === prefix || trimmed.startsWith(`${prefix} `));
+	if (!ALLOW_PREFIXES.some((prefix) => trimmed === prefix || trimmed.startsWith(`${prefix} `))) {
+		return false;
+	}
+	// Only PURE single commands may skip the judge: a compound command could
+	// smuggle anything after the innocuous prefix ("git status; cat ~/.env").
+	const rest = trimmed.replace(/^\S+/, "");
+	return !/[;|&`$><\n]/.test(rest);
 }
 
 // --- layer 2: laya judge ----------------------------------------------------
@@ -209,38 +247,74 @@ async function callJudge(
 
 const BASH_TOOLS = new Set(["bash", "bash_bg"]);
 
-/** Log-mode passthrough: report the would-be block, let the call through. */
-function decide(mode: JudgeConfig["mode"], reason: string | null): { block: boolean; reason: string } | undefined {
-	if (reason === null) return undefined;
-	if (mode === "log") {
-		console.log(`[bash-judge shadow] ${reason}`);
-		return undefined;
-	}
-	return { block: true, reason };
+/** Minimal ctx surface the handler needs (kept narrow for tests). */
+export interface JudgeCtx {
+	ui: {
+		notify(message: string, level: "info" | "warning" | "error"): void;
+		setStatus(key: string, value: string | undefined): void;
+	};
 }
 
 export default function (pi: ExtensionAPI) {
-	pi.on("tool_call", async (event) => {
-		if (!BASH_TOOLS.has(event.toolName)) return;
-		const command = (event.input as { command?: unknown } | undefined)?.command;
-		if (typeof command !== "string" || command.trim() === "") return;
+	// Config is read once, lazily, on the first judged call (that's where a
+	// ctx with ui surface exists). Missing/broken config => ONE proper TUI
+	// warning, then the gate self-disables: bash calls pass unjudged — a
+	// mis-deploy must not wedge every shell call.
+	let config: JudgeConfig | null = null;
+	let announced = false;
 
-		if (isAllowlisted(command)) return;
-
-		const config = readConfig();
+	async function handler(event: { toolName: string; input: unknown }, ctx: JudgeCtx) {
 		if (config === null) {
-			// Eval-time assertion guarantees baseUrl when enabled; a missing env
-			// here means a broken deploy — fail-safe, never silent-pass.
-			return decide("block", "blocked by bash-judge: PI_BASH_JUDGE_BASE_URL is not set (fail-safe)");
+			const loaded = readConfig();
+			if (loaded.config === null) {
+				if (!announced) {
+					announced = true;
+					ctx.ui.notify(
+						`bash-judge disabled: ${loaded.error} (${configPath}) — bash calls run unjudged`,
+						"warning",
+					);
+				}
+				return undefined;
+			}
+			config = loaded.config;
 		}
 
+		if (!BASH_TOOLS.has(event.toolName)) return undefined;
+		const command = (event.input as { command?: unknown } | undefined)?.command;
+		if (typeof command !== "string" || command.trim() === "") return undefined;
+
+		if (isAllowlisted(command)) return undefined;
+
 		const deny = denyReason(command);
-		if (deny !== null) return decide(config.mode, deny);
+		if (deny !== null) return decide(ctx, config.mode, deny);
 
 		const result = await callJudge(config, command);
 		if (!result.ok) {
-			return decide(config.mode, `blocked by bash-judge: judge unavailable (${result.error}) — fail-safe`);
+			return decide(
+				ctx,
+				config.mode,
+				`blocked by bash-judge: judge unavailable (${result.error}) — fail-safe`,
+			);
 		}
-		return decide(config.mode, evaluateAnswers(result.answers, result.usage, config.threshold));
-	});
+		return decide(ctx, config.mode, evaluateAnswers(result.answers, result.usage, config.threshold));
+	}
+
+	function decide(
+		ctx: JudgeCtx,
+		mode: JudgeConfig["mode"],
+		reason: string | null,
+	): { block: boolean; reason: string } | undefined {
+		if (reason === null) {
+			ctx.ui.setStatus("bash-judge", undefined);
+			return undefined;
+		}
+		if (mode === "log") {
+			// Shadow rollout: show the would-be block in the footer status, pass.
+			ctx.ui.setStatus("bash-judge", `shadow: ${reason}`);
+			return undefined;
+		}
+		return { block: true, reason };
+	}
+
+	pi.on("tool_call", (event, ctx) => handler(event, ctx as JudgeCtx));
 }
