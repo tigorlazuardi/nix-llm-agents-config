@@ -309,8 +309,11 @@ export default function (pi: ExtensionAPI) {
 			return undefined;
 		}
 		if (mode === "log") {
-			// Shadow rollout: show the would-be block in the footer status, pass.
+			// Shadow rollout: footer status persists the last verdict, notify makes
+			// each would-be block unmissable (setStatus alone is easy to miss and
+			// can be a no-op in RPC-driven sessions).
 			ctx.ui.setStatus("bash-judge", `shadow: ${reason}`);
+			ctx.ui.notify(`bash-judge shadow: ${reason}`, "warning");
 			return undefined;
 		}
 		return { block: true, reason };

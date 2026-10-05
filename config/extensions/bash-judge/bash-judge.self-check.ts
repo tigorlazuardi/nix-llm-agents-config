@@ -224,9 +224,8 @@ globalThis.fetch = (async () =>
 	judgeResponse(noBody, { truncated: true, state_tokens_dropped: 0 })) as typeof fetch;
 assert.match((await call("echo long"))?.reason ?? "", /too long/);
 
-// shadow mode: same verdicts, but everything passes with a footer status line.
-// Config is cached once read (immutable store file in production), so a mode
-// change needs a fresh extension load — write log config, spawn second handler.
+// shadow mode: same verdicts, but everything passes with a footer status line
+// AND a warning notify (the user must see would-be blocks).
 writeFileSync(
 	configPath,
 	JSON.stringify({ baseUrl: "http://127.0.0.1:8765", mode: "log" }),
@@ -244,6 +243,8 @@ uiLog.status.length = 0;
 globalThis.fetch = (async () => judgeResponse(yesBody)) as typeof fetch;
 assert.equal(await shadowCall("rm -rf /home/homeserver/homelab/build"), undefined);
 assert.match(uiLog.status.at(-1) ?? "", /shadow.*destro=yes/);
+assert.equal(uiLog.notify.length, 1, "shadow verdict must notify");
+assert.match(uiLog.notify[0], /shadow.*destro=yes/);
 
 // non-bash tools and malformed input pass untouched
 globalThis.fetch = async () => {
