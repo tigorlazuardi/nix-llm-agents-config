@@ -1735,8 +1735,9 @@ in
         mkdir -p "$PI_CODING_AGENT_DIR"
         test -d ${expectedWebAccessPath}/node_modules/@mozilla/readability
         test -d ${expectedWebAccessPath}/node_modules/unpdf
-        grep -q 'webSearch: "web_search"' ${expectedWebAccessPath}/index.ts
-        grep -q 'fetchContent: "fetch_content"' ${expectedWebAccessPath}/index.ts
+        # Upstream moves the tool-name table between files across versions; check package sources, not one file.
+        grep -qr --include='*.ts' --exclude-dir=node_modules 'webSearch: "web_search"' ${expectedWebAccessPath}
+        grep -qr --include='*.ts' --exclude-dir=node_modules 'fetchContent: "fetch_content"' ${expectedWebAccessPath}
         grep -q 'name: toolNames.webSearch' ${expectedWebAccessPath}/index.ts
         grep -q 'name: toolNames.fetchContent' ${expectedWebAccessPath}/index.ts
         pi --offline --no-extensions --no-skills --no-prompt-templates --no-context-files \
