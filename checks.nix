@@ -626,6 +626,14 @@ in
       == ./config/extensions/env-loader;
     assert
       default.config.home.file."${default.config.programs.pi-coding-agent.configDir}/extensions/env-loader".force;
+    assert
+      default.config.programs.pi-coding-agent.extensions.no-until-loop
+      == ./config/extensions/no-until-loop;
+    assert
+      default.config.home.file."${default.config.programs.pi-coding-agent.configDir}/extensions/no-until-loop".source
+      == ./config/extensions/no-until-loop;
+    assert
+      default.config.home.file."${default.config.programs.pi-coding-agent.configDir}/extensions/no-until-loop".force;
     assert default.config.programs.pi-coding-agent.idleCompact.enable;
     assert default.config.programs.pi-coding-agent.idleCompact.thresholdTokens == 150000;
     assert default.config.programs.pi-coding-agent.idleCompact.delayMs == 5000;
@@ -1046,6 +1054,30 @@ in
         mkdir -p "$PI_CODING_AGENT_DIR"
         pi --offline --no-extensions --no-skills --no-prompt-templates --no-context-files \
           -e ${./config/extensions/pi-idle-compact}/index.ts \
+          --list-models > pi.log 2>&1
+        ! grep -E 'Extension issues|Failed to load extension|Cannot find module|Error:' pi.log
+        touch $out
+      '';
+
+  no-until-loop =
+    pkgs.runCommandLocal "pi-no-until-loop"
+      {
+        nativeBuildInputs = [
+          expectedPackage
+          pkgs.nodejs_22
+        ];
+      }
+      ''
+        cp -R ${./config/extensions/no-until-loop} no-until-loop
+        chmod -R u+w no-until-loop
+        node --experimental-strip-types no-until-loop/no-until-loop.self-check.ts
+
+        export HOME="$TMPDIR/home"
+        export PI_CODING_AGENT_DIR="$HOME/.pi/agent"
+        export PI_TELEMETRY=0
+        mkdir -p "$PI_CODING_AGENT_DIR"
+        pi --offline --no-extensions --no-skills --no-prompt-templates --no-context-files \
+          -e ${./config/extensions/no-until-loop}/index.ts \
           --list-models > pi.log 2>&1
         ! grep -E 'Extension issues|Failed to load extension|Cannot find module|Error:' pi.log
         touch $out

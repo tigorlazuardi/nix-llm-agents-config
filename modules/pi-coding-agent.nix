@@ -707,6 +707,7 @@ in
           dev-journal = lib.mkDefault ../config/extensions/dev-journal;
           env-loader = lib.mkDefault ../config/extensions/env-loader;
           lazy-tools = lib.mkDefault ../config/extensions/lazy-tools;
+          no-until-loop = lib.mkDefault ../config/extensions/no-until-loop;
         }
         (lib.mkIf idleCompact.enable {
           pi-idle-compact = lib.mkDefault ../config/extensions/pi-idle-compact;
@@ -734,6 +735,10 @@ in
       };
       "${cfg.configDir}/extensions/lazy-tools" = {
         source = cfg.extensions.lazy-tools;
+        force = true;
+      };
+      "${cfg.configDir}/extensions/no-until-loop" = {
+        source = cfg.extensions.no-until-loop;
         force = true;
       };
       "${cfg.configDir}/prompts" = {
