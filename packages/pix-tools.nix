@@ -36,17 +36,6 @@ buildNpmPackage {
     cp ${./pix-tools-package-lock.json} package-lock.json
   '';
 
-  postInstall = ''
-    # ponytail: pix-footer 0.1.20 lacks responsive layout; drop patch when upstream wraps footer content.
-    substituteInPlace "$out/lib/node_modules/pix-tools/node_modules/@xynogen/pix-footer/src/footer.ts" \
-      --replace-fail \
-        'import { truncateToWidth } from "@earendil-works/pi-tui";' \
-        'import { wrapTextWithAnsi } from "@earendil-works/pi-tui";' \
-      --replace-fail \
-        'return [truncateToWidth(line, width)];' \
-        'return wrapTextWithAnsi(line, width);'
-  '';
-
   npmDepsHash = locks."pix-data".npmDepsHash;
   npmInstallFlags = [
     "--omit=dev"
