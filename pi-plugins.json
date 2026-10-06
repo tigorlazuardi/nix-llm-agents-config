@@ -5,7 +5,7 @@
     "version": "0.6.0",
     "src": "https://registry.npmjs.org/@tigorhutasuhut/pi-rules/-/pi-rules-0.6.0.tgz",
     "hash": "sha256-O3mjVfZHMmmPcg6XOD3mVHQjCJmAbMWNmRBFX4q1qjk=",
-    "npmDepsHash": "sha256-gONlod7vcULy/S1Xkzx6HLcGaESi3cWb8JRXmiJwb90=",
+    "npmDepsHash": "sha256-IvrFz7hdjIeo8Eb39SMgCgSG3uD+ug+c7DYRU2HWeTI=",
     "manifestTransform": {
       "delete": [
         "devDependencies",
@@ -278,10 +278,7 @@
       "delete": [
         "peerDependencies",
         "peerDependenciesMeta"
-      ],
-      "dependencyOverrides": {
-        "typebox": "*"
-      }
+      ]
     },
     "lockFile": "packages/supi-context-package-lock.json",
     "check": "supi-context-load"
@@ -337,10 +334,7 @@
       "delete": [
         "devDependencies",
         "peerDependencies"
-      ],
-      "dependencyOverrides": {
-        "@sinclair/typebox": "0.34.52"
-      }
+      ]
     },
     "lockFile": "packages/pi-herdr-subagents-package-lock.json",
     "check": "herdr-subagents-load"

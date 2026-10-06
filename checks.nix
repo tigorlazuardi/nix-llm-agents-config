@@ -1717,9 +1717,10 @@ in
     export PI_TELEMETRY=0
     mkdir -p "$PI_CODING_AGENT_DIR"
     test -d ${expectedRulesPath}/node_modules/picomatch
-    test -d ${expectedRulesPath}/node_modules/typebox
+    # Pi 1.0+ provides typebox through its loader; only real deps stay vendored.
+    test ! -e ${expectedRulesPath}/node_modules/typebox
     test -d ${expectedRulesPath}/node_modules/yaml
-    pi --offline --no-extensions --no-skills --no-prompt-templates --no-context-files \
+    pi --offline --no-skills --no-prompt-templates --no-context-files \
       -e ${expectedRulesPath} \
       --list-models > pi.log 2>&1
     ! grep -E 'Extension issues|Failed to load extension|Cannot find module|Error:' pi.log
@@ -1812,7 +1813,8 @@ in
         entry="$package/pi-extension/subagents/index.ts"
         test -f "$entry"
         test -f "$package/README.md"
-        test -d "$package/node_modules/@sinclair/typebox"
+        # Pi 1.0+ aliases @sinclair/typebox to its host copy; the package ships no vendored modules.
+        test ! -e "$package/node_modules"
         grep -F 'name: "subagent"' "$entry"
         grep -F 'name: "subagent_interrupt"' "$entry"
         grep -F 'name: "subagents_list"' "$entry"
@@ -1822,13 +1824,17 @@ in
         grep -F 'creates the herdr pane' "$entry"
         cp -R "$package" "$TMPDIR/package"
         chmod -R u+w "$TMPDIR/package"
-        mkdir -p "$TMPDIR/package/node_modules/@earendil-works"
+        mkdir -p "$TMPDIR/package/node_modules/@earendil-works" "$TMPDIR/package/node_modules/@sinclair"
         ln -s ${expectedPackage}/lib/node_modules/pi-monorepo \
           "$TMPDIR/package/node_modules/@earendil-works/pi-coding-agent"
         ln -s ${expectedPackage}/lib/node_modules/pi-monorepo/node_modules/@earendil-works/pi-ai \
           "$TMPDIR/package/node_modules/@earendil-works/pi-ai"
         ln -s ${expectedPackage}/lib/node_modules/pi-monorepo/node_modules/@earendil-works/pi-tui \
           "$TMPDIR/package/node_modules/@earendil-works/pi-tui"
+        ln -s ${expectedPackage}/lib/node_modules/pi-monorepo/node_modules/typebox \
+          "$TMPDIR/package/node_modules/typebox"
+        ln -s ${expectedPackage}/lib/node_modules/pi-monorepo/node_modules/typebox \
+          "$TMPDIR/package/node_modules/@sinclair/typebox"
         node --experimental-strip-types ${./tests/pi-herdr-subagents-policy-self-check.mjs} \
           "$TMPDIR/package" "$TMPDIR/policy" ${managedImplementerFixture} ${managedOrchestratorFixture}
         pi --offline --no-extensions --no-skills --no-prompt-templates --no-context-files \
@@ -1846,9 +1852,10 @@ in
         export PI_TELEMETRY=0
         mkdir -p "$PI_CODING_AGENT_DIR"
         test -d ${expectedSupiContextPath}/node_modules/@mrclrchtr/supi-core
-        test -d ${expectedSupiContextPath}/node_modules/typebox
+        # Pi 1.0+ provides typebox through its loader; only supi-core stays vendored.
+        test ! -e ${expectedSupiContextPath}/node_modules/typebox
         test -f ${expectedSupiContextPath}/src/extension.ts
-        pi --offline --no-extensions --no-skills --no-prompt-templates --no-context-files \
+        pi --offline --no-skills --no-prompt-templates --no-context-files \
           -e ${expectedSupiContextPath}/src/extension.ts \
           --list-models > pi.log 2>&1
         ! grep -E 'Extension issues|Failed to load extension|Cannot find module|Error:' pi.log

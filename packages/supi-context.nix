@@ -16,18 +16,17 @@ buildNpmPackage {
     hash = lock.hash;
   };
 
-  # ponytail: lock runtime deps only; managed Pi supplies optional peer packages.
-  # typebox moved to optional peerDependencies in 8.0.1 but stays a runtime import.
+  # ponytail: lock runtime deps only; Pi 1.0+ provides typebox through its
+  # extension loader (root and /value specifiers are host-aliased).
   postPatch = ''
     cp ${./supi-context-package-lock.json} package-lock.json
-    ${nodejs}/bin/node -e 'const fs = require("fs"); const p = require("./package.json"); delete p.peerDependencies; delete p.peerDependenciesMeta; p.dependencies.typebox = "*"; fs.writeFileSync("package.json", JSON.stringify(p, null, 2) + "\n")'
+    ${nodejs}/bin/node -e 'const fs = require("fs"); const p = require("./package.json"); delete p.peerDependencies; delete p.peerDependenciesMeta; fs.writeFileSync("package.json", JSON.stringify(p, null, 2) + "\n")'
   '';
 
   npmDepsHash = lock.npmDepsHash;
   npmInstallFlags = [
     "--omit=dev"
     "--omit=peer"
-    "--legacy-peer-deps"
   ];
   dontNpmBuild = true;
 
