@@ -81,7 +81,6 @@ let
   timestamps = pinnedPkgs.callPackage ../packages/pi-timestamps.nix { };
   piHerdr = pinnedPkgs.callPackage ../packages/pi-herdr.nix { };
   herdrSudoTask = pinnedPkgs.callPackage ../packages/pi-herdr-sudo-task.nix { };
-  askHerdr = pinnedPkgs.callPackage ../packages/pi-ask-herdr.nix { };
   herdrRename = pinnedPkgs.callPackage ../packages/pi-herdr-rename.nix { };
   piBg = pinnedPkgs.callPackage ../packages/pi-bg.nix { };
   messagingRelayConfigUpdater =
@@ -163,11 +162,6 @@ let
     {
       name = "pi-herdr-sudo-task";
       package = "${herdrSudoTask}/lib/node_modules/pi-herdr-sudo-task";
-      default = true;
-    }
-    {
-      name = "pi-ask-herdr";
-      package = "${askHerdr}/lib/node_modules/pi-ask-herdr";
       default = true;
     }
     {
@@ -450,6 +444,23 @@ in
             inherit (jsonFormat) type;
             default = { };
             description = "pi-mcp-adapter settings written beside integrated user-level MCP servers.";
+          };
+        };
+
+        ask-user = {
+          # Local extension (config/extensions/ask-user), NOT a settings
+          # package — same pattern as bash-judge: links via extensions/home.file
+          # when enabled; a pluginPackages entry would push a non-loadable
+          # package path into settings.packages (pi fails to boot).
+          # Registers the ask_user tool (kept eager in lazy-tools) with a
+          # numbered-menu dialog whose screen shape is the herdr-web-ui
+          # fallback-menu contract, so every question is answerable from the
+          # web/phone card with digit buttons; emits herdr:blocked while
+          # waiting. Replaces the pi-ask-herdr package.
+          enable = lib.mkOption {
+            type = lib.types.bool;
+            default = true;
+            description = "Register the in-repo ask_user tool (herdr-web-ui-native numbered dialog).";
           };
         };
 
@@ -796,6 +807,9 @@ in
         (lib.mkIf cfg.plugins.bash-judge.enable {
           bash-judge = lib.mkDefault ../config/extensions/bash-judge;
         })
+        (lib.mkIf cfg.plugins.ask-user.enable {
+          ask-user = lib.mkDefault ../config/extensions/ask-user;
+        })
       ];
       skills = lib.mapAttrs (_: lib.mkDefault) (repoSkills // patchedMattSkills);
     };
@@ -827,6 +841,10 @@ in
       };
       "${cfg.configDir}/extensions/bash-judge" = lib.mkIf cfg.plugins.bash-judge.enable {
         source = cfg.extensions.bash-judge;
+        force = true;
+      };
+      "${cfg.configDir}/extensions/ask-user" = lib.mkIf cfg.plugins.ask-user.enable {
+        source = cfg.extensions.ask-user;
         force = true;
       };
       "${cfg.configDir}/prompts" = {

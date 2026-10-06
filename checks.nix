@@ -271,8 +271,7 @@ let
   expectedPiHerdrPath = "${expectedPiHerdr}/lib/node_modules/@ogulcancelik/pi-herdr";
   expectedHerdrSudoTask = pkgs.callPackage ./packages/pi-herdr-sudo-task.nix { };
   expectedHerdrSudoTaskPath = "${expectedHerdrSudoTask}/lib/node_modules/pi-herdr-sudo-task";
-  expectedAskHerdr = pkgs.callPackage ./packages/pi-ask-herdr.nix { };
-  expectedAskHerdrPath = "${expectedAskHerdr}/lib/node_modules/pi-ask-herdr";
+  expectedAskUserDir = ./config/extensions/ask-user;
   expectedHerdrRename = pkgs.callPackage ./packages/pi-herdr-rename.nix { };
   expectedHerdrRenamePath = "${expectedHerdrRename}/lib/node_modules/pi-herdr-rename";
   expectedPiBg = pkgs.callPackage ./packages/pi-bg.nix { };
@@ -355,7 +354,6 @@ in
   pi-timestamps = expectedTimestamps;
   pi-herdr = expectedPiHerdr;
   pi-herdr-sudo-task = expectedHerdrSudoTask;
-  pi-ask-herdr = expectedAskHerdr;
   pi-herdr-rename = expectedHerdrRename;
   pi-bg = expectedPiBg;
   remote-pi-relay = expectedRemotePiRelay;
@@ -485,7 +483,6 @@ in
           expectedTimestampsPath
           expectedPiHerdrPath
           expectedHerdrSudoTaskPath
-          expectedAskHerdrPath
           expectedHerdrRenamePath
           expectedPiBgPath
           expectedVimModePath
@@ -872,7 +869,6 @@ in
         expectedTimestampsPath
         expectedPiHerdrPath
         expectedHerdrSudoTaskPath
-        expectedAskHerdrPath
         expectedHerdrRenamePath
         expectedPiBgPath
         expectedVimModePath
@@ -1174,7 +1170,7 @@ in
         ];
       }
       ''
-        nixfmt --check ${./flake.nix} ${./checks.nix} ${./modules/pi-coding-agent.nix} ${./modules/remote-pi-relay.nix} ${./modules/pi-coding-agent/agents.nix} ${./modules/pi-coding-agent/default-agents.nix} ${./modules/pi-coding-agent/pi-herdr-subagents.nix} ${./packages/pi-diet-lsp.nix} ${./packages/pi-commandcode-provider.nix} ${./packages/pi-effort.nix} ${./packages/pi-timestamps.nix} ${./packages/pi-herdr.nix} ${./packages/pi-herdr-sudo-task.nix} ${./packages/pi-ask-herdr.nix} ${./packages/pi-herdr-rename.nix} ${./packages/pi-herdr-rename.nix} ${./packages/pi-bg.nix} ${./packages/remote-pi-relay.nix} ${./packages/pi-vimmode.nix} ${./packages/pi-usage.nix} ${./packages/pi-cache-optimizer.nix} ${./packages/pi-mcp-adapter.nix} ${./packages/browser-goblin.nix} ${./packages/pix-optimizer.nix} ${./packages/pix-tools.nix} ${./packages/pi-vcc.nix} ${./packages/pi-prompt-template-model.nix} ${./packages/pi-todo-herdr.nix} ${./packages/pi-rules.nix} ${./packages/pi-web-access.nix} ${./packages/pi-herdr-subagents.nix} ${./packages/pi-vision-handoff.nix} ${./packages/pi-vision-handoff-config-updater.nix} ${./packages/supi-context.nix} ${./packages/supi-extras.nix} ${./packages/toon.nix}
+        nixfmt --check ${./flake.nix} ${./checks.nix} ${./modules/pi-coding-agent.nix} ${./modules/remote-pi-relay.nix} ${./modules/pi-coding-agent/agents.nix} ${./modules/pi-coding-agent/default-agents.nix} ${./modules/pi-coding-agent/pi-herdr-subagents.nix} ${./packages/pi-diet-lsp.nix} ${./packages/pi-commandcode-provider.nix} ${./packages/pi-effort.nix} ${./packages/pi-timestamps.nix} ${./packages/pi-herdr.nix} ${./packages/pi-herdr-sudo-task.nix} ${./packages/pi-herdr-rename.nix} ${./packages/pi-bg.nix} ${./packages/remote-pi-relay.nix} ${./packages/pi-vimmode.nix} ${./packages/pi-usage.nix} ${./packages/pi-cache-optimizer.nix} ${./packages/pi-mcp-adapter.nix} ${./packages/browser-goblin.nix} ${./packages/pix-optimizer.nix} ${./packages/pix-tools.nix} ${./packages/pi-vcc.nix} ${./packages/pi-prompt-template-model.nix} ${./packages/pi-todo-herdr.nix} ${./packages/pi-rules.nix} ${./packages/pi-web-access.nix} ${./packages/pi-herdr-subagents.nix} ${./packages/pi-vision-handoff.nix} ${./packages/pi-vision-handoff-config-updater.nix} ${./packages/supi-context.nix} ${./packages/supi-extras.nix} ${./packages/toon.nix}
         WORKFLOW=${./.github/workflows/daily-update.yml} UPDATER=${./scripts/daily-update.sh} REGISTRY=${./pi-plugins.json} CHECKS=${./checks.nix} MISSING_INTEGRITY_FIXTURE=${./tests/fixtures/npm-lock-missing-integrity.json} CONTROL_RESOLVED_FIXTURE=${./tests/fixtures/npm-lock-control-resolved.json} bash ${./tests/daily-updater-self-check.sh}
         RUNNER=${./scripts/local-update.sh} PROMPT=${./scripts/local-update-recovery.md} bash ${./tests/local-updater-self-check.sh}
         touch $out
@@ -1506,23 +1502,25 @@ in
         touch $out
       '';
 
-  pi-ask-herdr-load =
-    pkgs.runCommandLocal "pi-ask-herdr-load" { nativeBuildInputs = [ expectedPackage ]; }
+  ask-user =
+    pkgs.runCommandLocal "pi-ask-user"
+      {
+        nativeBuildInputs = [
+          expectedPackage
+          pkgs.nodejs_22
+        ];
+      }
       ''
+        cp -R ${expectedAskUserDir} ask-user
+        chmod -R u+w ask-user
+        node --experimental-strip-types ask-user/ask-user.self-check.ts
+
         export HOME="$TMPDIR/home"
         export PI_CODING_AGENT_DIR="$HOME/.pi/agent"
         export PI_TELEMETRY=0
         mkdir -p "$PI_CODING_AGENT_DIR"
-        test -f ${expectedAskHerdrPath}/index.ts
-        test ! -e ${expectedAskHerdrPath}/node_modules
-        grep -F 'name: "ask_user"' ${expectedAskHerdrPath}/src/tool.ts
-        grep -F 'Omit for no timeout (default).' ${expectedAskHerdrPath}/src/tool.ts
-        grep -F 'Omit timeout unless the user explicitly requests a deadline; no timeout is the default.' ${expectedAskHerdrPath}/src/tool.ts
-        grep -F 'if (params.timeout && params.timeout > 0)' ${expectedAskHerdrPath}/src/ui.ts
-        grep -F 'if (ctx.mode !== "tui")' ${expectedAskHerdrPath}/src/tool.ts
-        grep -F 'pane.report_metadata' ${expectedAskHerdrPath}/src/herdr.ts
         pi --offline --no-extensions --no-skills --no-prompt-templates --no-context-files \
-          -e ${expectedAskHerdrPath} \
+          -e ${expectedAskUserDir}/index.ts \
           --list-models > pi.log 2>&1
         ! grep -E 'Extension issues|Failed to load extension|Cannot find module|Error:' pi.log
         touch $out

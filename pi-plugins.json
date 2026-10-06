@@ -122,14 +122,6 @@
     "hash": "sha256-Xlz9kMkdVC35YEIVXdgGvfDv1C/PoDe4J69i7iykLUg=",
     "check": "pi-herdr-sudo-task-load"
   },
-  "pi-ask-herdr": {
-    "strategy": "npm",
-    "package": "pi-ask-herdr",
-    "version": "0.2.2",
-    "src": "https://registry.npmjs.org/pi-ask-herdr/-/pi-ask-herdr-0.2.2.tgz",
-    "hash": "sha256-kJG33jskQGWP6MH+OizscjKGgqt8TQQ3CsgyL9gPeww=",
-    "check": "pi-ask-herdr-load"
-  },
   "pi-bg": {
     "strategy": "npm",
     "package": "@alexlikevibe/pi-bg",

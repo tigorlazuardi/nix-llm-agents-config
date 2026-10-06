@@ -15,7 +15,7 @@ const paths: Record<string, string> = {
   read: "<builtin:read>",
   bash: "/nix/store/pi-bg/index.ts",
   bash_bg: "/nix/store/pi-bg/index.ts",
-  ask_user: "/nix/store/pi-ask-herdr/index.ts",
+  ask_user: "/config/extensions/ask-user/index.ts",
   rename_herdr_tab: "/nix/store/pi-herdr-rename/index.ts",
   browser_open: "/nix/store/browser-goblin/index.ts",
   subagent: "/nix/store/pi-herdr-subagents/pi-extension/subagents/index.ts",
