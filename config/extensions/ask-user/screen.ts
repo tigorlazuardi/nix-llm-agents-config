@@ -4,47 +4,77 @@
  * Zero imports — this module is also loaded by the self-check outside pi,
  * where @earendil-works/* packages do not resolve.
  *
- * The rendered shape is a CONTRACT with herdr-web-ui's fallback-menu parser
+ * The rendered shape is a CONTRACT with herdr-web-ui's fallbackMenu parser
  * (server/prompt.ts): a numbered menu that owns the screen's end becomes a
  * chat card with one button per option, each button typing that option's
  * digit — no Enter suffix, so mobile answering needs no keyboard and no
- * space key. Rules honored here (herdr-web-ui 0.3.49 regexes, ported in the
- * self-check):
- *   - every option renders as `N. label` (cursor marker ❯ on at most one row)
- *   - the hint line is the LAST line and says what to do (select/choose/esc),
- *     never ends like an input field, and carries no arrow glyphs
- *   - no "(x)" letter-key suffixes and no hint-like lines between rows
- *   - checked multiselect rows use an [x] mark inside the label, never a
- *     second selected-marker
+ * space key. Rules honored here (verified against 0.3.49 source):
+ *   - every selectable row renders `N. label` (cursor ❯ on at most one row —
+ *     parser allows <= 1 selected)
+ *   - at least 2 numbered rows, numbers sequential 1..n (parser rejects a
+ *     single row)
+ *   - the hint line is the LAST line and directly follows the last numbered
+ *     row — NO blank line between (the parser's end-walk stops at blanks and
+ *     any shown line after it voids the menu); it says what to do
+ *     (pick/toggle/esc), never starts with ❯ › > " ' or $, never ends like
+ *     an input field ("Choice: 2"), and carries no arrow glyphs (the card
+ *     only offers digit/enter/esc buttons)
+ *   - no "(x)" letter-key suffixes on rows (a row with its own letter key
+ *     means the number may not be the key)
+ *   - the only blank line sits between the header (question / step) and the
+ *     first row — above the menu, where the parser's scan-up stops anyway
  */
 
 export const ANSWER_LIMITS = { maxQuestions: 4, maxOptions: 9 } as const;
 
 export type AskType = "text" | "confirm" | "select" | "multiselect";
 
+/** What activating a row means. */
+export type RowKind = "option" | "custom" | "skip" | "multi";
+
 export interface OptionItem {
 	label: string;
+	description?: string;
+}
+
+/** A selectable row in the numbered menu. */
+export interface MenuRow {
+	label: string;
+	kind: RowKind;
 	description?: string;
 }
 
 export interface QuestionSpec {
 	question: string;
 	type: AskType;
-	options: OptionItem[];
-	allowCustom: boolean;
+	/** FINAL row list: options plus derived custom/skip rows. */
+	rows: MenuRow[];
+	/** index of the custom-input row, or -1 */
+	customRowIndex: number;
+	/** index of the skip row, or -1 */
+	skipRowIndex: number;
+	multi: boolean;
+	/** prefill for the text question's custom input */
 	default?: string;
 }
 
 export interface AnswerRecord {
 	questionIndex: number;
 	question: string;
-	kind: "option" | "custom" | "multi";
+	kind: "option" | "custom" | "multi" | "skip";
 	answer: string | string[] | null;
 	/** chosen labels for multi; mirror of answer when both are set */
 	selected?: string[];
 }
 
-/** Normalize raw tool params into a QuestionSpec with concrete option rows. */
+export const CUSTOM_ROW_LABEL = "Type your own answer";
+export const SKIP_ROW_LABEL = "Skip this question";
+
+/**
+ * Normalize raw tool params into a QuestionSpec with the FINAL numbered-row
+ * list. text questions get two rows (Type + Skip) because the fallback-menu
+ * parser needs at least two numbered rows to recognize a menu at all.
+ */
 export function normalizeQuestion(raw: {
 	question: string;
 	type?: AskType;
@@ -53,43 +83,41 @@ export function normalizeQuestion(raw: {
 	default?: string;
 }): QuestionSpec {
 	const type: AskType = raw.type ?? "text";
-	let options: OptionItem[] = [];
+	const rows: MenuRow[] = [];
 	if (type === "confirm") {
-		options = [
-			{ label: "Yes", description: raw.allow_custom ? undefined : undefined },
-			{ label: "No" },
-		];
-	} else if (type === "select" || type === "multiselect") {
-		options = (raw.options ?? []).map((option) =>
-			typeof option === "string" ? { label: option } : { label: option.label, description: option.description },
-		);
+		rows.push({ label: "Yes", kind: "option" }, { label: "No", kind: "option" });
+	} else if (type === "text") {
+		rows.push({ label: CUSTOM_ROW_LABEL, kind: "custom" }, { label: SKIP_ROW_LABEL, kind: "skip" });
+	} else {
+		for (const option of raw.options ?? []) {
+			rows.push(
+				typeof option === "string"
+					? { label: option, kind: "option" }
+					: { label: option.label, kind: "option", description: option.description },
+			);
+		}
 	}
-	return {
-		question: raw.question,
-		type,
-		options,
-		allowCustom: raw.allow_custom ?? type !== "confirm",
-		default: raw.default,
-	};
+	const customRowIndex =
+		type === "text" ? 0 : raw.allow_custom ?? type !== "confirm" ? rows.push({ label: CUSTOM_ROW_LABEL, kind: "custom" }) - 1 : -1;
+	const skipRowIndex = type === "text" ? 1 : -1;
+	return { question: raw.question, type, rows, customRowIndex, skipRowIndex, multi: type === "multiselect", default: raw.default };
 }
 
-/** The custom "Type your own answer" row, appended after the options when allowed. */
-export const CUSTOM_ROW_LABEL = "Type your own answer";
-
-/** Hint bar for a question type — always the screen's last line. */
+/** Hint bar for a question type — always the screen's last line, directly under the last row.
+ * Kept short so narrow panes never wrap it (a wrapped tail would break the fallback card). */
 export function hintBar(type: AskType): string {
 	switch (type) {
 		case "multiselect":
-			return "digit = toggle · enter = done · esc = back · ctrl+c = cancel";
+			return "digit toggle · enter done · esc back · ctrl+c cancel";
 		case "text":
-			return "digit 1 = type · enter = save · esc = back · ctrl+c = cancel";
+			return "digit choose · enter select · esc back · ctrl+c cancel";
 		default:
-			return "digit = pick · enter = submit · esc = back · ctrl+c = cancel";
+			return "digit pick · enter submit · esc back · ctrl+c cancel";
 	}
 }
 
 export interface ScreenState {
-	/** cursor position over all rows (options + custom row when present) */
+	/** cursor position over the row list */
 	cursor: number;
 	/** checked option indexes (multiselect) */
 	checked: Set<number>;
@@ -100,48 +128,39 @@ export interface ScreenState {
 	multi: boolean;
 }
 
-/** Pure layout: one numbered row per option, blank, hint bar last. */
+export interface HeaderInfo {
+	/** 1-based index of the active question */
+	step?: number;
+	/** total questions in the batch */
+	total?: number;
+}
+
+/** Pure layout: header, blank, numbered rows, hint bar — nothing after the hint. */
 export class ScreenLayout {
 	private readonly question: QuestionSpec;
-	private readonly items: OptionItem[];
 	private readonly state: ScreenState;
+	private readonly header: HeaderInfo;
 
-	constructor(
-		question: QuestionSpec,
-		items: OptionItem[],
-		state: ScreenState,
-	) {
+	constructor(question: QuestionSpec, state: ScreenState, header: HeaderInfo = {}) {
 		this.question = question;
-		this.items = items;
 		this.state = state;
+		this.header = header;
 	}
 
-	/** Total selectable rows: options plus the custom row when allowed. */
-	rowCount(): number {
-		return this.items.length + (this.question.allowCustom ? 1 : 0);
-	}
-
-	/** Index of the custom row, or -1 when absent. */
-	customRowIndex(): number {
-		return this.question.allowCustom ? this.items.length : -1;
-	}
-
+	/** Structured lines: plain text (no styling). Styling happens in the wizard. */
 	lines(): string[] {
-		const lines: string[] = [];
-		lines.push(this.question.question);
-		this.items.forEach((item, index) => {
-			const marker = index === this.state.cursor ? "❯" : " ";
-			const checked = this.state.multi && this.state.checked.has(index) ? "[x] " : "";
-			const description = item.description ? ` — ${item.description}` : "";
-			lines.push(`${marker} ${index + 1}. ${checked}${item.label}${description}`);
-		});
-		if (this.question.allowCustom) {
-			const index = this.items.length;
-			const marker = index === this.state.cursor && !this.state.customActive ? "❯" : " ";
-			const shown = this.state.customActive || this.state.draft ? `: ${this.state.draft}` : "";
-			lines.push(`${marker} ${index + 1}. ${CUSTOM_ROW_LABEL}${shown}`);
+		const lines: string[] = [this.question.question];
+		if (this.header.step && this.header.total && this.header.total > 1) {
+			lines.push(`Question ${this.header.step} of ${this.header.total}`);
 		}
 		lines.push("");
+		this.question.rows.forEach((row, index) => {
+			const marker = index === this.state.cursor && !this.state.customActive ? "❯" : " ";
+			const checked = this.state.multi && this.state.checked.has(index) ? "[x] " : "";
+			const description = row.description ? ` — ${row.description}` : "";
+			const draft = row.kind === "custom" && (this.state.customActive || this.state.draft) ? `: ${this.state.draft}` : "";
+			lines.push(`${marker} ${index + 1}. ${checked}${row.label}${description}${draft}`);
+		});
 		lines.push(hintBar(this.question.type));
 		return lines;
 	}
@@ -152,9 +171,7 @@ export function renderAgentAnswer(result: { answers: AnswerRecord[]; cancelled: 
 	if (result.cancelled) {
 		return "User declined to answer questions";
 	}
-	return result.answers
-		.map((answer, index) => `${index + 1} -> ${formatAnswer(answer)}`)
-		.join("\n");
+	return result.answers.map((answer, index) => `${index + 1} -> ${formatAnswer(answer)}`).join("\n");
 }
 
 function formatAnswer(answer: AnswerRecord): string {

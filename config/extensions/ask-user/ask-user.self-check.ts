@@ -5,85 +5,94 @@ import {
   hintBar,
   normalizeQuestion,
   renderAgentAnswer,
-  type OptionItem,
+  type AskType,
   type QuestionSpec,
 } from "./screen.ts";
 
 // --- fallback-menu contract regexes (port of herdr-web-ui 0.3.49
 // server/prompt.ts — the card appears only when these match) -----------------
 
-/** herdr-web-ui: /^[\s>❯›]*=\s*(\d+)\.\s+(.+)$/ — wait, exact: /^\s*([›>❯])?\s*(\d+)\.\s+(.+)$/ */
+/** herdr-web-ui NUMBERED_OPTION_RE: /^\s*([›>❯])?\s*(\d+)\.\s+(.+)$/ */
 const NUMBERED_OPTION_RE = /^\s*([›>❯])?\s*(\d+)\.\s+(.+)$/;
-/** herdr-web-ui MENU_HINT_RE — the hint line must say "choose" */
+/** herdr-web-ui MENU_HINT_RE — the hint line must say to choose */
 const MENU_HINT_RE =
   /\b(?:select|choose|pick|confirm|navigate|move|esc|cancel)\b|[↑↓↵⏎]|\b(?:enter|type)\s+(?:(?:a|an|the)\s+)?number\b|\b\d\s*[-–]\s*\d\b/i;
-/** herdr-web-ui: an input field waiting at a line's end voids the menu */
+/** herdr-web-ui INPUT_FIELD_RE: a line waiting at its end voids the menu */
 const INPUT_FIELD_RE = /:\s*\S{0,3}$/;
+/** herdr-web-ui NOT_PROMPT_TEXT_RE: a hint starting like a quote/prompt is no hint */
+const NOT_PROMPT_TEXT_RE = /^(?:[❯›>"'“]|\$ )/;
+/** herdr-web-ui SELECTED_RE: the hint may not start with a selection marker */
+const SELECTED_RE = /^[❯›>]\s*/;
 /** herdr-web-ui HINT_LINE_RE: a hint-like line inside the last row's wrap voids it */
 const HINT_LINE_RE = /^(?:[↵⏎]|(?:Press|Enter|Select|Choose|Pick|Type|Esc|ESC)\b)/;
-/** herdr-web-ui: a row with a trailing "(x)" letter key voids the menu (number may not be the key) */
+/** herdr-web-ui: a row with a trailing "(x)" letter key voids the menu */
 const LETTER_KEY_SUFFIX_RE = /\(\w\)$/;
+/** herdr-web-ui DIVIDER_RE: pure divider lines are dropped from the shown screen */
+const DIVIDER_RE = /^[\s╭╮╰╯├┤┬┴┼─━═╌▔]+$/;
 
-/** Strip ANSI escapes the way herdr-web-ui does before matching. */
-function stripAnsi(text: string): string {
-  // biome-ignore lint/suspicious/noControlCharactersInRegex: terminal protocol
-  // biome-ignore format: readability
-  const ANSI_RE = /(?:\x1B\[[?<]?[\d;]*[A-Za-z]|\x1B\][^\x07\x1B]*(?:\x07|\x1B\\)|\x1B.)/g;
-  return text.replace(ANSI_RE, "").replace(/\s+$/, "");
+/** Port of herdr-web-ui fallbackMenu over our rendered screen (ANSI already stripped). */
+function parseFallbackLike(screen: string[]): { rows: number[]; hintAt: number } | null {
+  const lines = screen.map((line) => line.replace(/\s+$/, ""));
+  const shown = lines.flatMap((line, index) => (line && !DIVIDER_RE.test(line) ? [index] : []));
+  const lastRow = [...shown].reverse().find((index) => NUMBERED_OPTION_RE.test(lines[index]!.trim()));
+  const hintIndex = shown.at(-1);
+  if (lastRow === undefined || hintIndex === undefined || hintIndex === lastRow) return null;
+  const hint = lines[hintIndex]!;
+  if (!MENU_HINT_RE.test(hint) || SELECTED_RE.test(hint) || NOT_PROMPT_TEXT_RE.test(hint) || INPUT_FIELD_RE.test(hint)) {
+    return null;
+  }
+  let end = lastRow + 1;
+  const numberAt = lines[lastRow]!.search(/\d/);
+  while (end < hintIndex && lines[end] && !DIVIDER_RE.test(lines[end]!) && lines[end]!.search(/\S/) > numberAt) end += 1;
+  if (shown.some((index) => index >= end && index < hintIndex) || end - lastRow - 1 > 2) return null;
+  let start = lastRow;
+  while (start > 0 && lines[start - 1] && !DIVIDER_RE.test(lines[start - 1]!)) start -= 1;
+  while (start < lastRow && !NUMBERED_OPTION_RE.test(lines[start]!.trim())) start += 1;
+  const rows: number[] = [];
+  for (let index = start; index < end; index += 1) {
+    const match = lines[index]!.trim().match(NUMBERED_OPTION_RE);
+    if (match) rows.push(Number.parseInt(match[2]!, 10));
+  }
+  if (!rows.length || !rows.every((row, index) => row === index + 1) || rows.length < 2 || rows.length > 9) return null;
+  // a row ending in its own letter key means the number may not be the key
+  for (const index of rows.map((_, at) => start + at)) {
+    if (/\(\w\)$/.test(lines[index]!)) return null;
+  }
+  return { rows, hintAt: hintIndex };
 }
 
-/** Render the numbered option line for a row (cursor column width 2, like the real UI). */
-function optionLine(index: number, item: OptionItem, cursor: boolean): string {
-  const marker = cursor ? "❯" : " ";
-  const checked = item.checked ? "[x] " : "";
-  const description = item.description ? ` — ${item.description}` : "";
-  return `${marker} ${index + 1}. ${checked}${item.label}${description}`;
-}
-
-// --- screen fixtures through the real renderer -------------------------------
-
+/** Render the screen for a spec + state, styled lines stripped like herdr-web-ui does. */
 function screenFor(
   question: QuestionSpec,
-  state: { index: number; checked: Set<number>; customActive?: boolean },
+  state: { index: number; checked: Set<number>; customActive?: boolean; draft?: string },
+  header: { step?: number; total?: number } = {},
 ): string[] {
-  const normalized = normalizeQuestion(question);
-  const layout = new ScreenLayout(normalized, normalized.options, {
+  const layout = new ScreenLayout(question, {
     cursor: state.index,
     checked: state.checked,
     customActive: state.customActive ?? false,
-    multi: question.type === "multiselect",
-  });
-  return layout.lines().map(stripAnsi);
+    draft: state.draft ?? "",
+    multi: question.multi,
+  }, header);
+  // pi pane width budget: our two-column padding is part of the line here
+  return layout.lines().map((line) => ` ${line}`);
 }
 
-// --- layout contract tests ----------------------------------------------------
-
-function assertFallbackMenuContract(screen: string[], opts: { hintAt: number; rows: number }) {
-  const hint = screen[opts.hintAt]!;
-  assert.match(hint, MENU_HINT_RE, `hint line must match MENU_HINT_RE: ${hint}`);
-  assert.doesNotMatch(hint, INPUT_FIELD_RE, "hint line must not read as an input field");
-  assert.doesNotMatch(hint, /[\u2191\u2193]/, "no arrow keys on the hint: card buttons are digits/enter/esc only");
-  // the last numbered row owns the space up to the hint (only blank/wrap lines allowed between)
-  const numbered = screen
-    .map((line, index) => ({ line, index }))
-    .filter(({ line }) => NUMBERED_OPTION_RE.test(line));
-  assert.ok(numbered.length === opts.rows, `expected ${opts.rows} numbered rows, saw ${numbered.length}`);
-  const lastRow = numbered[numbered.length - 1]!.index;
-  for (const line of screen.slice(lastRow + 1, opts.hintAt)) {
-    assert.doesNotMatch(line, NUMBERED_OPTION_RE, `no numbered row between last row and hint: ${line}`);
-    assert.doesNotMatch(line, HINT_LINE_RE, `no hint-like line between rows and hint: ${line}`);
-    assert.doesNotMatch(line, LETTER_KEY_SUFFIX_RE, `no "(x)" letter-key suffix on rows: ${line}`);
-  }
-  // numbers are 1..n in order
-  numbered.forEach(({ line }, index) => assert.equal(Number.parseInt(line.match(NUMBERED_OPTION_RE)![2]!, 10), index + 1, `sequential numbering: ${line}`));
+/** The full card contract, checked the way herdr-web-ui checks it. */
+function assertFallbackCard(screen: string[], expectedRows: number) {
+  const parsed = parseFallbackLike(screen);
+  assert.ok(parsed, `no fallback card for screen:\n${screen.join("\n")}`);
+  assert.equal(parsed.rows.length, expectedRows, `row count: ${parsed.rows.join(",")}`);
+  const hint = screen[parsed.hintAt]!;
+  assert.doesNotMatch(hint, /[\u2191\u2193]/, "no arrow glyphs on the hint: card buttons are digits/enter/esc only");
 }
 
 assert.equal(ANSWER_LIMITS.maxQuestions, 4);
 assert.equal(ANSWER_LIMITS.maxOptions, 9);
 
-// select: one question, cursor on the first row
+// select: options + derived custom row, cursor on the first row
 {
-  const question: QuestionSpec = {
+  const spec = normalizeQuestion({
     question: "Deploy now?",
     type: "select",
     options: [
@@ -91,87 +100,77 @@ assert.equal(ANSWER_LIMITS.maxOptions, 9);
       { label: "Deploy to staging" },
       { label: "Cancel" },
     ],
-  };
-  const screen = screenFor(question, { index: 0, checked: new Set() });
-  const hintAt = screen.findIndex((line) => line.includes("digit = pick"));
-  assert.ok(hintAt > 0, `hint bar present: ${screen.join("\n")}`);
-  assertFallbackMenuContract(screen, { hintAt, rows: 4 });
+  });
+  const screen = screenFor(spec, { index: 0, checked: new Set() });
+  assertFallbackCard(screen, 4);
   assert.match(screen[0]!, /Deploy now\?$/);
-  // cursor marker on row 1 only
-  assert.match(screen[1]!, /^❯/);
-  assert.match(screen[2]!, /^ {2}\d/);
+  assert.equal(screen[1]!.trim(), "");
+  assert.match(screen[2]!, /^ ❯ 1\. Deploy to production — kubectl rollout restart$/);
+  assert.match(screen[3]!, /^ {3}2\. Deploy to staging$/);
+  const hint = screen.at(-1)!;
+  assert.match(hint, /digit pick/);
+  assert.match(hint, /enter submit/);
 }
 
-// multiselect: checked marker renders inside the numbered row, still one row per option
+// multiselect: checked marker renders inside the numbered row
 {
-  const question: QuestionSpec = {
+  const spec = normalizeQuestion({
     question: "Pick tests?",
     type: "multiselect",
     options: [{ label: "unit" }, { label: "integration" }, { label: "e2e" }],
-  };
-  const screen = screenFor(question, { index: 0, checked: new Set([0, 2]) });
-  const hintAt = screen.findIndex((line) => line.includes("digit = toggle"));
-  assert.ok(hintAt > 0, "hint bar present");
-  assertFallbackMenuContract(screen, { hintAt, rows: 4 });
-  assert.match(screen[1]!, /1\. \[x\] unit/);
-  assert.match(screen[2]!, /2\. integration/);
+  });
+  const screen = screenFor(spec, { index: 0, checked: new Set([0, 2]) });
+  assertFallbackCard(screen, 4);
+  assert.match(screen[2]!, /1\. \[x\] unit/);
+  assert.match(screen[3]!, /2\. integration/);
+  assert.match(screen[4]!, /3\. \[x\] e2e/);
+  assert.match(screen.at(-1)!, /digit toggle/);
 }
 
-// custom input row: a numbered "Type your own answer" row, never a bare input field
+// text: two rows minimum (parser needs >= 2 numbered rows) — Type + Skip
 {
-  const question: QuestionSpec = {
-    question: "Name?",
-    type: "text",
-    options: [],
-  };
-  const screen = screenFor(question, { index: 0, checked: new Set() });
-  const hintAt = screen.findIndex((line) => line.includes("enter = save"));
-  assert.ok(hintAt > 0, "hint bar present");
-  assertFallbackMenuContract(screen, { hintAt, rows: 1 });
-  assert.match(screen[1]!, /Type your own answer/);
+  const spec = normalizeQuestion({ question: "Name?", type: "text", default: "world" });
+  assert.equal(spec.rows.length, 2);
+  assert.equal(spec.customRowIndex, 0);
+  assert.equal(spec.skipRowIndex, 1);
+  const screen = screenFor(spec, { index: 0, checked: new Set() });
+  assertFallbackCard(screen, 2);
+  assert.match(screen[2]!, /Type your own answer/);
+  assert.match(screen[3]!, /Skip this question/);
+  assert.match(screen.at(-1)!, /digit choose/);
 }
 
-// custom mode (typing inside the input row): the editor line is NOT the screen's last —
-// the hint bar stays last, so the fallback card never flips to the input-voiding shape
+// custom mode: draft rides the custom row; the hint stays the last line (not the draft)
 {
-  const question: QuestionSpec = {
-    question: "Name?",
-    type: "text",
-    options: [],
-  };
-  const screen = screenFor(question, { index: 0, checked: new Set(), customActive: true });
-  const hintAt = screen.findIndex((line) => line.includes("enter = save"));
-  assert.ok(hintAt > 0, "hint bar present");
-  assert.match(screen[hintAt]!, /digit 1/);
-  assert.doesNotMatch(screen[hintAt]!, INPUT_FIELD_RE, "hint stays the chooser line");
-  // the draft line must not read as "Password:" style input field either
-  assert.doesNotMatch(screen[hintAt - 1]!, INPUT_FIELD_RE);
+  const spec = normalizeQuestion({ question: "Name?", type: "text" });
+  const screen = screenFor(spec, { index: 0, checked: new Set(), customActive: true, draft: "hel" });
+  assertFallbackCard(screen, 2);
+  assert.match(screen[2]!, /Type your own answer: hel$/);
+  assert.doesNotMatch(screen.at(-1)!, INPUT_FIELD_RE, "hint never reads as an input field");
 }
 
-// descriptions render INLINE on the numbered row (em-dash style) — the safest contract
-// shape: no lines at all between rows, so fold-in ambiguity never arises
+// confirm: exactly Yes/No (+ custom row when allowed)
 {
-  const question: QuestionSpec = {
-    question: "Wide?",
-    type: "select",
-    options: [
-      { label: "first", description: "first description" },
-      { label: "second", description: "second description" },
-    ],
-  };
-  const screen = screenFor(question, { index: 0, checked: new Set() });
-  const hintAt = screen.findIndex((line) => line.includes("digit = pick"));
-  assert.ok(hintAt > 0, "hint bar present");
-  assertFallbackMenuContract(screen, { hintAt, rows: 3 });
-  assert.match(screen[1]!, /1\. first — first description$/);
-  assert.match(screen[2]!, /2\. second — second description$/);
+  const spec = normalizeQuestion({ question: "Proceed?", type: "confirm" });
+  const screen = screenFor(spec, { index: 0, checked: new Set() });
+  assertFallbackCard(screen, 2);
+  assert.match(screen[2]!, /1\. Yes/);
+  assert.match(screen[3]!, /2\. No/);
+}
+
+// batch header on question 2 of 3
+{
+  const spec = normalizeQuestion({ question: "Second?", type: "confirm", allow_custom: false });
+  const screen = screenFor(spec, { index: 0, checked: new Set() }, { step: 2, total: 3 });
+  assertFallbackCard(screen, 2);
+  assert.match(screen[1]!, /Question 2 of 3/);
 }
 
 // hint bars per mode
-assert.match(hintBar("select"), /digit = pick/);
-assert.match(hintBar("multiselect"), /digit = toggle/);
-assert.match(hintBar("text"), /digit 1 = type/);
-assert.match(hintBar("confirm"), /digit = pick/);
+assert.match(hintBar("select"), /digit pick/);
+assert.match(hintBar("multiselect"), /digit toggle/);
+assert.match(hintBar("text"), /digit choose/);
+assert.match(hintBar("confirm"), /digit pick/);
 
 // agent-facing envelope
 assert.equal(renderAgentAnswer({ answers: [], cancelled: true }), "User declined to answer questions");
@@ -180,14 +179,18 @@ const envelope = renderAgentAnswer({
   answers: [
     { questionIndex: 0, question: "Deploy now?", kind: "option", answer: "Deploy to production" },
     { questionIndex: 1, question: "Pick tests?", kind: "multi", answer: null, selected: ["unit", "e2e"] },
+    { questionIndex: 2, question: "Name?", kind: "skip", answer: null },
+    { questionIndex: 3, question: "Why?", kind: "custom", answer: "because" },
   ],
 });
 assert.match(envelope, /1 -> Deploy to production/);
 assert.match(envelope, /2 -> unit, e2e/);
+assert.match(envelope, /3 -> \(no answer\)/);
+assert.match(envelope, /4 -> because/);
 
-// wrapped long labels: contract must survive pi's own width wrapping (60 col here)
+// wrapped long labels: numbers survive pi's width wrapping (60 col here)
 {
-  const question: QuestionSpec = {
+  const spec = normalizeQuestion({
     question: "Which migration strategy should the team pick for this quarter's cutover?",
     type: "select",
     options: [
@@ -195,28 +198,16 @@ assert.match(envelope, /2 -> unit, e2e/);
       { label: "Incremental dual-write with a read-through cache backfill phase" },
       { label: "Strangler pattern behind a facade route table" },
     ],
-  };
+  });
   const wrapped: string[] = [];
-  for (const line of screenFor(question, { index: 0, checked: new Set() })) {
+  for (const line of screenFor(spec, { index: 0, checked: new Set() })) {
     if (line.length <= 60) {
       wrapped.push(line);
     } else {
-      // naive wrap like pi-tui does at width boundaries
       for (let at = 0; at < line.length; at += 60) wrapped.push(line.slice(at, at + 60));
     }
   }
-  const hintAt = wrapped.findIndex((line) => line.includes("digit = pick"));
-  assert.ok(hintAt > 0, "hint bar present after wrap");
-  const numbers = wrapped
-    .map((line) => line.match(NUMBERED_OPTION_RE))
-    .filter(Boolean)
-    .map((match) => Number.parseInt(match![2]!, 10));
-  assert.deepEqual(numbers, [1, 2, 3, 4], `numbers survive wrap: ${wrapped.join(" | ")}`);
-  // the last numbered line is the row that owns the wrap up to the hint
-  const lastNumbered = wrapped.findIndex((line) => NUMBERED_OPTION_RE.test(line) && Number.parseInt(line.trim().match(NUMBERED_OPTION_RE)![2]!, 10) === 4);
-  for (const line of wrapped.slice(lastNumbered + 1, hintAt)) {
-    assert.doesNotMatch(line, HINT_LINE_RE, `no hint-like wrap line before the hint bar: ${line}`);
-  }
+  assertFallbackCard(wrapped, 4);
 }
 
 console.log("ask-user self-check: all assertions passed");

@@ -5,30 +5,29 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
  *
  * The dialog renders every option as a numbered row and keeps a chooser
  * hint as the screen's last line — the exact shape herdr-web-ui's
- * fallback-menu parser (server/prompt.ts) turns into a chat card with one
+ * fallbackMenu parser (server/prompt.ts) turns into a chat card with one
  * button per row, each button typing that row's digit (no Enter suffix).
  * That makes every question answerable from the web/phone card: digits
  * pick or toggle, Enter submits, Esc goes back — the three keys the card
  * offers as buttons. Why not pi-ask-herdr / rpiv: both draw arrow-key
  * wizards whose hint bars match no herdr-web-ui reader, so the pane falls
  * to the generic ↑/↓/Enter/Esc card (nav lands on wrong rows; space
- * toggle is omp-only in herdr-web-ui's answerKeys).
+ * toggle is omo-only in herdr-web-ui's answerKeys).
  *
  * Herdr state: while a question waits the extension emits `herdr:blocked`
  * {active:true,label}, and {active:false} when it resolves — the herdr
- * pi-integration (herdr-agent-state.ts) maps that to the pane's
- * blocked/working state, which is also what arms the fallback card.
+ * pi-integration maps that to the pane's blocked/working state, which is
+ * also what arms the fallback card.
  *
  * All user-visible output goes through ctx.ui — never console.*.
  */
 
 import { StringEnum } from "@earendil-works/pi-ai";
-import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { matchesKey, Text } from "@earendil-works/pi-tui";
+import type { ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
+import { DynamicBorder, matchesKey, Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import {
 	ANSWER_LIMITS,
-	CUSTOM_ROW_LABEL,
 	ScreenLayout,
 	hintBar,
 	normalizeQuestion,
@@ -206,28 +205,29 @@ function runWizard(
 	signal: AbortSignal | undefined,
 	timeoutMs: number | undefined,
 ): Promise<{ answers: AnswerRecord[]; cancelled: boolean }> {
-	return ctx.ui.custom<{ answers: AnswerRecord[]; cancelled: boolean }>((tui, theme, keybindings, done) => {
+	return ctx.ui.custom<{ answers: AnswerRecord[]; cancelled: boolean }>((_tui, theme, _keybindings, done) => {
 		return new AskWizard(specs, theme, done, signal, timeoutMs);
 	});
 }
 
 class AskWizard {
 	private readonly specs: QuestionSpec[];
-	private readonly theme: { fg: (color: string, text: string) => string };
+	private readonly theme: Theme;
 	private readonly done: Done<{ answers: AnswerRecord[]; cancelled: boolean }>;
+	private readonly topBorder = new DynamicBorder((text) => this.theme.fg("border", text));
+	private readonly bottomBorder = new DynamicBorder((text) => this.theme.fg("border", text));
 	private readonly answers: AnswerRecord[] = [];
+	private readonly checked = new Set<number>();
 	private questionIndex = 0;
 	private cursor = 0;
-	private readonly checked = new Set<number>();
 	private customActive = false;
 	private draft = "";
-	private readonly items: OptionItem[];
-	private readonly state: ScreenState;
+	private state: ScreenState;
 	private timer: ReturnType<typeof setTimeout> | undefined;
 
 	constructor(
 		specs: QuestionSpec[],
-		theme: { fg: (color: string, text: string) => string },
+		theme: Theme,
 		done: Done<{ answers: AnswerRecord[]; cancelled: boolean }>,
 		signal: AbortSignal | undefined,
 		timeoutMs: number | undefined,
@@ -235,14 +235,12 @@ class AskWizard {
 		this.specs = specs;
 		this.theme = theme;
 		this.done = done;
-		const spec = specs[0]!;
-		this.items = spec.options;
 		this.state = {
 			cursor: 0,
 			checked: this.checked,
 			customActive: false,
 			draft: "",
-			multi: spec.type === "multiselect",
+			multi: this.spec.type === "multiselect",
 		};
 		if (signal) {
 			signal.addEventListener(
@@ -264,8 +262,8 @@ class AskWizard {
 		return this.specs[this.questionIndex]!;
 	}
 
-	private get rowCount(): number {
-		return this.items.length + (this.spec.allowCustom ? 1 : 0);
+	private get rows() {
+		return this.spec.rows;
 	}
 
 	private finish(result: { answers: AnswerRecord[]; cancelled: boolean }) {
@@ -283,14 +281,8 @@ class AskWizard {
 		};
 	}
 
-	/** Advance to the next question (or finish), resetting per-question state. */
-	private advance(answer: AnswerRecord) {
-		this.answers.push(answer);
-		if (this.questionIndex + 1 >= this.specs.length) {
-			this.finish({ answers: this.answers, cancelled: false });
-			return;
-		}
-		this.questionIndex += 1;
+	/** Reset per-question state for specs[this.questionIndex] (after move). */
+	private resetForCurrentQuestion() {
 		this.cursor = 0;
 		this.checked.clear();
 		this.customActive = false;
@@ -299,6 +291,17 @@ class AskWizard {
 		this.state.customActive = false;
 		this.state.draft = "";
 		this.state.multi = this.spec.type === "multiselect";
+	}
+
+	/** Advance to the next question (or finish). */
+	private advance(answer: AnswerRecord) {
+		this.answers.push(answer);
+		if (this.questionIndex + 1 >= this.specs.length) {
+			this.finish({ answers: this.answers, cancelled: false });
+			return;
+		}
+		this.questionIndex += 1;
+		this.resetForCurrentQuestion();
 	}
 
 	/** Step back to the previous question, dropping its recorded answer. */
@@ -309,16 +312,10 @@ class AskWizard {
 		}
 		this.questionIndex -= 1;
 		this.answers.pop();
-		this.cursor = 0;
-		this.checked.clear();
-		this.customActive = false;
-		this.draft = "";
-		this.state.cursor = 0;
-		this.state.customActive = false;
-		this.state.draft = "";
-		this.state.multi = this.spec.type === "multiselect";
+		this.resetForCurrentQuestion();
 	}
 
+	/** Open the custom input on the custom row; text questions prefill the default. */
 	private pickCustom() {
 		this.customActive = true;
 		this.state.customActive = true;
@@ -328,21 +325,48 @@ class AskWizard {
 		}
 	}
 
-	/** Commit the custom row: text/confirm/select need text; multiselect takes what is checked. */
+	/** Commit the custom row's draft. */
 	private commitCustom() {
-		const type = this.spec.type;
-		if (type === "multiselect") {
-			this.commitMulti();
+		const text = this.draft.trim();
+		if (this.spec.type === "multiselect") {
+			const labels = [...this.checked].sort((a, b) => a - b).map((index) => this.rows[index]!.label);
+			if (text) labels.push(text);
+			if (labels.length === 0) return; // nothing selected, nothing typed: stay
+			this.advance(this.record("multi", labels, labels));
 			return;
 		}
-		const text = this.draft.trim();
 		if (!text) return; // nothing typed: stay
 		this.advance(this.record("custom", text));
 	}
 
 	private commitMulti() {
-		const selected = [...this.checked].sort((a, b) => a - b).map((index) => this.items[index]!.label);
+		const selected = [...this.checked].sort((a, b) => a - b).map((index) => this.rows[index]!.label);
 		this.advance(this.record("multi", selected, selected));
+	}
+
+	/** Activate the row the cursor sits on (digit or Enter). */
+	private activateCursorRow(viaEnter: boolean) {
+		const row = this.rows[this.cursor];
+		if (!row) return;
+		if (row.kind === "custom") {
+			this.pickCustom();
+			return;
+		}
+		if (row.kind === "skip") {
+			this.advance(this.record("skip", null));
+			return;
+		}
+		if (this.spec.type === "multiselect") {
+			if (viaEnter) {
+				this.commitMulti();
+			} else if (this.checked.has(this.cursor)) {
+				this.checked.delete(this.cursor);
+			} else {
+				this.checked.add(this.cursor);
+			}
+			return;
+		}
+		this.advance(this.record("option", row.label));
 	}
 
 	handleInput(data: string): void {
@@ -379,63 +403,33 @@ class AskWizard {
 		const digit = DIGIT_RE.exec(data);
 		if (digit) {
 			const row = Number.parseInt(digit[0], 10) - 1;
-			if (row >= this.rowCount) return;
+			if (row >= this.rows.length) return;
 			this.cursor = row;
 			this.state.cursor = row;
-			if (row === this.items.length) {
-				this.pickCustom();
-				return;
-			}
-			if (this.spec.type === "multiselect") {
-				if (this.checked.has(row)) this.checked.delete(row);
-				else this.checked.add(row);
-				return;
-			}
-			if (this.spec.type === "text") {
-				this.pickCustom();
-				return;
-			}
-			// confirm/select: a digit picks immediately and advances (omo-style)
-			this.advance(this.record("option", this.items[row]!.label));
+			this.activateCursorRow(false);
 			return;
 		}
 
 		if (matchesKey(data, "up")) {
-			if (this.rowCount > 0) {
-				this.cursor = (this.cursor - 1 + this.rowCount) % this.rowCount;
-				this.state.cursor = this.cursor;
-			}
+			this.cursor = (this.cursor - 1 + this.rows.length) % this.rows.length;
+			this.state.cursor = this.cursor;
 			return;
 		}
 		if (matchesKey(data, "down")) {
-			if (this.rowCount > 0) {
-				this.cursor = (this.cursor + 1) % this.rowCount;
-				this.state.cursor = this.cursor;
-			}
+			this.cursor = (this.cursor + 1) % this.rows.length;
+			this.state.cursor = this.cursor;
 			return;
 		}
 		if (data === " ") {
-			// space toggles on multiselect
-			if (this.spec.type === "multiselect" && this.cursor < this.items.length) {
+			// space toggles the cursor row on multiselect
+			if (this.spec.type === "multiselect" && this.rows[this.cursor]?.kind === "option") {
 				if (this.checked.has(this.cursor)) this.checked.delete(this.cursor);
 				else this.checked.add(this.cursor);
 			}
 			return;
 		}
 		if (data === "\r" || data === "\n" || matchesKey(data, "return")) {
-			if (this.cursor === this.items.length) {
-				this.pickCustom();
-				return;
-			}
-			if (this.spec.type === "multiselect") {
-				this.commitMulti();
-				return;
-			}
-			if (this.spec.type === "text") {
-				this.pickCustom();
-				return;
-			}
-			this.advance(this.record("option", this.items[this.cursor]!.label));
+			this.activateCursorRow(true);
 			return;
 		}
 		if (data === "\x1b" || matchesKey(data, "escape")) {
@@ -444,17 +438,30 @@ class AskWizard {
 			return;
 		}
 	}
+
 	render(width: number): string[] {
-		const layout = new ScreenLayout(this.spec, this.items, this.state);
-		const body = layout.lines();
-		return [...body.slice(0, -1), this.theme.fg("dim", body[body.length - 1]!)].map((line) =>
-			line.length > width ? `${line.slice(0, Math.max(1, width - 1))}…` : line,
-		);
+		const layout = new ScreenLayout(this.spec, this.state, {
+			step: this.questionIndex + 1,
+			total: this.specs.length,
+		});
+		const lines = layout.lines();
+		const [question, step, ...rowsAndHint] = lines as [string, string?, ...string[]];
+		const styled: string[] = [this.theme.fg("accent", this.theme.bold(question!))];
+		if (step) styled.push(this.theme.fg("muted", step));
+		// last line is the hint bar, dimmed; rows keep their raw markers so the
+		// herdr-web-ui parser reads them after ANSI stripping
+		const body = rowsAndHint.slice(0, -1);
+		const hint = rowsAndHint[rowsAndHint.length - 1]!;
+		styled.push(...body, this.theme.fg("dim", hint));
+		const framed = [...styled.map((line) => (line.length > width ? `${line.slice(0, Math.max(1, width - 1))}…` : line))];
+		return [
+			...this.topBorder.render(width),
+			...framed.map((line) => ` ${line}`),
+			...this.bottomBorder.render(width),
+		];
 	}
 
 	invalidate(): void {
 		// rendered from scratch each frame
 	}
 }
-
-export { CUSTOM_ROW_LABEL, hintBar };
