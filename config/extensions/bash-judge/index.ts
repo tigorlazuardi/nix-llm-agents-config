@@ -18,8 +18,10 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
  * => block. failOpen=true (the config default) downgrades ONLY that
  * unavailability path in mode "block" to a visible warning + pass — a hung
  * judge must not freeze every shell call; deny-list hits and verdict blocks
- * always block regardless. Mode "log" downgrades everything to a footer
- * status + pass, for rollout.
+ * always block regardless. Unavailability is classified fetch-only into
+ * down (connection refused/reset), timeout (abort), and http (non-2xx or
+ * malformed body) with tailored messages. Mode "log" downgrades everything
+ * to a footer status + pass, for rollout.
  *
  * All user-visible output goes through ctx.ui (notify / setStatus) — never
  * console.*, so the pi TUI renders it properly.
@@ -210,6 +212,60 @@ export interface JudgeUsage {
 	state_tokens_dropped?: number;
 }
 
+// --- failure classification (fetch-only; systemd/journal state stays server-side) ---
+
+export type JudgeFailureClass = "down" | "timeout" | "http";
+
+export interface JudgeFailure {
+	class: JudgeFailureClass;
+	/** HTTP status for class "http"; absent when the body was malformed. */
+	status?: number;
+	error: string;
+}
+
+/** Match on DOMException name AND message text — Node and Bun fetch phrase aborts differently. */
+export function classifyJudgeError(error: unknown): JudgeFailure {
+	const message = error instanceof Error ? error.message : String(error);
+	const name = error instanceof Error ? error.name : "";
+	if (
+		name === "TimeoutError" ||
+		name === "AbortError" ||
+		/timed?\s?-?out|operation was aborted|The operation was aborted/i.test(message)
+	) {
+		return { class: "timeout", error: message };
+	}
+	if (/ECONNREFUSED|Connection refused|ECONNRESET|socket hang up/i.test(message)) {
+		return { class: "down", error: message };
+	}
+	// Other connect-phase failures (DNS, TLS, unknown) land here: closest class is down.
+	return { class: "down", error: message };
+}
+
+/** User-facing texts per failure class. open = fail-open notify tail; detail = block/shadow reason. */
+export function failureTexts(
+	failure: JudgeFailure,
+	timeoutMs: number,
+): { open: string; detail: string } {
+	if (failure.class === "down") {
+		return {
+			open:
+				"judge process down (connection refused) — likely restarting after memory-kill/crash; command ALLOWED, auto-recovery typically <2 min",
+			detail: "safety check unavailable (judge down, restarting?)",
+		};
+	}
+	if (failure.class === "timeout") {
+		return {
+			open: `judge no answer in ${timeoutMs}ms (hung or overloaded) — command ALLOWED`,
+			detail: "safety check unavailable (judge timeout)",
+		};
+	}
+	const status = failure.status === undefined ? "invalid response" : String(failure.status);
+	return {
+		open: `judge HTTP ${status} — command ALLOWED`,
+		detail: `safety check unavailable (judge HTTP ${status})`,
+	};
+}
+
 /** Apply the verdict rule to a successful judge response. Returns block reason or null. */
 export function evaluateAnswers(
 	answers: JudgeAnswers,
@@ -236,7 +292,7 @@ export function evaluateAnswers(
 async function callJudge(
 	config: JudgeConfig,
 	command: string,
-): Promise<{ ok: true; answers: JudgeAnswers; usage?: JudgeUsage } | { ok: false; error: string }> {
+): Promise<{ ok: true; answers: JudgeAnswers; usage?: JudgeUsage } | { ok: false; failure: JudgeFailure }> {
 	try {
 		const response = await fetch(`${config.baseUrl}/v1/systemone`, {
 			method: "POST",
@@ -244,12 +300,30 @@ async function callJudge(
 			body: JSON.stringify(buildRequest(command)),
 			signal: AbortSignal.timeout(config.timeoutMs),
 		});
-		if (!response.ok) return { ok: false, error: `HTTP ${response.status}` };
-		const body = (await response.json()) as { answers?: JudgeAnswers; usage?: JudgeUsage };
-		if (body.answers === undefined) return { ok: false, error: "response has no answers" };
+		if (!response.ok) {
+			return {
+				ok: false,
+				failure: { class: "http", status: response.status, error: `HTTP ${response.status}` },
+			};
+		}
+		let body: { answers?: JudgeAnswers; usage?: JudgeUsage };
+		try {
+			body = (await response.json()) as { answers?: JudgeAnswers; usage?: JudgeUsage };
+		} catch {
+			return {
+				ok: false,
+				failure: { class: "http", error: "response body is not valid JSON" },
+			};
+		}
+		if (body.answers === undefined) {
+			return {
+				ok: false,
+				failure: { class: "http", error: "response has no answers" },
+			};
+		}
 		return { ok: true, answers: body.answers, usage: body.usage };
 	} catch (error) {
-		return { ok: false, error: error instanceof Error ? error.message : String(error) };
+		return { ok: false, failure: classifyJudgeError(error) };
 	}
 }
 
@@ -298,7 +372,19 @@ export default function (pi: ExtensionAPI) {
 
 		const result = await callJudge(config, command);
 		if (!result.ok) {
-			return decide(ctx, config.mode, `safety check unavailable (${result.error})`, config.failOpen);
+			// Unavailability is the one place mode and failOpen interact, so the
+			// branch lives here; decide() stays verdict/deny-only (always block).
+			const texts = failureTexts(result.failure, config.timeoutMs);
+			if (config.mode === "log") {
+				ctx.ui.setStatus("bash-judge", `bash-judge shadow: ${texts.detail}`);
+				ctx.ui.notify(`bash-judge shadow: ${texts.detail}`, "warning");
+				return undefined;
+			}
+			if (config.failOpen) {
+				ctx.ui.notify(`bash-judge: ${texts.open}`, "warning");
+				return undefined;
+			}
+			return { block: true, reason: `command blocked: ${texts.detail}` };
 		}
 		return decide(ctx, config.mode, evaluateAnswers(result.answers, result.usage, config.threshold));
 	}
@@ -307,7 +393,6 @@ export default function (pi: ExtensionAPI) {
 		ctx: JudgeCtx,
 		mode: JudgeConfig["mode"],
 		reason: string | null,
-		failOpen = false,
 	): { block: boolean; reason: string } | undefined {
 		if (reason === null) {
 			ctx.ui.setStatus("bash-judge", undefined);
@@ -318,13 +403,6 @@ export default function (pi: ExtensionAPI) {
 			// nothing — command runs, conversation stays clean.
 			ctx.ui.setStatus("bash-judge", `bash-judge shadow: ${reason}`);
 			ctx.ui.notify(`bash-judge shadow: ${reason}`, "warning");
-			return undefined;
-		}
-		if (failOpen) {
-			// Judge unavailability in enforcement mode: the infra is down, not the
-			// command unsafe. Deny-list and verdict blocks never take this path
-			// (callers pass failOpen=false). User-visible warning; command runs.
-			ctx.ui.notify(`bash-judge unavailable, failing OPEN: ${reason}`, "warning");
 			return undefined;
 		}
 		// Enforcement: the agent gets ONLY the violation, never the mechanism

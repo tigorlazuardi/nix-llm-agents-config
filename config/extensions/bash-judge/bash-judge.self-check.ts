@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import bashJudge, {
 	buildRequest,
+	classifyJudgeError,
 	denyReason,
 	evaluateAnswers,
+	failureTexts,
 	isAllowlisted,
 	readConfig,
 	setConfigPath,
@@ -86,6 +88,36 @@ assert.match(denyReason("rm -fr ~/*") ?? "", /rm -rf/);
 assert.equal(denyReason("rm -rf build/"), null); // scoped rm is the judge's call
 assert.equal(denyReason("echo reading the .environment"), null);
 assert.equal(denyReason("git clean -fd"), null);
+
+// --- failure classification: down / timeout / http -------------------------
+// Match on DOMException name AND message text (Node vs Bun fetch phrasing differs).
+assert.equal(classifyJudgeError(new Error("fetch failed: connect ECONNREFUSED 127.0.0.1:8765")).class, "down");
+assert.equal(classifyJudgeError(new Error("Connection refused")).class, "down");
+assert.equal(classifyJudgeError(new Error("ECONNRESET")).class, "down");
+assert.equal(classifyJudgeError(new Error("other side closed")).class, "down");
+const clsTimeout = new Error("The operation was aborted due to timeout");
+clsTimeout.name = "TimeoutError";
+assert.equal(classifyJudgeError(clsTimeout).class, "timeout");
+const clsAbort = new Error("This operation was aborted");
+clsAbort.name = "AbortError";
+assert.equal(classifyJudgeError(clsAbort).class, "timeout");
+assert.equal(classifyJudgeError(new Error("request timed out")).class, "timeout");
+// DNS-style connect failure has no refused marker: still closest to down.
+assert.equal(classifyJudgeError(new Error("getaddrinfo ENOTFOUND judge")).class, "down");
+assert.deepEqual(failureTexts({ class: "down", error: "x" }, 2500), {
+	open:
+		"judge process down (connection refused) — likely restarting after memory-kill/crash; command ALLOWED, auto-recovery typically <2 min",
+	detail: "safety check unavailable (judge down, restarting?)",
+});
+assert.deepEqual(failureTexts({ class: "timeout", error: "x" }, 2500), {
+	open: "judge no answer in 2500ms (hung or overloaded) — command ALLOWED",
+	detail: "safety check unavailable (judge timeout)",
+});
+assert.deepEqual(failureTexts({ class: "http", status: 503, error: "x" }, 2500), {
+	open: "judge HTTP 503 — command ALLOWED",
+	detail: "safety check unavailable (judge HTTP 503)",
+});
+assert.match(failureTexts({ class: "http", error: "no answers" }, 1).open, /invalid response/);
 
 // --- request: word-for-word bench phrasing ---------------------------------
 const request = buildRequest("df -h");
@@ -220,18 +252,30 @@ globalThis.fetch = (async () => judgeResponse(noBody)) as typeof fetch;
 assert.equal(await call("systemctl status nginx"), undefined);
 assert.equal(uiLog.status.at(-1), "(cleared)");
 
-// fail-safe: judge unreachable -> block (failOpen defaults true, but this
-// config instance was already cached before the knob existed in this file —
-// the cached config read above has failOpen=true, so verify BOTH paths).
-// failOpen=true (default): unavailable judge -> visible warning + allow.
+// fail-safe: judge unreachable -> class-specific handling (failOpen default true).
+// down: connection refused -> open with restart guidance.
 globalThis.fetch = (async () => {
-	throw new TypeError("fetch failed");
+	throw new Error("connect ECONNREFUSED 127.0.0.1:8765");
 }) as typeof fetch;
-const unavailable = await call("make test");
-assert.equal(unavailable, undefined, "failOpen=true must allow when judge is unavailable");
-assert.match(uiLog.notify.at(-1) ?? "", /failing OPEN/);
+const downCall = await call("make test");
+assert.equal(downCall, undefined, "failOpen=true must allow when judge is down");
+assert.match(uiLog.notify.at(-1) ?? "", /judge process down.*ALLOWED/);
 
-// failOpen=false: same outage -> block (fail-safe, no open warning).
+// timeout: listening but no answer -> open with timeout detail.
+const timeoutErr2 = new Error("The operation was aborted due to timeout");
+timeoutErr2.name = "TimeoutError";
+globalThis.fetch = (async () => {
+	throw timeoutErr2;
+}) as typeof fetch;
+assert.equal(await call("make test"), undefined);
+assert.match(uiLog.notify.at(-1) ?? "", /judge no answer in 2500ms.*ALLOWED/);
+
+// http: judge up but broken -> open with status code.
+globalThis.fetch = (async () => new Response("boom", { status: 503 })) as typeof fetch;
+assert.equal(await call("make test"), undefined);
+assert.match(uiLog.notify.at(-1) ?? "", /judge HTTP 503 — command ALLOWED/);
+
+// failOpen=false: same outages block with class-specific agent-facing reasons.
 writeFileSync(configPath, JSON.stringify({ baseUrl: "http://127.0.0.1:8765", failOpen: false }));
 let failClosedHandler: Handler | undefined;
 bashJudge({
@@ -242,13 +286,24 @@ bashJudge({
 const failClosedCall = (command: string) =>
 	failClosedHandler!({ toolName: "bash", input: { command } }, makeCtx());
 const notifyCountBeforeBlock = uiLog.notify.length;
+globalThis.fetch = (async () => {
+	throw new Error("connect ECONNREFUSED 127.0.0.1:8765");
+}) as typeof fetch;
 const blocked = await failClosedCall("make test");
-assert.equal(blocked?.block, true, "failOpen=false must block when judge is unavailable");
-assert.match(blocked?.reason ?? "", /safety check unavailable/);
+assert.equal(blocked?.block, true, "failOpen=false must block when judge is down");
+assert.match(blocked?.reason ?? "", /judge down, restarting\?/);
+const timeoutErr3 = new Error("The operation was aborted due to timeout");
+timeoutErr3.name = "TimeoutError";
+globalThis.fetch = (async () => {
+	throw timeoutErr3;
+}) as typeof fetch;
+assert.match((await failClosedCall("make test"))?.reason ?? "", /judge timeout/);
+globalThis.fetch = (async () => new Response("boom", { status: 503 })) as typeof fetch;
+assert.match((await failClosedCall("make test"))?.reason ?? "", /judge HTTP 503/);
 assert.equal(
 	uiLog.notify.length,
 	notifyCountBeforeBlock,
-	"fail-closed path must not emit the open warning",
+	"fail-closed path must not emit open warnings",
 );
 
 // verdict blocks ignore failOpen entirely (deny + verdict with failOpen=false
