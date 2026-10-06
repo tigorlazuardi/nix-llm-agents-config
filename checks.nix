@@ -1157,6 +1157,8 @@ in
         test "$(jq -r .baseUrl "$configFile")" = "http://127.0.0.1:8765"
         test "$(jq -r .mode "$configFile")" = "block"
         test "$(jq -r .threshold "$configFile")" = "0.75"
+        # failOpen option wires through with the safe rollout default.
+        test "$(jq -r .failOpen "$configFile")" = "true"
       '';
 
   formatting =

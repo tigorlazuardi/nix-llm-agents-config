@@ -14,8 +14,12 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
  * env vars). Missing/invalid config => ONE ctx.ui.notify warning, then the
  * gate self-disables: bash calls pass unjudged. A mis-deployed gate degrades
  * to a visible no-op; it must not wedge every shell call. Within a VALID
- * config, failures fail-safe: judge unreachable/timeout/truncated => block
- * (mode "log" downgrades to a footer status + pass, for rollout).
+ * config, failures fail-safe by default: judge unreachable/timeout/truncated
+ * => block. failOpen=true (the config default) downgrades ONLY that
+ * unavailability path in mode "block" to a visible warning + pass — a hung
+ * judge must not freeze every shell call; deny-list hits and verdict blocks
+ * always block regardless. Mode "log" downgrades everything to a footer
+ * status + pass, for rollout.
  *
  * All user-visible output goes through ctx.ui (notify / setStatus) — never
  * console.*, so the pi TUI renders it properly.
@@ -43,6 +47,8 @@ export interface JudgeConfig {
 	threshold: number;
 	timeoutMs: number;
 	mode: "block" | "log";
+	/** Only judge-unavailability in mode "block"; verdicts and deny-list always block. */
+	failOpen: boolean;
 }
 
 export type ConfigResult = { config: JudgeConfig } | { config: null; error: string };
@@ -62,6 +68,7 @@ export function readConfig(path: string = configPath): ConfigResult {
 		threshold?: unknown;
 		timeoutMs?: unknown;
 		mode?: unknown;
+		failOpen?: unknown;
 	};
 	if (typeof body.baseUrl !== "string" || body.baseUrl === "") {
 		return { config: null, error: "baseUrl missing in bash-judge.json" };
@@ -72,6 +79,7 @@ export function readConfig(path: string = configPath): ConfigResult {
 			threshold: typeof body.threshold === "number" ? body.threshold : 0.75,
 			timeoutMs: typeof body.timeoutMs === "number" ? body.timeoutMs : 2500,
 			mode: body.mode === "log" ? "log" : "block",
+			failOpen: typeof body.failOpen === "boolean" ? body.failOpen : true,
 		},
 	};
 }
@@ -290,7 +298,7 @@ export default function (pi: ExtensionAPI) {
 
 		const result = await callJudge(config, command);
 		if (!result.ok) {
-			return decide(ctx, config.mode, `safety check unavailable (${result.error})`);
+			return decide(ctx, config.mode, `safety check unavailable (${result.error})`, config.failOpen);
 		}
 		return decide(ctx, config.mode, evaluateAnswers(result.answers, result.usage, config.threshold));
 	}
@@ -299,6 +307,7 @@ export default function (pi: ExtensionAPI) {
 		ctx: JudgeCtx,
 		mode: JudgeConfig["mode"],
 		reason: string | null,
+		failOpen = false,
 	): { block: boolean; reason: string } | undefined {
 		if (reason === null) {
 			ctx.ui.setStatus("bash-judge", undefined);
@@ -309,6 +318,13 @@ export default function (pi: ExtensionAPI) {
 			// nothing — command runs, conversation stays clean.
 			ctx.ui.setStatus("bash-judge", `bash-judge shadow: ${reason}`);
 			ctx.ui.notify(`bash-judge shadow: ${reason}`, "warning");
+			return undefined;
+		}
+		if (failOpen) {
+			// Judge unavailability in enforcement mode: the infra is down, not the
+			// command unsafe. Deny-list and verdict blocks never take this path
+			// (callers pass failOpen=false). User-visible warning; command runs.
+			ctx.ui.notify(`bash-judge unavailable, failing OPEN: ${reason}`, "warning");
 			return undefined;
 		}
 		// Enforcement: the agent gets ONLY the violation, never the mechanism

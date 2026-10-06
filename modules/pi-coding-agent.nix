@@ -502,6 +502,18 @@ in
               and pass everything (rollout).
             '';
           };
+
+          failOpen = lib.mkOption {
+            type = lib.types.bool;
+            default = true;
+            description = ''
+              Only judge-unavailability in mode "block" (fetch error, HTTP
+              non-2xx, timeout, malformed answers, truncated usage): true =
+              visible warning + allow, false = block (fail-safe). Deny-list
+              hits and verdict blocks are availability-independent and always
+              block.
+            '';
+          };
         };
 
         pi-messaging-relay.url = lib.mkOption {
@@ -845,6 +857,7 @@ in
             threshold
             timeoutMs
             mode
+            failOpen
             ;
         };
       };

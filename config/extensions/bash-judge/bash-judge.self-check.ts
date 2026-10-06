@@ -32,6 +32,7 @@ assert.equal(cfg.baseUrl, "http://127.0.0.1:8765");
 assert.equal(cfg.threshold, 0.75);
 assert.equal(cfg.timeoutMs, 2500);
 assert.equal(cfg.mode, "block");
+assert.equal(cfg.failOpen, true);
 
 // explicit fields win
 writeFileSync(
@@ -42,6 +43,14 @@ const cfg2 = readConfig().config;
 assert.ok(cfg2);
 assert.equal(cfg2.threshold, 0.6);
 assert.equal(cfg2.mode, "log");
+writeFileSync(configPath, JSON.stringify({ baseUrl: "http://x", failOpen: false }));
+const cfg3 = readConfig().config;
+assert.ok(cfg3);
+assert.equal(cfg3.failOpen, false, "explicit failOpen=false must be honored");
+writeFileSync(configPath, JSON.stringify({ baseUrl: "http://x", failOpen: "yes" }));
+const cfg4 = readConfig().config;
+assert.ok(cfg4);
+assert.equal(cfg4.failOpen, true, "non-boolean failOpen falls back to default true");
 writeFileSync(configPath, JSON.stringify({ baseUrl: "http://127.0.0.1:8765" }));
 
 // --- allowlist: tight read-only prefixes pass without judging ---------------
@@ -211,15 +220,58 @@ globalThis.fetch = (async () => judgeResponse(noBody)) as typeof fetch;
 assert.equal(await call("systemctl status nginx"), undefined);
 assert.equal(uiLog.status.at(-1), "(cleared)");
 
-// fail-safe: judge unreachable -> block
+// fail-safe: judge unreachable -> block (failOpen defaults true, but this
+// config instance was already cached before the knob existed in this file —
+// the cached config read above has failOpen=true, so verify BOTH paths).
+// failOpen=true (default): unavailable judge -> visible warning + allow.
 globalThis.fetch = (async () => {
 	throw new TypeError("fetch failed");
 }) as typeof fetch;
-const unreachable = await call("make test");
-assert.equal(unreachable?.block, true);
-assert.match(unreachable?.reason ?? "", /safety check unavailable/);
+const unavailable = await call("make test");
+assert.equal(unavailable, undefined, "failOpen=true must allow when judge is unavailable");
+assert.match(uiLog.notify.at(-1) ?? "", /failing OPEN/);
 
-// fail-safe: judge says truncated -> block even with all-no answers
+// failOpen=false: same outage -> block (fail-safe, no open warning).
+writeFileSync(configPath, JSON.stringify({ baseUrl: "http://127.0.0.1:8765", failOpen: false }));
+let failClosedHandler: Handler | undefined;
+bashJudge({
+	on(event: string, h: never) {
+		if (event === "tool_call") failClosedHandler = h as Handler;
+	},
+} as never);
+const failClosedCall = (command: string) =>
+	failClosedHandler!({ toolName: "bash", input: { command } }, makeCtx());
+const notifyCountBeforeBlock = uiLog.notify.length;
+const blocked = await failClosedCall("make test");
+assert.equal(blocked?.block, true, "failOpen=false must block when judge is unavailable");
+assert.match(blocked?.reason ?? "", /safety check unavailable/);
+assert.equal(
+	uiLog.notify.length,
+	notifyCountBeforeBlock,
+	"fail-closed path must not emit the open warning",
+);
+
+// verdict blocks ignore failOpen entirely (deny + verdict with failOpen=false
+// config also block — already covered above; deny-list here with the
+// fail-open config restored).
+writeFileSync(configPath, JSON.stringify({ baseUrl: "http://127.0.0.1:8765" }));
+let openHandler: Handler | undefined;
+bashJudge({
+	on(event: string, h: never) {
+		if (event === "tool_call") openHandler = h as Handler;
+	},
+} as never);
+const openCall = (command: string) =>
+	openHandler!({ toolName: "bash", input: { command } }, makeCtx());
+const deniedOpen = await openCall("cat ~/.env");
+assert.equal(deniedOpen?.block, true, "deny-list must block even with failOpen=true");
+globalThis.fetch = (async () => judgeResponse(yesBody)) as typeof fetch;
+const verdictOpen = await openCall("rm -rf /home/homeserver/homelab/build");
+assert.equal(verdictOpen?.block, true, "verdict block must apply even with failOpen=true");
+assert.match(verdictOpen?.reason ?? "", /destro=yes/);
+
+// fail-safe: judge says truncated -> block even with all-no answers (truncation
+// is unavailability, but it arrives via evaluateAnswers, which stays fail-closed).
 globalThis.fetch = (async () =>
 	judgeResponse(noBody, { truncated: true, state_tokens_dropped: 0 })) as typeof fetch;
 assert.match((await call("echo long"))?.reason ?? "", /too long/);
@@ -240,6 +292,7 @@ assert(shadowHandler);
 const shadowCall = (command: string) =>
 	shadowHandler!({ toolName: "bash", input: { command } }, makeCtx());
 uiLog.status.length = 0;
+uiLog.notify.length = 0;
 globalThis.fetch = (async () => judgeResponse(yesBody)) as typeof fetch;
 assert.equal(await shadowCall("rm -rf /home/homeserver/homelab/build"), undefined);
 assert.match(uiLog.status.at(-1) ?? "", /shadow.*destro=yes/);
