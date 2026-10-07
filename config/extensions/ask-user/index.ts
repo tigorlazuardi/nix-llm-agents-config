@@ -465,3 +465,8 @@ class AskWizard {
 		// rendered from scratch each frame
 	}
 }
+
+/** pi's loader imports the module with { default: true } and requires a factory function. */
+export default function askUser(pi: ExtensionAPI) {
+	registerAskUserTool(pi);
+}

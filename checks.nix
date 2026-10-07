@@ -1514,6 +1514,10 @@ in
         cp -R ${expectedAskUserDir} ask-user
         chmod -R u+w ask-user
         node --experimental-strip-types ask-user/ask-user.self-check.ts
+        # pi's loader resolves the extension module to its default export as the
+        # factory; a named-only export passes --list-models but fails every real
+        # session ("Extension does not export a valid factory function")
+        grep -F 'export default' ask-user/index.ts
 
         export HOME="$TMPDIR/home"
         export PI_CODING_AGENT_DIR="$HOME/.pi/agent"
