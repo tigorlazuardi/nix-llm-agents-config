@@ -23,19 +23,25 @@
     "hash": "sha256-plzzkhCcFVHxZ3wpUE4MiUn3YkhMfDxK//HMawF3I6U=",
     "check": "pi-vimmode-load"
   },
-  "pi-vcc": {
-    "strategy": "github",
-    "owner": "sting8k",
-    "repo": "pi-vcc",
-    "tagPrefix": "v",
-    "version": "0.9.0",
-    "rev": "03111ea83e8874bfa4043d1fcd3bbd1c49f4f262",
-    "hash": "sha256-PUlV/zVSdzGfDpLwc3Smhgn53nIRuvnjwMaxmkOivcQ=",
-    "removePaths": [
-      "demo.gif"
-    ],
-    "check": "pi-vcc-load",
-    "src": "https://github.com/sting8k/pi-vcc/archive/03111ea83e8874bfa4043d1fcd3bbd1c49f4f262.tar.gz"
+  "pi-blackhole": {
+    "strategy": "npm",
+    "package": "pi-blackhole",
+    "version": "0.5.11",
+    "src": "https://registry.npmjs.org/pi-blackhole/-/pi-blackhole-0.5.11.tgz",
+    "hash": "sha256-2Kz+Ip1e969OjxNtIluOc7HO39ESsiYdB/1fJPi1dtM=",
+    "lockFile": "packages/pi-blackhole-package-lock.json",
+    "npmDepsHash": "sha256-L8o7nYpbo0uDGDDDK7FkNzm90npS+976One7n/f8Hj4=",
+    "check": "pi-blackhole-load"
+  },
+  "pi-sensitive-guard": {
+    "strategy": "npm",
+    "package": "pi-sensitive-guard",
+    "version": "0.5.0",
+    "src": "https://registry.npmjs.org/pi-sensitive-guard/-/pi-sensitive-guard-0.5.0.tgz",
+    "hash": "sha256-+C+aZkVFv+DQeUW233eAHorvSQFA5h54bO9XzJaW7DQ=",
+    "lockFile": "packages/pi-sensitive-guard-package-lock.json",
+    "npmDepsHash": "sha256-DLxZ8fhWE04RF2Lx1mdPdUeFp+kNrNc02vWeFJtHb8c=",
+    "check": "pi-sensitive-guard-load"
   },
   "pi-prompt-template-model": {
     "strategy": "github",

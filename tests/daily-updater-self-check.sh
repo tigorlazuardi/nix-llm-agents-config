@@ -46,7 +46,7 @@ jq -e 'all(to_entries[]; .value | has("version") and has("check") and (if .strat
 jq -e 'all(.[]; .manifestTransform? // {} | ((keys - ["delete", "dependencyOverrides", "overrides"]) | length == 0) and ((.delete? // []) | all(. == "devDependencies" or . == "peerDependencies" or . == "peerDependenciesMeta")) and ((.dependencyOverrides? // {}) | type == "object" and all(.[]; type == "string")) and ((.overrides? // {}) | type == "object" and all(.[]; type == "string")))' "$registry" >/dev/null
 jq -e 'all(.[]; has("lockIntegrityPatches") | not)' "$registry" >/dev/null
 jq -e '([.[] | select(.sharedPackage? == "pix-tools") | .npmDepsHash] | unique | length) == 1' "$registry" >/dev/null
-jq -e '."pi-vcc".tagPrefix == "v" and ."pi-vcc".removePaths == ["demo.gif"]' "$registry" >/dev/null
+jq -e '."pi-blackhole".strategy == "npm" and ."pi-blackhole".package == "pi-blackhole"' "$registry" >/dev/null
 ! grep -F 'git push --force' "$updater"
 ! grep -F 'git reset --hard origin/main' "$updater"
 grep -F 'alias_base=$(git rev-parse HEAD)' "$updater"

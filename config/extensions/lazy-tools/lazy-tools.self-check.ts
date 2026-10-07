@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import lazyTools from "./index.ts";
 
-type Group = "browser" | "subagents" | "research" | "herdr" | "journal" | "artifact";
+type Group = "browser" | "subagents" | "research" | "herdr" | "journal" | "artifact" | "memory";
 const core = ["read", "bash", "bash_bg", "agent_bg", "jobs", "monitor", "ask_user", "rename_herdr_tab", "todo", "agent_send", "list_peers"];
 const grouped: Record<Group, string[]> = {
   browser: ["browser_open"],
@@ -10,6 +10,7 @@ const grouped: Record<Group, string[]> = {
   herdr: ["herdr_layout", "sudo_task"],
   journal: ["dev_journal"],
   artifact: ["host_artifact"],
+  memory: ["recall"],
 };
 const paths: Record<string, string> = {
   read: "<builtin:read>",
@@ -34,6 +35,7 @@ const paths: Record<string, string> = {
   list_peers: "/nix/store/pi-messaging-relay-extension/index.ts",
   dev_journal: "/config/extensions/dev-journal/index.ts",
   host_artifact: "/config/extensions/artifact-preview/index.ts",
+  recall: "/nix/store/pi-blackhole/index.js",
   todo: "/nix/store/pi-todo-herdr/index.ts",
 };
 const tools = Object.entries(paths).map(([name, path]) => ({ name, description: "", sourceInfo: { path } }));

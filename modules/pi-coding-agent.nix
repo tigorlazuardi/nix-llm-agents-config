@@ -61,9 +61,10 @@ let
   };
   defaultModels = builtins.fromJSON (builtins.readFile ../config/models.json);
   mcpPlugin = cfg.plugins.pi-mcp-adapter;
+  blackholePlugin = cfg.plugins.pi-blackhole;
   bashJudgePlugin = cfg.plugins.bash-judge;
   optimizerPlugin = cfg.plugins.pix-optimizer;
-  vccPlugin = cfg.plugins.pi-vcc;
+  sensitiveGuardPlugin = cfg.plugins.pi-sensitive-guard;
   webAccessPlugin = cfg.plugins.pi-web-access;
   visionHandoffPlugin = cfg.plugins.pi-vision-handoff;
   mkPluginOptions =
@@ -73,6 +74,49 @@ let
       inherit default;
       description = "Whether to load this Pi plugin and render its integration config.";
     };
+  # pi-blackhole worker-model shape: { provider, id, thinking?, cooldownHours? }.
+  blackholeModelType = lib.types.submodule {
+    options = {
+      provider = lib.mkOption {
+        type = lib.types.str;
+        description = "Provider id as known to Pi (e.g. omniroute).";
+      };
+      id = lib.mkOption {
+        type = lib.types.str;
+        description = "Model id under the provider.";
+      };
+      thinking = lib.mkOption {
+        type = lib.types.nullOr (
+          lib.types.enum [
+            "off"
+            "low"
+            "medium"
+            "high"
+          ]
+        );
+        default = null;
+        description = "Thinking level for the worker call.";
+      };
+      cooldownHours = lib.mkOption {
+        type = lib.types.nullOr lib.types.numbers.positive;
+        default = null;
+        description = "Hours to cool down after a failure before retrying.";
+      };
+    };
+  };
+  blackholeModelOption =
+    description: default:
+    lib.mkOption {
+      type = blackholeModelType;
+      inherit description default;
+    };
+  # Guardrail-class cheap model for all blackhole workers (user decision:
+  # pin compactor everywhere; override per role when needed).
+  blackholeDefaultModel = {
+    provider = "omniroute";
+    id = "personal/compactor";
+    thinking = "off";
+  };
   jsonFormat = pkgs.formats.json { };
   pinnedPkgs = nixpkgs-unstable.legacyPackages.${pkgs.stdenv.hostPlatform.system};
   dietLsp = pinnedPkgs.callPackage ../packages/pi-diet-lsp.nix { };
@@ -116,7 +160,8 @@ let
     package = "${pixToolsRoot}/pix-${name}";
     default = true;
   }) pixToolNames;
-  piVcc = pinnedPkgs.callPackage ../packages/pi-vcc.nix { };
+  piBlackhole = pinnedPkgs.callPackage ../packages/pi-blackhole.nix { };
+  piSensitiveGuard = pinnedPkgs.callPackage ../packages/pi-sensitive-guard.nix { };
   promptTemplateModel = pinnedPkgs.callPackage ../packages/pi-prompt-template-model.nix { };
   todoHerdr = pinnedPkgs.callPackage ../packages/pi-todo-herdr.nix { };
   rules = pinnedPkgs.callPackage ../packages/pi-rules.nix { };
@@ -208,8 +253,14 @@ let
   ]
   ++ [
     {
-      name = "pi-vcc";
-      package = "${piVcc}";
+      name = "pi-blackhole";
+      package = "${piBlackhole}/lib/node_modules/pi-blackhole";
+      default = true;
+    }
+    {
+      name = "pi-sensitive-guard";
+      # wrapped: config.json planted inside the extension root (no env override upstream).
+      package = "${sensitiveGuardWrapped}/lib/node_modules/pi-sensitive-guard";
       default = true;
     }
     {
@@ -320,7 +371,47 @@ let
     rtk = if optimizerPlugin.settings.rtk then "on" else "off";
     toon = if optimizerPlugin.settings.toon then "on" else "off";
   };
-  vccConfigFile = jsonFormat.generate "pi-vcc-config.json" vccPlugin.settings;
+  # pi-sensitive-guard reads its config from config.json inside the extension
+  # root (dirname of index.ts); it has no env override, so wrap the package and
+  # plant the generated config next to the entrypoint.
+  sensitiveGuardWrapped =
+    pinnedPkgs.runCommand "pi-sensitive-guard-wrapped"
+      {
+        pname = "pi-sensitive-guard";
+        version = (import ../packages/pi-plugin-lock.nix)."pi-sensitive-guard".version;
+        passthru = {
+          inherit piSensitiveGuard;
+          # Nix check builds against a newer nixpkgs snapshot than consumer
+          # hosts; keep node_modules parity in checks (see pi-extension-version-skew).
+          unwrapped = piSensitiveGuard;
+        };
+      }
+      ''
+        mkdir -p "$out/lib/node_modules/pi-sensitive-guard"
+        cp -R ${piSensitiveGuard}/lib/node_modules/pi-sensitive-guard/. \
+          "$out/lib/node_modules/pi-sensitive-guard/"
+        chmod -R u+w "$out/lib/node_modules/pi-sensitive-guard"
+        install -Dm644 ${sensitiveGuardConfigFile} \
+          "$out/lib/node_modules/pi-sensitive-guard/config.json"
+      '';
+  sensitiveGuardConfigFile = jsonFormat.generate "pi-sensitive-guard-config.json" sensitiveGuardPlugin.settings;
+  # pi-blackhole reads ~/.pi/agent/pi-blackhole/pi-blackhole-config.json
+  # (PI_CODING_AGENT_DIR-aware); generated as a home.file below. Null
+  # submodule fields (thinking/cooldownHours unset) are stripped at render.
+  blackholeCleanModel =
+    m: builtins.removeAttrs m (lib.filter (k: m.${k} == null) (builtins.attrNames m));
+  blackholeConfigFile = jsonFormat.generate "pi-blackhole-config.json" (
+    blackholePlugin.settings
+    // {
+      model = blackholeCleanModel blackholePlugin.settings.model;
+      observerModel = blackholeCleanModel blackholePlugin.settings.observerModel;
+      reflectorModel = blackholeCleanModel blackholePlugin.settings.reflectorModel;
+      dropperModel = blackholeCleanModel blackholePlugin.settings.dropperModel;
+      observerFallbackModels = map blackholeCleanModel blackholePlugin.settings.observerFallbackModels;
+      reflectorFallbackModels = map blackholeCleanModel blackholePlugin.settings.reflectorFallbackModels;
+      dropperFallbackModels = map blackholeCleanModel blackholePlugin.settings.dropperFallbackModels;
+    }
+  );
   webAccessCredentialNames = [
     "anysearchApiKey"
     "braveApiKey"
@@ -581,26 +672,82 @@ in
           description = "Vision-capable provider/model used to describe images for text-only models.";
         };
 
-        pi-vcc.settings = {
-          overrideDefaultCompaction = lib.mkOption {
-            type = lib.types.bool;
-            default = true;
-            description = "Replace Pi's default manual and automatic compaction with pi-vcc.";
+        pi-blackhole.settings = {
+          compaction = lib.mkOption {
+            type = lib.types.enum [
+              "auto"
+              "manual"
+              "off"
+            ];
+            default = "auto";
+            description = "How compaction triggers: automatically at threshold, manually via /compact, or never.";
           };
-          smartKeepTail = lib.mkOption {
-            type = lib.types.bool;
-            default = true;
-            description = "Retain additional recent turns when their estimated token cost fits.";
+          compactionEngine = lib.mkOption {
+            type = lib.types.enum [
+              "blackhole"
+              "pi-default"
+            ];
+            default = "blackhole";
+            description = "Which engine handles compaction.";
           };
-          continueAfterThresholdCompact = lib.mkOption {
-            type = lib.types.bool;
-            default = true;
-            description = "Automatically continue the agent after threshold or overflow compaction.";
-          };
-          debug = lib.mkOption {
+          sessionFallback = lib.mkOption {
             type = lib.types.bool;
             default = false;
-            description = "Write compaction diagnostics to /tmp/pi-vcc-debug.json.";
+            description = "Fall back to Pi's default compaction when blackhole workers fail.";
+          };
+          model = blackholeModelOption "Base model (last fallback before session model)." blackholeDefaultModel;
+          observerModel = blackholeModelOption "Observer: extracts observations from compacted turns." blackholeDefaultModel;
+          observerFallbackModels = lib.mkOption {
+            type = lib.types.listOf blackholeModelType;
+            default = [ ];
+            description = "Observer fallback chain used when the primary fails or cools down.";
+          };
+          reflectorModel = blackholeModelOption "Reflector: synthesizes reflections from observations." blackholeDefaultModel;
+          reflectorFallbackModels = lib.mkOption {
+            type = lib.types.listOf blackholeModelType;
+            default = [ ];
+            description = "Reflector fallback chain used when the primary fails or cools down.";
+          };
+          dropperModel = blackholeModelOption "Dropper: prioritizes what stays in the context pool." blackholeDefaultModel;
+          dropperFallbackModels = lib.mkOption {
+            type = lib.types.listOf blackholeModelType;
+            default = [ ];
+            description = "Dropper fallback chain used when the primary fails or cools down.";
+          };
+        };
+
+        pi-sensitive-guard.settings = {
+          enabled = lib.mkOption {
+            type = lib.types.bool;
+            default = true;
+            description = "Master switch for sensitive-file protection and redaction.";
+          };
+          readRedaction = {
+            enabled = lib.mkOption {
+              type = lib.types.bool;
+              default = true;
+              description = "Redact secret-pattern matches before content reaches the model.";
+            };
+            includeShellOutput = lib.mkOption {
+              type = lib.types.bool;
+              default = true;
+              description = "Also scan and redact bash tool output.";
+            };
+            scope = lib.mkOption {
+              type = lib.types.enum [
+                "allOutput"
+                "protectedOnly"
+              ];
+              default = "allOutput";
+              description = "Scan all read/bash output, or only protected files.";
+            };
+          };
+          protectedFileEdits = {
+            enabled = lib.mkOption {
+              type = lib.types.bool;
+              default = false;
+              description = "Block edits to files matching protected patterns.";
+            };
           };
         };
 
@@ -766,9 +913,6 @@ in
           # ponytail: Nix/CI owns Pi and plugin updates; skip redundant startup network checks.
           PI_OFFLINE = lib.mkDefault "1";
         }
-        // lib.optionalAttrs vccPlugin.enable {
-          PI_VCC_CONFIG_PATH = lib.mkDefault "${cfg.configDir}/pi-vcc-config.json";
-        }
         // lib.optionalAttrs idleCompact.enable {
           PI_IDLE_COMPACT_THRESHOLD_TOKENS = lib.mkDefault (toString idleCompact.thresholdTokens);
           PI_IDLE_COMPACT_DELAY_MS = lib.mkDefault (toString idleCompact.delayMs);
@@ -866,7 +1010,9 @@ in
       "${cfg.configDir}/optimizer.json" = lib.mkIf optimizerPlugin.enable {
         source = optimizerStateFile;
       };
-      "${cfg.configDir}/pi-vcc-config.json" = lib.mkIf vccPlugin.enable { source = vccConfigFile; };
+      "${cfg.configDir}/pi-blackhole/pi-blackhole-config.json" = lib.mkIf blackholePlugin.enable {
+        source = blackholeConfigFile;
+      };
       # bash-judge reads its wiring from this config file (no env vars).
       "${cfg.configDir}/bash-judge.json" = lib.mkIf cfg.plugins.bash-judge.enable {
         source = jsonFormat.generate "bash-judge.json" {

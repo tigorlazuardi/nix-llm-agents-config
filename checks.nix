@@ -136,12 +136,81 @@ let
   };
   optimizerConfigSource =
     optimizerConfigured.config.home.file."${optimizerConfigured.config.programs.pi-coding-agent.configDir}/optimizer.json".source;
-  vccConfigured = evaluate {
-    programs.pi-coding-agent.plugins.pi-vcc.settings = {
-      overrideDefaultCompaction = false;
-      smartKeepTail = false;
-      continueAfterThresholdCompact = false;
-      debug = true;
+  blackholeConfigured = evaluate {
+    programs.pi-coding-agent.plugins.pi-blackhole.settings = {
+      sessionFallback = true;
+      model = {
+        provider = "omniroute";
+        id = "personal/worker";
+        thinking = "low";
+      };
+      observerModel = {
+        provider = "omniroute";
+        id = "personal/compactor";
+        thinking = "off";
+      };
+    };
+  };
+  expectedBlackholeConfigFile = (pkgs.formats.json { }).generate "pi-blackhole-config.json" {
+    compaction = "auto";
+    compactionEngine = "blackhole";
+    sessionFallback = true;
+    model = {
+      provider = "omniroute";
+      id = "personal/worker";
+      thinking = "low";
+    };
+    observerModel = {
+      provider = "omniroute";
+      id = "personal/compactor";
+      thinking = "off";
+    };
+    observerFallbackModels = [ ];
+    reflectorModel = {
+      provider = "omniroute";
+      id = "personal/compactor";
+      thinking = "off";
+    };
+    reflectorFallbackModels = [ ];
+    dropperModel = {
+      provider = "omniroute";
+      id = "personal/compactor";
+      thinking = "off";
+    };
+    dropperFallbackModels = [ ];
+  };
+  blackholeConfigSource =
+    blackholeConfigured.config.home.file."${blackholeConfigured.config.programs.pi-coding-agent.configDir}/pi-blackhole/pi-blackhole-config.json".source;
+  sensitiveGuardConfigured = evaluate {
+    programs.pi-coding-agent.plugins.pi-sensitive-guard.settings.readRedaction.scope = "protectedOnly";
+  };
+  expectedSensitiveGuardConfig = (pkgs.formats.json { }).generate "pi-sensitive-guard-config.json" {
+    enabled = true;
+    readRedaction = {
+      enabled = true;
+      includeShellOutput = true;
+      scope = "protectedOnly";
+    };
+    protectedFileEdits = {
+      enabled = false;
+    };
+  };
+  sensitiveGuardWrappedPath = builtins.head (
+    builtins.filter (
+      p: builtins.match ".*pi-sensitive-guard-wrapped.*" p != null
+    ) sensitiveGuardConfigured.config.programs.pi-coding-agent.settings.packages
+  );
+  pluginsDisabled = evaluate {
+    programs.pi-coding-agent.plugins = {
+      browser-goblin.enable = false;
+      command-code.enable = false;
+      pi-mcp-adapter.enable = false;
+      pix-optimizer.enable = false;
+      pi-blackhole.enable = false;
+      pi-sensitive-guard.enable = false;
+      pi-herdr-subagents.enable = false;
+      pi-vision-handoff.enable = false;
+      pi-todo-herdr.enable = false;
     };
   };
   webAccessConfigured = evaluate {
@@ -152,26 +221,6 @@ let
   };
   webAccessPathConfigured = evaluate {
     programs.pi-coding-agent.plugins.pi-web-access.credentialFiles.braveApiKey = ./config/models.json;
-  };
-  expectedVccConfigFile = (pkgs.formats.json { }).generate "pi-vcc-config.json" {
-    overrideDefaultCompaction = false;
-    smartKeepTail = false;
-    continueAfterThresholdCompact = false;
-    debug = true;
-  };
-  vccConfigSource =
-    vccConfigured.config.home.file."${vccConfigured.config.programs.pi-coding-agent.configDir}/pi-vcc-config.json".source;
-  pluginsDisabled = evaluate {
-    programs.pi-coding-agent.plugins = {
-      browser-goblin.enable = false;
-      command-code.enable = false;
-      pi-mcp-adapter.enable = false;
-      pix-optimizer.enable = false;
-      pi-vcc.enable = false;
-      pi-herdr-subagents.enable = false;
-      pi-vision-handoff.enable = false;
-      pi-todo-herdr.enable = false;
-    };
   };
   rulesEnabled = evaluate { programs.pi-coding-agent.plugins.pi-rules.enable = true; };
   secretWrappedMcp = evaluate {
@@ -311,8 +360,10 @@ let
   ];
   expectedPixToolPaths = map (name: "${expectedPixToolsRoot}/pix-${name}") expectedPixToolNames;
   expectedPixPrettyPath = "${expectedPixToolsRoot}/pix-pretty";
-  expectedPiVcc = pkgs.callPackage ./packages/pi-vcc.nix { };
-  expectedPiVccPath = "${expectedPiVcc}";
+  expectedBlackhole = pkgs.callPackage ./packages/pi-blackhole.nix { };
+  expectedBlackholePath = "${expectedBlackhole}/lib/node_modules/pi-blackhole";
+  expectedSensitiveGuard = pkgs.callPackage ./packages/pi-sensitive-guard.nix { };
+  expectedSensitiveGuardPath = "${expectedSensitiveGuard}/lib/node_modules/pi-sensitive-guard";
   expectedPromptTemplateModel = pkgs.callPackage ./packages/pi-prompt-template-model.nix { };
   expectedPromptTemplateModelPath = "${expectedPromptTemplateModel}/lib/node_modules/pi-prompt-template-model";
   expectedTodoHerdr = pkgs.callPackage ./packages/pi-todo-herdr.nix { };
@@ -364,7 +415,8 @@ in
   browser-goblin = expectedBrowserGoblin;
   pix-optimizer = expectedPixOptimizer;
   pix-tools = expectedPixTools;
-  pi-vcc = expectedPiVcc;
+  pi-blackhole = expectedBlackhole;
+  pi-sensitive-guard = expectedSensitiveGuard;
   prompt-template-model = expectedPromptTemplateModel;
   pi-todo-herdr = expectedTodoHerdr;
   rules = expectedRules;
@@ -492,7 +544,13 @@ in
           expectedBrowserGoblinPath
         ]
         ++ [
-          expectedPiVccPath
+          expectedBlackholePath
+          # wrapped: store path differs from unwrapped expectedSensitiveGuardPath
+          (builtins.head (
+            builtins.filter (
+              p: builtins.match ".*pi-sensitive-guard.*" p != null
+            ) default.config.programs.pi-coding-agent.settings.packages
+          ))
           expectedPromptTemplateModelPath
           expectedTodoHerdrPath
           expectedRulesPath
@@ -540,11 +598,26 @@ in
     assert default.config.programs.pi-coding-agent.context == ./config/AGENTS.md;
     assert default.config.programs.pi-coding-agent.plugins.pi-mcp-adapter.enable;
     assert default.config.programs.pi-coding-agent.plugins.pi-mcp-adapter.enableMcpIntegration;
-    assert default.config.programs.pi-coding-agent.plugins.pi-vcc.enable;
+    assert default.config.programs.pi-coding-agent.plugins.pi-blackhole.enable;
+    assert default.config.programs.pi-coding-agent.plugins.pi-sensitive-guard.enable;
     assert !default.config.programs.pi-coding-agent.plugins.pix-optimizer.enable;
     assert builtins.all (
       name: default.config.programs.pi-coding-agent.plugins."pix-${name}".enable
     ) expectedPixToolNames;
+    # pi-sensitive-guard ships wrapped (config planted in extension root); its
+    # store path differs from the unwrapped package, so assert by pattern.
+    assert
+      builtins.length (
+        builtins.filter (
+          p: builtins.match ".*pi-sensitive-guard.*" p != null
+        ) default.config.programs.pi-coding-agent.settings.packages
+      ) == 1;
+    assert
+      builtins.length (
+        builtins.filter (
+          p: builtins.match ".*pi-blackhole.*" p != null
+        ) default.config.programs.pi-coding-agent.settings.packages
+      ) == 1;
     assert builtins.all (
       path: builtins.elem path default.config.programs.pi-coding-agent.settings.packages
     ) expectedPixToolPaths;
@@ -570,20 +643,46 @@ in
     assert
       !(default.config.home.file ? "${default.config.programs.pi-coding-agent.configDir}/optimizer.json");
     assert
-      default.config.programs.pi-coding-agent.plugins.pi-vcc.settings == {
-        overrideDefaultCompaction = true;
-        smartKeepTail = true;
-        continueAfterThresholdCompact = true;
-        debug = false;
+      default.config.programs.pi-coding-agent.plugins.pi-blackhole.settings == {
+        compaction = "auto";
+        compactionEngine = "blackhole";
+        sessionFallback = false;
+        model = {
+          provider = "omniroute";
+          id = "personal/compactor";
+          thinking = "off";
+          cooldownHours = null;
+        };
+        observerModel = {
+          provider = "omniroute";
+          id = "personal/compactor";
+          thinking = "off";
+          cooldownHours = null;
+        };
+        observerFallbackModels = [ ];
+        reflectorModel = {
+          provider = "omniroute";
+          id = "personal/compactor";
+          thinking = "off";
+          cooldownHours = null;
+        };
+        reflectorFallbackModels = [ ];
+        dropperModel = {
+          provider = "omniroute";
+          id = "personal/compactor";
+          thinking = "off";
+          cooldownHours = null;
+        };
+        dropperFallbackModels = [ ];
       };
     assert
-      vccConfigured.config.programs.pi-coding-agent.plugins.pi-vcc.settings == {
-        overrideDefaultCompaction = false;
-        smartKeepTail = false;
-        continueAfterThresholdCompact = false;
-        debug = true;
-      };
-    assert vccConfigSource == expectedVccConfigFile;
+      blackholeConfigured.config.programs.pi-coding-agent.plugins.pi-blackhole.settings.model.id
+      == "personal/worker";
+    assert blackholeConfigSource == expectedBlackholeConfigFile;
+    assert
+      sensitiveGuardConfigured.config.programs.pi-coding-agent.plugins.pi-sensitive-guard.settings.readRedaction.scope
+      == "protectedOnly";
+    assert sensitiveGuardWrappedPath != "";
     assert webAccessConfigSource == expectedWebAccessConfigFile;
     assert
       webAccessPathConfigured.config.programs.pi-coding-agent.plugins.pi-web-access.credentialFiles.braveApiKey
@@ -592,9 +691,7 @@ in
       !(
         default.config.home.file ? "${default.config.programs.pi-coding-agent.configDir}/web-search.json"
       );
-    assert
-      vccConfigured.config.home.sessionVariables.PI_VCC_CONFIG_PATH
-      == "/home/test/.pi/agent/pi-vcc-config.json";
+    assert !(blackholeConfigured.config.home.sessionVariables ? PI_BLACKHOLE_CONFIG_PATH);
     assert default.config.programs.mcp.enable;
     assert !(default.config.programs.mcp.servers ? open-design);
     assert
@@ -795,7 +892,7 @@ in
     assert
       !(
         disabled.config.home.file
-          ? "${disabled.config.programs.pi-coding-agent.configDir}/pi-vcc-config.json"
+          ? "${disabled.config.programs.pi-coding-agent.configDir}/pi-blackhole/pi-blackhole-config.json"
       );
     assert !(disabled.config.xdg.configFile ? "mcp/mcp.json");
     assert
@@ -804,7 +901,6 @@ in
       );
     assert !(disabled.config.home.sessionVariables ? C2C_BIN);
     assert !(disabled.config.home.sessionVariables ? PI_OFFLINE);
-    assert !(disabled.config.home.sessionVariables ? PI_VCC_CONFIG_PATH);
     assert !(disabled.config.home.sessionVariables ? PLAYWRIGHT_EXECUTABLE_PATH);
     assert
       !(disabled.config.home.file ? "${disabled.config.programs.pi-coding-agent.configDir}/skills");
@@ -831,7 +927,13 @@ in
     assert
       !(builtins.elem expectedPixOptimizerPath pluginsDisabled.config.programs.pi-coding-agent.settings.packages);
     assert
-      !(builtins.elem expectedPiVccPath pluginsDisabled.config.programs.pi-coding-agent.settings.packages);
+      !(builtins.elem expectedBlackholePath pluginsDisabled.config.programs.pi-coding-agent.settings.packages);
+    assert
+      builtins.length (
+        builtins.filter (
+          p: builtins.match ".*pi-sensitive-guard.*" p != null
+        ) pluginsDisabled.config.programs.pi-coding-agent.settings.packages
+      ) == 0;
     assert
       !(builtins.elem expectedHerdrSubagentsPath pluginsDisabled.config.programs.pi-coding-agent.settings.packages);
     assert
@@ -846,12 +948,11 @@ in
         pluginsDisabled.config.home.file
           ? "${pluginsDisabled.config.programs.pi-coding-agent.configDir}/optimizer.json"
       );
-    assert !(pluginsDisabled.config.home.sessionVariables ? PI_VCC_CONFIG_PATH);
     assert !(pluginsDisabled.config.home.sessionVariables ? PLAYWRIGHT_EXECUTABLE_PATH);
     assert
       !(
         pluginsDisabled.config.home.file
-          ? "${pluginsDisabled.config.programs.pi-coding-agent.configDir}/pi-vcc-config.json"
+          ? "${pluginsDisabled.config.programs.pi-coding-agent.configDir}/pi-blackhole/pi-blackhole-config.json"
       );
     assert
       !(
@@ -878,7 +979,12 @@ in
         expectedBrowserGoblinPath
       ]
       ++ [
-        expectedPiVccPath
+        expectedBlackholePath
+        (builtins.head (
+          builtins.filter (
+            p: builtins.match ".*pi-sensitive-guard.*" p != null
+          ) settingsOverridden.config.programs.pi-coding-agent.settings.packages
+        ))
         expectedPromptTemplateModelPath
         expectedTodoHerdrPath
         expectedRulesPath
@@ -1170,7 +1276,7 @@ in
         ];
       }
       ''
-        nixfmt --check ${./flake.nix} ${./checks.nix} ${./modules/pi-coding-agent.nix} ${./modules/remote-pi-relay.nix} ${./modules/pi-coding-agent/agents.nix} ${./modules/pi-coding-agent/default-agents.nix} ${./modules/pi-coding-agent/pi-herdr-subagents.nix} ${./packages/pi-diet-lsp.nix} ${./packages/pi-commandcode-provider.nix} ${./packages/pi-effort.nix} ${./packages/pi-timestamps.nix} ${./packages/pi-herdr.nix} ${./packages/pi-herdr-sudo-task.nix} ${./packages/pi-herdr-rename.nix} ${./packages/pi-bg.nix} ${./packages/remote-pi-relay.nix} ${./packages/pi-vimmode.nix} ${./packages/pi-usage.nix} ${./packages/pi-cache-optimizer.nix} ${./packages/pi-mcp-adapter.nix} ${./packages/browser-goblin.nix} ${./packages/pix-optimizer.nix} ${./packages/pix-tools.nix} ${./packages/pi-vcc.nix} ${./packages/pi-prompt-template-model.nix} ${./packages/pi-todo-herdr.nix} ${./packages/pi-rules.nix} ${./packages/pi-web-access.nix} ${./packages/pi-herdr-subagents.nix} ${./packages/pi-vision-handoff.nix} ${./packages/pi-vision-handoff-config-updater.nix} ${./packages/supi-context.nix} ${./packages/supi-extras.nix} ${./packages/toon.nix}
+        nixfmt --check ${./flake.nix} ${./checks.nix} ${./modules/pi-coding-agent.nix} ${./modules/remote-pi-relay.nix} ${./modules/pi-coding-agent/agents.nix} ${./modules/pi-coding-agent/default-agents.nix} ${./modules/pi-coding-agent/pi-herdr-subagents.nix} ${./packages/pi-diet-lsp.nix} ${./packages/pi-commandcode-provider.nix} ${./packages/pi-effort.nix} ${./packages/pi-timestamps.nix} ${./packages/pi-herdr.nix} ${./packages/pi-herdr-sudo-task.nix} ${./packages/pi-herdr-rename.nix} ${./packages/pi-bg.nix} ${./packages/remote-pi-relay.nix} ${./packages/pi-vimmode.nix} ${./packages/pi-usage.nix} ${./packages/pi-cache-optimizer.nix} ${./packages/pi-mcp-adapter.nix} ${./packages/browser-goblin.nix} ${./packages/pix-optimizer.nix} ${./packages/pix-tools.nix} ${./packages/pi-blackhole.nix} ${./packages/pi-sensitive-guard.nix} ${./packages/pi-prompt-template-model.nix} ${./packages/pi-todo-herdr.nix} ${./packages/pi-rules.nix} ${./packages/pi-web-access.nix} ${./packages/pi-herdr-subagents.nix} ${./packages/pi-vision-handoff.nix} ${./packages/pi-vision-handoff-config-updater.nix} ${./packages/supi-context.nix} ${./packages/supi-extras.nix} ${./packages/toon.nix}
         WORKFLOW=${./.github/workflows/daily-update.yml} UPDATER=${./scripts/daily-update.sh} REGISTRY=${./pi-plugins.json} CHECKS=${./checks.nix} MISSING_INTEGRITY_FIXTURE=${./tests/fixtures/npm-lock-missing-integrity.json} CONTROL_RESOLVED_FIXTURE=${./tests/fixtures/npm-lock-control-resolved.json} bash ${./tests/daily-updater-self-check.sh}
         RUNNER=${./scripts/local-update.sh} PROMPT=${./scripts/local-update-recovery.md} bash ${./tests/local-updater-self-check.sh}
         touch $out
@@ -1672,8 +1778,8 @@ in
         touch $out
       '';
 
-  pi-vcc-load =
-    pkgs.runCommandLocal "pi-vcc-load"
+  pi-blackhole-load =
+    pkgs.runCommandLocal "pi-blackhole-load"
       {
         nativeBuildInputs = [
           expectedPackage
@@ -1682,21 +1788,44 @@ in
       ''
         export HOME="$TMPDIR/home"
         export PI_CODING_AGENT_DIR="$HOME/.pi/agent"
-        export PI_VCC_CONFIG_PATH="$TMPDIR/pi-vcc-config.json"
         export PI_TELEMETRY=0
-        mkdir -p "$PI_CODING_AGENT_DIR"
-        test -f ${expectedPiVcc}/index.ts
-        test ! -e ${expectedPiVcc}/demo.gif
-        test ! -e ${expectedPiVcc}/node_modules
-
+        mkdir -p "$PI_CODING_AGENT_DIR/pi-blackhole"
+        test -f ${expectedBlackholePath}/dist/index.js
+        test ! -e ${expectedBlackholePath}/node_modules
+        grep -F '"name": "pi-blackhole"' ${expectedBlackholePath}/package.json
+        grep -F '"version": "${pluginLocks."pi-blackhole".version}"' ${expectedBlackholePath}/package.json
+        # explicit config lands in the agent dir and carries pinned worker models
+        install -m644 ${expectedBlackholeConfigFile} "$PI_CODING_AGENT_DIR/pi-blackhole/pi-blackhole-config.json"
+        grep -F '"id": "personal/compactor"' "$PI_CODING_AGENT_DIR/pi-blackhole/pi-blackhole-config.json"
         pi --offline --no-extensions --no-skills --no-prompt-templates --no-context-files \
-          -e ${expectedPiVcc} \
+          -e ${expectedBlackholePath} \
           --list-models > pi.log 2>&1
         ! grep -E 'Extension issues|Failed to load extension|Cannot find module|Error:' pi.log
-        grep -F '"overrideDefaultCompaction": true' "$PI_VCC_CONFIG_PATH"
-        grep -F '"smartKeepTail": true' "$PI_VCC_CONFIG_PATH"
-        grep -F '"continueAfterThresholdCompact": true' "$PI_VCC_CONFIG_PATH"
-        grep -F '"debug": false' "$PI_VCC_CONFIG_PATH"
+        touch $out
+      '';
+
+  pi-sensitive-guard-load =
+    pkgs.runCommandLocal "pi-sensitive-guard-load"
+      {
+        nativeBuildInputs = [
+          expectedPackage
+        ];
+      }
+      ''
+        export HOME="$TMPDIR/home"
+        export PI_CODING_AGENT_DIR="$HOME/.pi/agent"
+        export PI_TELEMETRY=0
+        mkdir -p "$PI_CODING_AGENT_DIR"
+        guard=${expectedSensitiveGuardPath}
+        test -f "$guard/index.ts"
+        test -f "$guard/src/index.ts"
+        test -d "$guard/node_modules/@aliou/sh"
+        grep -F '"name": "pi-sensitive-guard"' "$guard/package.json"
+        grep -F '"version": "${pluginLocks."pi-sensitive-guard".version}"' "$guard/package.json"
+        pi --offline --no-extensions --no-skills --no-prompt-templates --no-context-files \
+          -e "$guard" \
+          --list-models > pi.log 2>&1
+        ! grep -E 'Extension issues|Failed to load extension|Cannot find module|Error:' pi.log
         touch $out
       '';
 

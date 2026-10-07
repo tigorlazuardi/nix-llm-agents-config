@@ -2,7 +2,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { StringEnum } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
 
-const GROUP_NAMES = ["browser", "subagents", "research", "herdr", "journal", "artifact"] as const;
+const GROUP_NAMES = ["browser", "subagents", "research", "herdr", "journal", "artifact", "memory"] as const;
 type Group = typeof GROUP_NAMES[number];
 const GROUP_MARKERS: Record<Group, readonly string[]> = {
   browser: ["browser-goblin"],
@@ -11,6 +11,7 @@ const GROUP_MARKERS: Record<Group, readonly string[]> = {
   herdr: ["pi-herdr"],
   journal: ["dev-journal"],
   artifact: ["artifact-preview"],
+  memory: ["pi-blackhole"],
 };
 const ALWAYS_ACTIVE = new Set(["bash", "bash_bg", "ask_user", "rename_herdr_tab", "todo", "load_tools"]);
 // Permanently hidden every session — NOT deferrable via load_tools. Models mistake
@@ -41,9 +42,9 @@ export default function (pi: ExtensionAPI) {
   pi.registerTool({
     name: "load_tools",
     label: "Load Tools",
-    description: "Enable an installed tool group for this session. Groups: browser, subagents, research/web/MCP, Herdr/elevation, journal, artifact hosting.",
+    description: "Enable an installed tool group for this session. Groups: browser, subagents, research/web/MCP, Herdr/elevation, journal, artifact hosting, memory/recall.",
     promptSnippet: "Enable deferred tool groups when needed",
-    promptGuidelines: ["Use load_tools before browser automation; /supervise or delegation; web/current-source/MCP research; explicit Herdr or elevated work; journal access; or artifact preview."],
+    promptGuidelines: ["Use load_tools before browser automation; /supervise or delegation; web/current-source/MCP research; explicit Herdr or elevated work; journal access; artifact preview; or memory recall search."],
     parameters: Type.Object({
       group: StringEnum(GROUP_NAMES),
     }),
