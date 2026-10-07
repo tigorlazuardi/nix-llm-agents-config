@@ -144,6 +144,7 @@ let
   toon = pinnedPkgs.callPackage ../packages/toon.nix { };
   pixTools = pinnedPkgs.callPackage ../packages/pix-tools.nix { };
   pixSudo = pinnedPkgs.callPackage ../packages/pix-sudo.nix { };
+  rpivAskUserQuestion = pinnedPkgs.callPackage ../packages/rpiv-ask-user-question.nix { };
   pixToolsRoot = "${pixTools}/lib/node_modules/pix-tools/node_modules/@xynogen";
   pixToolNames = [
     "pretty"
@@ -215,6 +216,11 @@ let
     {
       name = "pix-sudo";
       package = "${pixSudo}/lib/node_modules/@xynogen/pix-sudo";
+      default = true;
+    }
+    {
+      name = "rpiv-ask-user-question";
+      package = "${rpivAskUserQuestion}/lib/node_modules/@juicesharp/rpiv-ask-user-question";
       default = true;
     }
     {
@@ -546,23 +552,6 @@ in
             inherit (jsonFormat) type;
             default = { };
             description = "pi-mcp-adapter settings written beside integrated user-level MCP servers.";
-          };
-        };
-
-        ask-user = {
-          # Local extension (config/extensions/ask-user), NOT a settings
-          # package — same pattern as bash-judge: links via extensions/home.file
-          # when enabled; a pluginPackages entry would push a non-loadable
-          # package path into settings.packages (pi fails to boot).
-          # Registers the ask_user tool (kept eager in lazy-tools) with a
-          # numbered-menu dialog whose screen shape is the herdr-web-ui
-          # fallback-menu contract, so every question is answerable from the
-          # web/phone card with digit buttons; emits herdr:blocked while
-          # waiting. Replaces the pi-ask-herdr package.
-          enable = lib.mkOption {
-            type = lib.types.bool;
-            default = true;
-            description = "Register the in-repo ask_user tool (herdr-web-ui-native numbered dialog).";
           };
         };
 
@@ -962,9 +951,7 @@ in
         (lib.mkIf cfg.plugins.bash-judge.enable {
           bash-judge = lib.mkDefault ../config/extensions/bash-judge;
         })
-        (lib.mkIf cfg.plugins.ask-user.enable {
-          ask-user = lib.mkDefault ../config/extensions/ask-user;
-        })
+        { rpiv-herdr-bridge = lib.mkDefault ../config/extensions/rpiv-herdr-bridge; }
       ];
       skills = lib.mapAttrs (_: lib.mkDefault) (repoSkills // patchedMattSkills);
     };
@@ -998,8 +985,8 @@ in
         source = cfg.extensions.bash-judge;
         force = true;
       };
-      "${cfg.configDir}/extensions/ask-user" = lib.mkIf cfg.plugins.ask-user.enable {
-        source = cfg.extensions.ask-user;
+      "${cfg.configDir}/extensions/rpiv-herdr-bridge" = {
+        source = cfg.extensions.rpiv-herdr-bridge;
         force = true;
       };
       "${cfg.configDir}/prompts" = {

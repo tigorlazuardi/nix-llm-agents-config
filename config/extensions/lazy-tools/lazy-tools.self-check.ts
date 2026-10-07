@@ -1,13 +1,14 @@
 import assert from "node:assert/strict";
 import lazyTools from "./index.ts";
 
-type Group = "browser" | "subagents" | "research" | "herdr" | "journal" | "artifact" | "memory";
-const core = ["read", "bash", "bash_bg", "agent_bg", "jobs", "monitor", "ask_user", "rename_herdr_tab", "todo", "agent_send", "list_peers"];
+type Group = "browser" | "subagents" | "research" | "herdr" | "sudo" | "journal" | "artifact" | "memory";
+const core = ["read", "bash", "bash_bg", "agent_bg", "jobs", "monitor", "ask_user_question", "rename_herdr_tab", "todo", "agent_send", "list_peers"];
 const grouped: Record<Group, string[]> = {
   browser: ["browser_open"],
   subagents: ["subagent", "subagent_interrupt", "subagents_list", "subagent_resume"],
   research: ["web_search", "mcp", "mcpScript"],
-  herdr: ["herdr_layout", "sudo_run"],
+  herdr: ["herdr_layout"],
+  sudo: ["sudo_run"],
   journal: ["dev_journal"],
   artifact: ["host_artifact"],
   memory: ["recall"],
@@ -16,7 +17,7 @@ const paths: Record<string, string> = {
   read: "<builtin:read>",
   bash: "/nix/store/pi-bg/index.ts",
   bash_bg: "/nix/store/pi-bg/index.ts",
-  ask_user: "/config/extensions/ask-user/index.ts",
+  ask_user_question: "/nix/store/@juicesharp/rpiv-ask-user-question/src/index.ts",
   rename_herdr_tab: "/nix/store/pi-herdr-rename/index.ts",
   browser_open: "/nix/store/browser-goblin/index.ts",
   subagent: "/nix/store/pi-herdr-subagents/pi-extension/subagents/index.ts",

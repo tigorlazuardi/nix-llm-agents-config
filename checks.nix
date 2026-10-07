@@ -325,7 +325,8 @@ let
   expectedPixSudoPath = "${expectedPixSudo}/lib/node_modules/@xynogen/pix-sudo";
   expectedHerdrSudoTask = pkgs.callPackage ./packages/pi-herdr-sudo-task.nix { };
   expectedHerdrSudoTaskPath = "${expectedHerdrSudoTask}/lib/node_modules/pi-herdr-sudo-task";
-  expectedAskUserDir = ./config/extensions/ask-user;
+  expectedRpivAskUser = pkgs.callPackage ./packages/rpiv-ask-user-question.nix { };
+  expectedRpivAskUserPath = "${expectedRpivAskUser}/lib/node_modules/@juicesharp/rpiv-ask-user-question";
   expectedHerdrRename = pkgs.callPackage ./packages/pi-herdr-rename.nix { };
   expectedHerdrRenamePath = "${expectedHerdrRename}/lib/node_modules/pi-herdr-rename";
   expectedPiBg = pkgs.callPackage ./packages/pi-bg.nix { };
@@ -421,6 +422,7 @@ in
   pix-optimizer = expectedPixOptimizer;
   pix-tools = expectedPixTools;
   pix-sudo = expectedPixSudo;
+  rpiv-ask-user-question = expectedRpivAskUser;
   pi-blackhole = expectedBlackhole;
   pi-sensitive-guard = expectedSensitiveGuard;
   prompt-template-model = expectedPromptTemplateModel;
@@ -541,6 +543,7 @@ in
           expectedTimestampsPath
           expectedPiHerdrPath
           expectedPixSudoPath
+          expectedRpivAskUserPath
           # herdr-sudo-task is default-off; path only present when explicitly enabled.
           expectedHerdrRenamePath
           expectedPiBgPath
@@ -990,6 +993,7 @@ in
         expectedTimestampsPath
         expectedPiHerdrPath
         expectedPixSudoPath
+        expectedRpivAskUserPath
         expectedHerdrRenamePath
         expectedPiBgPath
         expectedVimModePath
@@ -1291,7 +1295,7 @@ in
         ];
       }
       ''
-        nixfmt --check ${./flake.nix} ${./checks.nix} ${./modules/pi-coding-agent.nix} ${./modules/remote-pi-relay.nix} ${./modules/pi-coding-agent/agents.nix} ${./modules/pi-coding-agent/default-agents.nix} ${./modules/pi-coding-agent/pi-herdr-subagents.nix} ${./packages/pi-diet-lsp.nix} ${./packages/pi-commandcode-provider.nix} ${./packages/pi-effort.nix} ${./packages/pi-timestamps.nix} ${./packages/pi-herdr.nix} ${./packages/pi-herdr-sudo-task.nix} ${./packages/pi-herdr-rename.nix} ${./packages/pi-bg.nix} ${./packages/remote-pi-relay.nix} ${./packages/pi-vimmode.nix} ${./packages/pi-usage.nix} ${./packages/pi-cache-optimizer.nix} ${./packages/pi-mcp-adapter.nix} ${./packages/browser-goblin.nix} ${./packages/pix-optimizer.nix} ${./packages/pix-tools.nix} ${./packages/pix-sudo.nix} ${./packages/pi-blackhole.nix} ${./packages/pi-sensitive-guard.nix} ${./packages/pi-prompt-template-model.nix} ${./packages/pi-todo-herdr.nix} ${./packages/pi-rules.nix} ${./packages/pi-web-access.nix} ${./packages/pi-herdr-subagents.nix} ${./packages/pi-vision-handoff.nix} ${./packages/pi-vision-handoff-config-updater.nix} ${./packages/supi-context.nix} ${./packages/supi-extras.nix} ${./packages/toon.nix}
+        nixfmt --check ${./flake.nix} ${./checks.nix} ${./modules/pi-coding-agent.nix} ${./modules/remote-pi-relay.nix} ${./modules/pi-coding-agent/agents.nix} ${./modules/pi-coding-agent/default-agents.nix} ${./modules/pi-coding-agent/pi-herdr-subagents.nix} ${./packages/pi-diet-lsp.nix} ${./packages/pi-commandcode-provider.nix} ${./packages/pi-effort.nix} ${./packages/pi-timestamps.nix} ${./packages/pi-herdr.nix} ${./packages/pi-herdr-sudo-task.nix} ${./packages/pi-herdr-rename.nix} ${./packages/pi-bg.nix} ${./packages/remote-pi-relay.nix} ${./packages/pi-vimmode.nix} ${./packages/pi-usage.nix} ${./packages/pi-cache-optimizer.nix} ${./packages/pi-mcp-adapter.nix} ${./packages/browser-goblin.nix} ${./packages/pix-optimizer.nix} ${./packages/pix-tools.nix} ${./packages/pix-sudo.nix} ${./packages/rpiv-ask-user-question.nix} ${./packages/pi-blackhole.nix} ${./packages/pi-sensitive-guard.nix} ${./packages/pi-prompt-template-model.nix} ${./packages/pi-todo-herdr.nix} ${./packages/pi-rules.nix} ${./packages/pi-web-access.nix} ${./packages/pi-herdr-subagents.nix} ${./packages/pi-vision-handoff.nix} ${./packages/pi-vision-handoff-config-updater.nix} ${./packages/supi-context.nix} ${./packages/supi-extras.nix} ${./packages/toon.nix}
         WORKFLOW=${./.github/workflows/daily-update.yml} UPDATER=${./scripts/daily-update.sh} REGISTRY=${./pi-plugins.json} CHECKS=${./checks.nix} MISSING_INTEGRITY_FIXTURE=${./tests/fixtures/npm-lock-missing-integrity.json} CONTROL_RESOLVED_FIXTURE=${./tests/fixtures/npm-lock-control-resolved.json} bash ${./tests/daily-updater-self-check.sh}
         RUNNER=${./scripts/local-update.sh} PROMPT=${./scripts/local-update-recovery.md} bash ${./tests/local-updater-self-check.sh}
         touch $out
@@ -1623,29 +1627,52 @@ in
         touch $out
       '';
 
-  ask-user =
-    pkgs.runCommandLocal "pi-ask-user"
+  rpiv-ask-user-question-load =
+    pkgs.runCommandLocal "pi-rpiv-ask-user-question"
       {
         nativeBuildInputs = [
           expectedPackage
-          pkgs.nodejs_22
+          expectedRpivAskUser
         ];
       }
       ''
-        cp -R ${expectedAskUserDir} ask-user
-        chmod -R u+w ask-user
-        node --experimental-strip-types ask-user/ask-user.self-check.ts
-        # pi's loader resolves the extension module to its default export as the
-        # factory; a named-only export passes --list-models but fails every real
-        # session ("Extension does not export a valid factory function")
-        grep -F 'export default' ask-user/index.ts
+        # Registration contracts: rpiv's public event channels and the tool name.
+        grep -F 'rpiv:ask-user:prompt' ${expectedRpivAskUserPath}/events.ts
+        grep -F 'rpiv:ask-user:blocked' ${expectedRpivAskUserPath}/events.ts
+        grep -F 'name: ASK_USER_QUESTION_TOOL_NAME' ${expectedRpivAskUserPath}/ask-user-question.ts
+        grep -F 'ASK_USER_QUESTION_TOOL_NAME = "ask_user_question"' ${expectedRpivAskUserPath}/ask-user-question.ts
+        grep -F 'export default function' ${expectedRpivAskUserPath}/index.ts
+
+        # Blocked-event emission paths (wait + resolve).
+        grep -F 'emitAskUserBlockedEvent(pi, true)' ${expectedRpivAskUserPath}/ask-user-question.ts
+        grep -F 'emitAskUserBlockedEvent(pi, false)' ${expectedRpivAskUserPath}/ask-user-question.ts
 
         export HOME="$TMPDIR/home"
         export PI_CODING_AGENT_DIR="$HOME/.pi/agent"
         export PI_TELEMETRY=0
         mkdir -p "$PI_CODING_AGENT_DIR"
         pi --offline --no-extensions --no-skills --no-prompt-templates --no-context-files \
-          -e ${expectedAskUserDir}/index.ts \
+          -e ${expectedRpivAskUserPath}/index.ts \
+          --list-models > pi.log 2>&1
+        ! grep -E 'Extension issues|Failed to load extension|Cannot find module|Error:' pi.log
+        touch $out
+      '';
+
+  rpiv-herdr-bridge-load =
+    pkgs.runCommandLocal "pi-rpiv-herdr-bridge" { nativeBuildInputs = [ expectedPackage ]; }
+      ''
+        # Bridge contracts: rpiv event listeners forward to herdr:blocked.
+        grep -F 'rpiv:ask-user:prompt' ${./config/extensions/rpiv-herdr-bridge/index.ts}
+        grep -F 'rpiv:ask-user:blocked' ${./config/extensions/rpiv-herdr-bridge/index.ts}
+        grep -F '"herdr:blocked", { active: false }' ${./config/extensions/rpiv-herdr-bridge/index.ts}
+        grep -F '"herdr:blocked", { active: true, label' ${./config/extensions/rpiv-herdr-bridge/index.ts}
+
+        export HOME="$TMPDIR/home"
+        export PI_CODING_AGENT_DIR="$HOME/.pi/agent"
+        export PI_TELEMETRY=0
+        mkdir -p "$PI_CODING_AGENT_DIR"
+        pi --offline --no-extensions --no-skills --no-prompt-templates --no-context-files \
+          -e ${./config/extensions/rpiv-herdr-bridge}/index.ts \
           --list-models > pi.log 2>&1
         ! grep -E 'Extension issues|Failed to load extension|Cannot find module|Error:' pi.log
         touch $out

@@ -2,18 +2,19 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { StringEnum } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
 
-const GROUP_NAMES = ["browser", "subagents", "research", "herdr", "journal", "artifact", "memory"] as const;
+const GROUP_NAMES = ["browser", "subagents", "research", "herdr", "sudo", "journal", "artifact", "memory"] as const;
 type Group = typeof GROUP_NAMES[number];
 const GROUP_MARKERS: Record<Group, readonly string[]> = {
   browser: ["browser-goblin"],
   subagents: ["pi-herdr-subagents"],
   research: ["pi-web-access", "pi-mcp-adapter"],
-  herdr: ["pi-herdr", "pix-sudo"],
+  herdr: ["pi-herdr"],
+  sudo: ["pix-sudo"],
   journal: ["dev-journal"],
   artifact: ["artifact-preview"],
   memory: ["pi-blackhole"],
 };
-const ALWAYS_ACTIVE = new Set(["bash", "bash_bg", "ask_user", "rename_herdr_tab", "todo", "load_tools"]);
+const ALWAYS_ACTIVE = new Set(["bash", "bash_bg", "ask_user_question", "rename_herdr_tab", "todo", "load_tools"]);
 // Permanently hidden every session — NOT deferrable via load_tools. Models mistake
 // agent_bg for a subagent/delegation tool and misfire it; background pi -p work goes
 // through the subagents group instead.

@@ -22,7 +22,7 @@ Process routing:
 - `tail` is for files only — finite reads like `tail -n 50 file.log`. Never tail an output stream (`cmd | tail`, `tail -f`): it never exits and floods the session; live streams belong in a Herdr pane or the monitor tool.
 - Bounded execution only: `timeout` every long-running command — start short (30–60s); most finish in seconds, so escalate to minutes only for commands proven to run long (full builds, large test suites). Every loop carries a counter + `break`. Infinite loops without a timeout are forbidden.
 - Never wait via `until grep …; do sleep` polling — one missed pattern hangs the turn until timeout. Wait on the job's completion wake or read it with `jobs action='attach'`.
-- `nixos-rebuild switch` → load Herdr/elevation tools, then execute the exact command through `sudo_run`; do not probe direct `sudo` first.
+- `nixos-rebuild switch` → load tools (sudo group for `sudo_run`, herdr group for `herdr_layout`), then execute the exact command through `sudo_run`; do not probe direct `sudo` first.
 
 Mode router:
 - Small–medium coherent scope → main executes autonomously; no mode invocation required.
