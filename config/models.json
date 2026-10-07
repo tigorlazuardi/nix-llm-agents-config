@@ -195,6 +195,36 @@
             "supportsDeveloperRole": false,
             "sendSessionAffinityHeaders": true
           }
+        },
+        {
+          "id": "bareksa/compactor",
+          "reasoning": true,
+          "contextWindow": 200000,
+          "maxTokens": 64000,
+          "api": "openai-completions",
+          "input": [
+            "text",
+            "image"
+          ],
+          "compat": {
+            "supportsDeveloperRole": false,
+            "sendSessionAffinityHeaders": true
+          }
+        },
+        {
+          "id": "personal/compactor",
+          "reasoning": true,
+          "contextWindow": 200000,
+          "maxTokens": 64000,
+          "api": "openai-completions",
+          "input": [
+            "text",
+            "image"
+          ],
+          "compat": {
+            "supportsDeveloperRole": false,
+            "sendSessionAffinityHeaders": true
+          }
         }
       ]
     }
