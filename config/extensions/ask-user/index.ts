@@ -161,6 +161,8 @@ export function registerAskUserTool(pi: ExtensionAPI) {
 			try {
 				details = await runWizard(specs, ctx, signal ?? undefined, params.timeout);
 			} finally {
+				// restore agent state, herdr status, and pi's built-in footer
+				ctx.ui.setFooter?.(undefined);
 				pi.events.emit("herdr:blocked", { active: false });
 			}
 
@@ -199,12 +201,29 @@ type Done<T> = (result: T) => void;
 /** Digit typing (the herdr-web-ui card buttons) plus the interactive keys. */
 const DIGIT_RE = /^[1-9]$/;
 
+/**
+ * Zero-height footer swapped in while the wizard is open: pi's status footer
+ * (branch/tokens/model) renders BELOW the editor area, and herdr-web-ui's
+ * fallbackMenu only arms when the chooser hint is the screen's last shown
+ * line. With the footer empty, the hint is last and the web card gets one
+ * digit button per row. Optional-called + restored, so builds without
+ * setFooter just keep the plain Enter/Esc card.
+ */
+class EmptyFooter {
+	render(): string[] {
+		return [];
+	}
+
+	invalidate(): void {}
+}
+
 function runWizard(
 	specs: QuestionSpec[],
 	ctx: ExtensionContext,
 	signal: AbortSignal | undefined,
 	timeoutMs: number | undefined,
 ): Promise<{ answers: AnswerRecord[]; cancelled: boolean }> {
+	ctx.ui.setFooter?.(() => new EmptyFooter());
 	return ctx.ui.custom<{ answers: AnswerRecord[]; cancelled: boolean }>((_tui, theme, _keybindings, done) => {
 		return new AskWizard(specs, theme, done, signal, timeoutMs);
 	});
