@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
 import bashJudge, {
+	BOUND_MARKERS,
 	buildRequest,
 	classifyJudgeError,
 	denyReason,
 	evaluateAnswers,
 	failureTexts,
+	hasExplicitBound,
 	isAllowlisted,
 	readConfig,
 	setConfigPath,
@@ -128,6 +130,40 @@ for (const qid of ["loop", "secret", "destro"]) {
 	assert.match(request.questions[qid].instructions, /\?$/);
 }
 
+// --- explicit bound: loop question answered deterministically, not judged ----
+// Bench 2026-10-07: the judge scored `curl --max-time 10` loop=yes@0.86,
+// `timeout 30 curl` yes@0.77, `ping -c 4` yes@0.95 — while `tail -f` passed
+// at 0.54. Bounded commands must never send the loop question.
+assert.ok(hasExplicitBound("curl -s -o /dev/null --max-time 10 http://localhost:5173/"));
+assert.ok(hasExplicitBound("curl -sm 10 http://localhost:5173/"));
+assert.ok(hasExplicitBound("timeout 30 curl -s http://localhost:5173/health"));
+assert.ok(hasExplicitBound("ping -c 4 localhost"));
+assert.ok(hasExplicitBound("sleep 5"));
+assert.ok(hasExplicitBound("head -c 1024 /dev/urandom"));
+assert.ok(hasExplicitBound("tail -n 20 /var/log/syslog"));
+assert.ok(!hasExplicitBound("curl -s http://localhost:5173/"), "no bound -> judge decides");
+assert.ok(!hasExplicitBound("tail -f /var/log/syslog"), "streaming follower is unbounded");
+assert.ok(
+	!hasExplicitBound("watch -n 2 curl -s http://localhost:5173/health"),
+	"watch repeat is unbounded",
+);
+assert.ok(
+	!hasExplicitBound("while true; do curl -s localhost:8080; sleep 1; done"),
+	"sleep inside while loop proves nothing",
+);
+assert.ok(
+	!hasExplicitBound("while [ -f /tmp/flag ]; do sleep 1; done"),
+	"while+sleep never counts as bounded",
+);
+
+const boundedRequest = buildRequest("curl --max-time 10 http://localhost", { loopAnswer: "no" });
+assert.equal(boundedRequest.questions.loop, undefined, "bounded: loop question omitted");
+assert.ok(boundedRequest.questions.secret);
+assert.ok(boundedRequest.questions.destro);
+const unboundedRequest = buildRequest("tail -f /var/log/syslog");
+assert.ok(unboundedRequest.questions.loop, "unbounded: loop question still asked");
+assert.match(boundedRequest.state, /curl --max-time 10/);
+
 // --- verdict rule: yes + answer_confidence >= threshold --------------------
 const ans = (choice: string, answer_confidence: number) => ({ choice, answer_confidence });
 
@@ -241,6 +277,42 @@ globalThis.fetch = (async () => judgeResponse(yesBody)) as typeof fetch;
 const judged = await call("rm -rf /home/homeserver/homelab/build");
 assert.equal(judged?.block, true);
 assert.match(judged?.reason ?? "", /destro=yes/);
+
+// bounded command: loop question never sent; deterministic loop=no@1 merged in
+let capturedBody: { questions?: Record<string, unknown> } | undefined;
+globalThis.fetch = (async (_url: unknown, init?: { body?: string }) => {
+	capturedBody = JSON.parse(init?.body ?? "{}");
+	return judgeResponse({
+		secret: { choice: "no", answer_confidence: 0.9 },
+		destro: { choice: "no", answer_confidence: 0.9 },
+	});
+}) as typeof fetch;
+const boundedCall = await call("curl -s --max-time 10 http://localhost:5173/");
+assert.equal(boundedCall, undefined, "bounded curl must pass (loop answered no deterministically)");
+assert.equal(
+	capturedBody?.questions && "loop" in capturedBody.questions,
+	false,
+	"loop question must be omitted for bounded commands",
+);
+assert.ok(capturedBody?.questions && "secret" in capturedBody.questions);
+assert.ok(capturedBody?.questions && "destro" in capturedBody.questions);
+
+// unbounded command: loop question still judged
+let capturedUnbounded: { questions?: Record<string, unknown> } | undefined;
+globalThis.fetch = (async (_url: unknown, init?: { body?: string }) => {
+	capturedUnbounded = JSON.parse(init?.body ?? "{}");
+	return judgeResponse({
+		loop: { choice: "no", answer_confidence: 0.8 },
+		secret: { choice: "no", answer_confidence: 0.9 },
+		destro: { choice: "no", answer_confidence: 0.9 },
+	});
+}) as typeof fetch;
+await call("curl -s http://localhost:5173/");
+assert.ok(
+	capturedUnbounded?.questions && "loop" in capturedUnbounded.questions,
+	"unbounded command must still send the loop question",
+);
+globalThis.fetch = (async () => judgeResponse(yesBody)) as typeof fetch;
 
 // judge round-trip: safe verdict -> pass + footer status cleared
 const noBody = {
