@@ -307,10 +307,10 @@
   "pi-usage": {
     "strategy": "npm",
     "package": "@narumitw/pi-usage",
-    "version": "0.63.0",
-    "src": "https://registry.npmjs.org/@narumitw/pi-usage/-/pi-usage-0.63.0.tgz",
-    "hash": "sha256-2yQxSUectTSbG6f2vtSq6dTfovifvOowwO1uK5zGHmI=",
-    "npmDepsHash": "sha256-i9Qu5kb52J87RpnFz1CdKYDGwrIYF0GBelz3oiEf9Vg=",
+    "version": "0.64.1",
+    "src": "https://registry.npmjs.org/@narumitw/pi-usage/-/pi-usage-0.64.1.tgz",
+    "hash": "sha256-kdlR1c2agLjm0giYGn7ZRM/OeIePYoWd1UBohKqeft4=",
+    "npmDepsHash": "sha256-y4u/fyds80LdfxZLofOg4THBb4KkG5Yb94kc8Sba+IQ=",
     "manifestTransform": {
       "delete": [
         "devDependencies",
