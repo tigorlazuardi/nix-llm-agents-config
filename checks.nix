@@ -182,7 +182,10 @@ let
   blackholeConfigSource =
     blackholeConfigured.config.home.file."${blackholeConfigured.config.programs.pi-coding-agent.configDir}/pi-blackhole/pi-blackhole-config.json".source;
   sensitiveGuardConfigured = evaluate {
-    programs.pi-coding-agent.plugins.pi-sensitive-guard.settings.readRedaction.scope = "protectedOnly";
+    programs.pi-coding-agent.plugins.pi-sensitive-guard = {
+      enable = true;
+      settings.readRedaction.scope = "protectedOnly";
+    };
   };
   expectedSensitiveGuardConfig = (pkgs.formats.json { }).generate "pi-sensitive-guard-config.json" {
     enabled = true;
@@ -318,6 +321,8 @@ let
   expectedTimestampsPath = "${expectedTimestamps}/lib/node_modules/pi-timestamps";
   expectedPiHerdr = pkgs.callPackage ./packages/pi-herdr.nix { };
   expectedPiHerdrPath = "${expectedPiHerdr}/lib/node_modules/@ogulcancelik/pi-herdr";
+  expectedPixSudo = pkgs.callPackage ./packages/pix-sudo.nix { };
+  expectedPixSudoPath = "${expectedPixSudo}/lib/node_modules/@xynogen/pix-sudo";
   expectedHerdrSudoTask = pkgs.callPackage ./packages/pi-herdr-sudo-task.nix { };
   expectedHerdrSudoTaskPath = "${expectedHerdrSudoTask}/lib/node_modules/pi-herdr-sudo-task";
   expectedAskUserDir = ./config/extensions/ask-user;
@@ -415,6 +420,7 @@ in
   browser-goblin = expectedBrowserGoblin;
   pix-optimizer = expectedPixOptimizer;
   pix-tools = expectedPixTools;
+  pix-sudo = expectedPixSudo;
   pi-blackhole = expectedBlackhole;
   pi-sensitive-guard = expectedSensitiveGuard;
   prompt-template-model = expectedPromptTemplateModel;
@@ -534,7 +540,8 @@ in
           expectedEffortPath
           expectedTimestampsPath
           expectedPiHerdrPath
-          expectedHerdrSudoTaskPath
+          expectedPixSudoPath
+          # herdr-sudo-task is default-off; path only present when explicitly enabled.
           expectedHerdrRenamePath
           expectedPiBgPath
           expectedVimModePath
@@ -546,6 +553,7 @@ in
         ++ [
           expectedBlackholePath
           # guard is default-off; wrapped path only present when explicitly enabled.
+          expectedPromptTemplateModelPath
           expectedTodoHerdrPath
           expectedRulesPath
           expectedWebAccessPath
@@ -593,7 +601,18 @@ in
     assert default.config.programs.pi-coding-agent.plugins.pi-mcp-adapter.enable;
     assert default.config.programs.pi-coding-agent.plugins.pi-mcp-adapter.enableMcpIntegration;
     assert default.config.programs.pi-coding-agent.plugins.pi-blackhole.enable;
-    assert default.config.programs.pi-coding-agent.plugins.pi-sensitive-guard.enable;
+    # guard is default-off (enabled explicitly in sensitiveGuardConfigured).
+    assert !default.config.programs.pi-coding-agent.plugins.pi-sensitive-guard.enable;
+    assert default.config.programs.pi-coding-agent.plugins.pix-sudo.enable;
+    # pi-herdr-sudo-task is default-off — superseded by pix-sudo's sudo_run;
+    # store path only present when explicitly enabled.
+    assert
+      builtins.length (
+        builtins.filter (
+          p: builtins.match ".*pi-herdr-sudo-task.*" p != null
+        ) default.config.programs.pi-coding-agent.settings.packages
+      ) == 0;
+    assert !default.config.programs.pi-coding-agent.plugins.pi-herdr-sudo-task.enable;
     assert !default.config.programs.pi-coding-agent.plugins.pix-optimizer.enable;
     assert builtins.all (
       name: default.config.programs.pi-coding-agent.plugins."pix-${name}".enable
@@ -677,7 +696,13 @@ in
     assert
       sensitiveGuardConfigured.config.programs.pi-coding-agent.plugins.pi-sensitive-guard.settings.readRedaction.scope
       == "protectedOnly";
-    assert sensitiveGuardWrappedPath != "";
+    # guard enabled explicitly here → wrapped path present
+    assert
+      builtins.length (
+        builtins.filter (
+          p: builtins.match ".*pi-sensitive-guard.*" p != null
+        ) sensitiveGuardConfigured.config.programs.pi-coding-agent.settings.packages
+      ) == 1;
     assert webAccessConfigSource == expectedWebAccessConfigFile;
     assert
       webAccessPathConfigured.config.programs.pi-coding-agent.plugins.pi-web-access.credentialFiles.braveApiKey
@@ -964,7 +989,7 @@ in
         expectedEffortPath
         expectedTimestampsPath
         expectedPiHerdrPath
-        expectedHerdrSudoTaskPath
+        expectedPixSudoPath
         expectedHerdrRenamePath
         expectedPiBgPath
         expectedVimModePath
@@ -975,11 +1000,6 @@ in
       ]
       ++ [
         expectedBlackholePath
-        (builtins.head (
-          builtins.filter (
-            p: builtins.match ".*pi-sensitive-guard.*" p != null
-          ) settingsOverridden.config.programs.pi-coding-agent.settings.packages
-        ))
         expectedPromptTemplateModelPath
         expectedTodoHerdrPath
         expectedRulesPath
@@ -1271,7 +1291,7 @@ in
         ];
       }
       ''
-        nixfmt --check ${./flake.nix} ${./checks.nix} ${./modules/pi-coding-agent.nix} ${./modules/remote-pi-relay.nix} ${./modules/pi-coding-agent/agents.nix} ${./modules/pi-coding-agent/default-agents.nix} ${./modules/pi-coding-agent/pi-herdr-subagents.nix} ${./packages/pi-diet-lsp.nix} ${./packages/pi-commandcode-provider.nix} ${./packages/pi-effort.nix} ${./packages/pi-timestamps.nix} ${./packages/pi-herdr.nix} ${./packages/pi-herdr-sudo-task.nix} ${./packages/pi-herdr-rename.nix} ${./packages/pi-bg.nix} ${./packages/remote-pi-relay.nix} ${./packages/pi-vimmode.nix} ${./packages/pi-usage.nix} ${./packages/pi-cache-optimizer.nix} ${./packages/pi-mcp-adapter.nix} ${./packages/browser-goblin.nix} ${./packages/pix-optimizer.nix} ${./packages/pix-tools.nix} ${./packages/pi-blackhole.nix} ${./packages/pi-sensitive-guard.nix} ${./packages/pi-prompt-template-model.nix} ${./packages/pi-todo-herdr.nix} ${./packages/pi-rules.nix} ${./packages/pi-web-access.nix} ${./packages/pi-herdr-subagents.nix} ${./packages/pi-vision-handoff.nix} ${./packages/pi-vision-handoff-config-updater.nix} ${./packages/supi-context.nix} ${./packages/supi-extras.nix} ${./packages/toon.nix}
+        nixfmt --check ${./flake.nix} ${./checks.nix} ${./modules/pi-coding-agent.nix} ${./modules/remote-pi-relay.nix} ${./modules/pi-coding-agent/agents.nix} ${./modules/pi-coding-agent/default-agents.nix} ${./modules/pi-coding-agent/pi-herdr-subagents.nix} ${./packages/pi-diet-lsp.nix} ${./packages/pi-commandcode-provider.nix} ${./packages/pi-effort.nix} ${./packages/pi-timestamps.nix} ${./packages/pi-herdr.nix} ${./packages/pi-herdr-sudo-task.nix} ${./packages/pi-herdr-rename.nix} ${./packages/pi-bg.nix} ${./packages/remote-pi-relay.nix} ${./packages/pi-vimmode.nix} ${./packages/pi-usage.nix} ${./packages/pi-cache-optimizer.nix} ${./packages/pi-mcp-adapter.nix} ${./packages/browser-goblin.nix} ${./packages/pix-optimizer.nix} ${./packages/pix-tools.nix} ${./packages/pix-sudo.nix} ${./packages/pi-blackhole.nix} ${./packages/pi-sensitive-guard.nix} ${./packages/pi-prompt-template-model.nix} ${./packages/pi-todo-herdr.nix} ${./packages/pi-rules.nix} ${./packages/pi-web-access.nix} ${./packages/pi-herdr-subagents.nix} ${./packages/pi-vision-handoff.nix} ${./packages/pi-vision-handoff-config-updater.nix} ${./packages/supi-context.nix} ${./packages/supi-extras.nix} ${./packages/toon.nix}
         WORKFLOW=${./.github/workflows/daily-update.yml} UPDATER=${./scripts/daily-update.sh} REGISTRY=${./pi-plugins.json} CHECKS=${./checks.nix} MISSING_INTEGRITY_FIXTURE=${./tests/fixtures/npm-lock-missing-integrity.json} CONTROL_RESOLVED_FIXTURE=${./tests/fixtures/npm-lock-control-resolved.json} bash ${./tests/daily-updater-self-check.sh}
         RUNNER=${./scripts/local-update.sh} PROMPT=${./scripts/local-update-recovery.md} bash ${./tests/local-updater-self-check.sh}
         touch $out
@@ -1740,6 +1760,36 @@ in
           --list-models > pi.log 2>&1
         ! grep -E 'Extension issues|Failed to load extension|Cannot find module|Error:' pi.log
         test ! -e "$PI_CODING_AGENT_DIR/optimizer.json"
+        touch $out
+      '';
+
+  # Version-skew contract (see .pi/skills/pi-extension-version-skew): the load probe
+  # does not initialize extensions — grep the sources for the contracts first.
+  pix-sudo-load =
+    pkgs.runCommandLocal "pix-sudo-load"
+      {
+        nativeBuildInputs = [
+          expectedPackage
+          pkgs.nodejs
+        ];
+      }
+      ''
+        export HOME="$TMPDIR/home"
+        export PI_CODING_AGENT_DIR="$HOME/.pi/agent"
+        export PI_TELEMETRY=0
+        mkdir -p "$PI_CODING_AGENT_DIR"
+        test -f ${expectedPixSudoPath}/src/index.ts
+        grep -F 'name: "sudo_run"' ${expectedPixSudoPath}/src/index.ts
+        grep -F 'if (!ctx.hasUI)' ${expectedPixSudoPath}/src/index.ts
+        grep -F 'spawnTool("sudo", ["-n", "true"]' ${expectedPixSudoPath}/src/lib.ts
+        grep -F 'spawnTool("sudo", args, { stdio: ["pipe", "pipe", "pipe"] })' ${expectedPixSudoPath}/src/lib.ts
+        # default export must be present (pi's loader requires a factory function;
+        # named-only export = "Extension does not export a valid factory function").
+        grep -F 'export default function' ${expectedPixSudoPath}/src/index.ts
+        pi --offline --no-extensions --no-skills --no-prompt-templates --no-context-files \
+          -e ${expectedPixSudoPath} \
+          --list-models > pi.log 2>&1
+        ! grep -E 'Extension issues|Failed to load extension|Cannot find module|Error:' pi.log
         touch $out
       '';
 

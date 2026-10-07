@@ -143,6 +143,7 @@ let
   pixOptimizer = pinnedPkgs.callPackage ../packages/pix-optimizer.nix { };
   toon = pinnedPkgs.callPackage ../packages/toon.nix { };
   pixTools = pinnedPkgs.callPackage ../packages/pix-tools.nix { };
+  pixSudo = pinnedPkgs.callPackage ../packages/pix-sudo.nix { };
   pixToolsRoot = "${pixTools}/lib/node_modules/pix-tools/node_modules/@xynogen";
   pixToolNames = [
     "pretty"
@@ -207,6 +208,13 @@ let
     {
       name = "pi-herdr-sudo-task";
       package = "${herdrSudoTask}/lib/node_modules/pi-herdr-sudo-task";
+      # ponytail: default off — replaced by pix-sudo (same-tab sudo_run with PAM
+      # ticket cache + approval overlay); drop the package when nothing consumes it.
+      default = false;
+    }
+    {
+      name = "pix-sudo";
+      package = "${pixSudo}/lib/node_modules/@xynogen/pix-sudo";
       default = true;
     }
     {
@@ -259,6 +267,7 @@ let
     }
     {
       name = "pi-sensitive-guard";
+      package = "${sensitiveGuardWrapped}/lib/node_modules/pi-sensitive-guard";
       # wrapped: config.json planted inside the extension root (no env override upstream).
       # ponytail: default off — readRedaction scope=allOutput redacts base64-like
       # tokens (nix store hashes) in every bash/ls output; re-enable when upstream

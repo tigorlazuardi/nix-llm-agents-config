@@ -8,7 +8,7 @@ const GROUP_MARKERS: Record<Group, readonly string[]> = {
   browser: ["browser-goblin"],
   subagents: ["pi-herdr-subagents"],
   research: ["pi-web-access", "pi-mcp-adapter"],
-  herdr: ["pi-herdr"],
+  herdr: ["pi-herdr", "pix-sudo"],
   journal: ["dev-journal"],
   artifact: ["artifact-preview"],
   memory: ["pi-blackhole"],

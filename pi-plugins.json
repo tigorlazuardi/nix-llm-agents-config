@@ -246,6 +246,16 @@
     "npmDepsHash": "sha256-wBreqFOikbVRzp0OAuYgOFKlmvm76rLhAljLEey+m4g=",
     "check": "pix-tools-load"
   },
+  "pix-sudo": {
+    "strategy": "npm",
+    "package": "@xynogen/pix-sudo",
+    "version": "0.3.32",
+    "src": "https://registry.npmjs.org/@xynogen/pix-sudo/-/pix-sudo-0.3.32.tgz",
+    "hash": "sha256-5ljxArSmcQIQKdZ0I8LXAC5vQsXk91yfsFeftlVDEK8=",
+    "lockFile": "packages/pix-sudo-package-lock.json",
+    "npmDepsHash": "sha256-ZtrKPdJmeetMV1SHeNUZxQJceo5B7oOiACIRhGtridc=",
+    "check": "pix-sudo-load"
+  },
   "pi-todo-herdr": {
     "strategy": "npm",
     "package": "pi-todo-herdr",
