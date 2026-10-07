@@ -24,7 +24,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 import { StringEnum } from "@earendil-works/pi-ai";
 import type { ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
-import { DynamicBorder, matchesKey, Text } from "@earendil-works/pi-tui";
+import { matchesKey, Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import {
 	ANSWER_LIMITS,
@@ -214,8 +214,6 @@ class AskWizard {
 	private readonly specs: QuestionSpec[];
 	private readonly theme: Theme;
 	private readonly done: Done<{ answers: AnswerRecord[]; cancelled: boolean }>;
-	private readonly topBorder = new DynamicBorder((text) => this.theme.fg("border", text));
-	private readonly bottomBorder = new DynamicBorder((text) => this.theme.fg("border", text));
 	private readonly answers: AnswerRecord[] = [];
 	private readonly checked = new Set<number>();
 	private questionIndex = 0;
@@ -453,12 +451,13 @@ class AskWizard {
 		const body = rowsAndHint.slice(0, -1);
 		const hint = rowsAndHint[rowsAndHint.length - 1]!;
 		styled.push(...body, this.theme.fg("dim", hint));
-		const framed = [...styled.map((line) => (line.length > width ? `${line.slice(0, Math.max(1, width - 1))}…` : line))];
-		return [
-			...this.topBorder.render(width),
-			...framed.map((line) => ` ${line}`),
-			...this.bottomBorder.render(width),
-		];
+		const framed = styled.map((line) => (line.length > width ? `${line.slice(0, Math.max(1, width - 1))}…` : line));
+		// hand-rolled border: DynamicBorder is missing from the pi-tui bundled in
+		// older nixpkgs snapshots some consumers pin (f45c6f0); it is only a
+		// colored rule, so draw it directly. Color "dim" is proven on every
+		// consumer snapshot (pi-ask-herdr uses it); "border" is newer.
+		const border = this.theme.fg("dim", "─".repeat(Math.max(1, width)));
+		return [border, ...framed.map((line) => ` ${line}`), border];
 	}
 
 	invalidate(): void {
