@@ -943,7 +943,7 @@ in
           dev-journal = lib.mkDefault ../config/extensions/dev-journal;
           env-loader = lib.mkDefault ../config/extensions/env-loader;
           lazy-tools = lib.mkDefault ../config/extensions/lazy-tools;
-          no-until-loop = lib.mkDefault ../config/extensions/no-until-loop;
+          bash-loop-guard = lib.mkDefault ../config/extensions/bash-loop-guard;
         }
         (lib.mkIf idleCompact.enable {
           pi-idle-compact = lib.mkDefault ../config/extensions/pi-idle-compact;
@@ -979,8 +979,8 @@ in
         source = cfg.extensions.lazy-tools;
         force = true;
       };
-      "${cfg.configDir}/extensions/no-until-loop" = {
-        source = cfg.extensions.no-until-loop;
+      "${cfg.configDir}/extensions/bash-loop-guard" = {
+        source = cfg.extensions.bash-loop-guard;
         force = true;
       };
       "${cfg.configDir}/extensions/bash-judge" = lib.mkIf cfg.plugins.bash-judge.enable {

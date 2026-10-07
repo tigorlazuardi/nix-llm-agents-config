@@ -724,13 +724,13 @@ in
     assert
       default.config.home.file."${default.config.programs.pi-coding-agent.configDir}/extensions/env-loader".force;
     assert
-      default.config.programs.pi-coding-agent.extensions.no-until-loop
-      == ./config/extensions/no-until-loop;
+      default.config.programs.pi-coding-agent.extensions.bash-loop-guard
+      == ./config/extensions/bash-loop-guard;
     assert
-      default.config.home.file."${default.config.programs.pi-coding-agent.configDir}/extensions/no-until-loop".source
-      == ./config/extensions/no-until-loop;
+      default.config.home.file."${default.config.programs.pi-coding-agent.configDir}/extensions/bash-loop-guard".source
+      == ./config/extensions/bash-loop-guard;
     assert
-      default.config.home.file."${default.config.programs.pi-coding-agent.configDir}/extensions/no-until-loop".force;
+      default.config.home.file."${default.config.programs.pi-coding-agent.configDir}/extensions/bash-loop-guard".force;
     assert default.config.programs.pi-coding-agent.idleCompact.enable;
     assert default.config.programs.pi-coding-agent.idleCompact.thresholdTokens == 150000;
     assert default.config.programs.pi-coding-agent.idleCompact.delayMs == 5000;
@@ -1164,8 +1164,8 @@ in
         touch $out
       '';
 
-  no-until-loop =
-    pkgs.runCommandLocal "pi-no-until-loop"
+  bash-loop-guard =
+    pkgs.runCommandLocal "pi-bash-loop-guard"
       {
         nativeBuildInputs = [
           expectedPackage
@@ -1173,16 +1173,16 @@ in
         ];
       }
       ''
-        cp -R ${./config/extensions/no-until-loop} no-until-loop
-        chmod -R u+w no-until-loop
-        node --experimental-strip-types no-until-loop/no-until-loop.self-check.ts
+        cp -R ${./config/extensions/bash-loop-guard} bash-loop-guard
+        chmod -R u+w bash-loop-guard
+        node --experimental-strip-types bash-loop-guard/bash-loop-guard.self-check.ts
 
         export HOME="$TMPDIR/home"
         export PI_CODING_AGENT_DIR="$HOME/.pi/agent"
         export PI_TELEMETRY=0
         mkdir -p "$PI_CODING_AGENT_DIR"
         pi --offline --no-extensions --no-skills --no-prompt-templates --no-context-files \
-          -e ${./config/extensions/no-until-loop}/index.ts \
+          -e ${./config/extensions/bash-loop-guard}/index.ts \
           --list-models > pi.log 2>&1
         ! grep -E 'Extension issues|Failed to load extension|Cannot find module|Error:' pi.log
         touch $out
