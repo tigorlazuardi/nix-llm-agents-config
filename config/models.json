@@ -225,6 +225,36 @@
             "supportsDeveloperRole": false,
             "sendSessionAffinityHeaders": true
           }
+        },
+        {
+          "id": "bareksa/guardrail",
+          "reasoning": true,
+          "contextWindow": 200000,
+          "maxTokens": 64000,
+          "api": "openai-completions",
+          "input": [
+            "text",
+            "image"
+          ],
+          "compat": {
+            "supportsDeveloperRole": false,
+            "sendSessionAffinityHeaders": true
+          }
+        },
+        {
+          "id": "personal/guardrail",
+          "reasoning": true,
+          "contextWindow": 200000,
+          "maxTokens": 64000,
+          "api": "openai-completions",
+          "input": [
+            "text",
+            "image"
+          ],
+          "compat": {
+            "supportsDeveloperRole": false,
+            "sendSessionAffinityHeaders": true
+          }
         }
       ]
     }
