@@ -545,13 +545,7 @@ in
         ]
         ++ [
           expectedBlackholePath
-          # wrapped: store path differs from unwrapped expectedSensitiveGuardPath
-          (builtins.head (
-            builtins.filter (
-              p: builtins.match ".*pi-sensitive-guard.*" p != null
-            ) default.config.programs.pi-coding-agent.settings.packages
-          ))
-          expectedPromptTemplateModelPath
+          # guard is default-off; wrapped path only present when explicitly enabled.
           expectedTodoHerdrPath
           expectedRulesPath
           expectedWebAccessPath
@@ -604,14 +598,15 @@ in
     assert builtins.all (
       name: default.config.programs.pi-coding-agent.plugins."pix-${name}".enable
     ) expectedPixToolNames;
-    # pi-sensitive-guard ships wrapped (config planted in extension root); its
+    # pi-sensitive-guard is default-off (allOutput redaction mangles ls/nix-hash
+    # output); wrapped path must be absent from the default package list.
     # store path differs from the unwrapped package, so assert by pattern.
     assert
       builtins.length (
         builtins.filter (
           p: builtins.match ".*pi-sensitive-guard.*" p != null
         ) default.config.programs.pi-coding-agent.settings.packages
-      ) == 1;
+      ) == 0;
     assert
       builtins.length (
         builtins.filter (

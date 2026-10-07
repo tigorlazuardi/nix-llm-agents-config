@@ -260,8 +260,10 @@ let
     {
       name = "pi-sensitive-guard";
       # wrapped: config.json planted inside the extension root (no env override upstream).
-      package = "${sensitiveGuardWrapped}/lib/node_modules/pi-sensitive-guard";
-      default = true;
+      # ponytail: default off — readRedaction scope=allOutput redacts base64-like
+      # tokens (nix store hashes) in every bash/ls output; re-enable when upstream
+      # ships a protectedOnly default that keeps discovery output intact.
+      default = false;
     }
     {
       name = "pi-prompt-template-model";
