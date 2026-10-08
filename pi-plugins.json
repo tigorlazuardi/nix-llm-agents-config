@@ -131,9 +131,9 @@
   "pi-bg": {
     "strategy": "npm",
     "package": "@alexlikevibe/pi-bg",
-    "version": "2.2.0",
-    "src": "https://registry.npmjs.org/@alexlikevibe/pi-bg/-/pi-bg-2.2.0.tgz",
-    "hash": "sha256-9n6DrNtBaDXmBUndraymGtbLDteyb12FZ0b01VIPDEg=",
+    "version": "2.3.0",
+    "src": "https://registry.npmjs.org/@alexlikevibe/pi-bg/-/pi-bg-2.3.0.tgz",
+    "hash": "sha256-ae4oFzp/0PD/+V0mvuYkZHLcicP31sfUppkO1v7VlZk=",
     "check": "pi-bg-load"
   },
   "browser-goblin": {
