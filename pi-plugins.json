@@ -107,9 +107,9 @@
   "pi-herdr": {
     "strategy": "npm",
     "package": "@ogulcancelik/pi-herdr",
-    "version": "0.4.0",
-    "src": "https://registry.npmjs.org/@ogulcancelik/pi-herdr/-/pi-herdr-0.4.0.tgz",
-    "hash": "sha256-B9xw6mLpOwaEvSZPADJI5SbTlBJCfasUxXTURTXVnLQ=",
+    "version": "0.4.1",
+    "src": "https://registry.npmjs.org/@ogulcancelik/pi-herdr/-/pi-herdr-0.4.1.tgz",
+    "hash": "sha256-qQdi6NrEyF3Yr5gBBSZvQT0mNxolw/fM7OUG4ou7oAI=",
     "check": "pi-herdr-load"
   },
   "pi-herdr-rename": {
