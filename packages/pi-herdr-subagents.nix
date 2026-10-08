@@ -1,5 +1,5 @@
 {
-  fetchzip,
+  fetchurl,
   lib,
   nodejs,
   stdenvNoCC,
@@ -11,12 +11,11 @@ stdenvNoCC.mkDerivation {
   pname = "pi-herdr-subagents";
   version = lock.version;
 
-  src = fetchzip {
-    pname = "pi-herdr-subagents";
-    version = lock.version;
-
+  # The registry pins the compressed tarball (lock.src/lock.hash); stdenv
+  # unpacks it before the build phases run.
+  src = fetchurl {
     url = lock.src;
-    hash = "sha256-M0gbuxDSrvEd2VXfUpx06Ow2jBqk6rAVJ46wQGn66iE=";
+    hash = lock.hash;
   };
 
   patches = [

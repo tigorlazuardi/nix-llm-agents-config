@@ -22,7 +22,6 @@ let
 
   default = evaluate { };
 
-
   darwin = home-manager.lib.homeManagerConfiguration {
     pkgs = nixpkgs-unstable.legacyPackages.aarch64-darwin;
     modules = [
@@ -747,10 +746,12 @@ in
       default.config.home.file."${default.config.programs.pi-coding-agent.configDir}/extensions/bash-loop-guard".force;
     # idle-compact disabled upstream: pi-blackhole owns compaction.
     assert !default.config.programs.pi-coding-agent.idleCompact.enable;
+    assert !(default.config.programs.pi-coding-agent.extensions or { } ? pi-idle-compact);
     assert
-      !(default.config.programs.pi-coding-agent.extensions or { } ? pi-idle-compact);
-    assert
-      !(default.config.home.file ? "${default.config.programs.pi-coding-agent.configDir}/extensions/pi-idle-compact");
+      !(
+        default.config.home.file
+          ? "${default.config.programs.pi-coding-agent.configDir}/extensions/pi-idle-compact"
+      );
     assert !(default.config.home.sessionVariables ? PI_IDLE_COMPACT_THRESHOLD_TOKENS);
     assert !(default.config.home.sessionVariables ? PI_IDLE_COMPACT_DELAY_MS);
     assert !default.config.programs.pi-coding-agent.plugins.pi-messaging-relay.enable;
