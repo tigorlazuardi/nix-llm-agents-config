@@ -22,15 +22,6 @@ let
 
   default = evaluate { };
 
-  debug-idle =
-    pkgs.runCommandLocal "debug-idle"
-      {
-        enable = toString default.config.programs.pi-coding-agent.idleCompact.enable;
-        ext = toString (default.config.programs.pi-coding-agent.extensions or { } ? pi-idle-compact);
-      }
-      ''
-        echo "enable=$enable ext=$ext" > $out
-      '';
 
   darwin = home-manager.lib.homeManagerConfiguration {
     pkgs = nixpkgs-unstable.legacyPackages.aarch64-darwin;
@@ -754,17 +745,14 @@ in
       == ./config/extensions/bash-loop-guard;
     assert
       default.config.home.file."${default.config.programs.pi-coding-agent.configDir}/extensions/bash-loop-guard".force;
-    assert default.config.programs.pi-coding-agent.idleCompact.enable;
-    assert default.config.programs.pi-coding-agent.idleCompact.thresholdTokens == 150000;
-    assert default.config.programs.pi-coding-agent.idleCompact.delayMs == 5000;
+    # idle-compact disabled upstream: pi-blackhole owns compaction.
+    assert !default.config.programs.pi-coding-agent.idleCompact.enable;
     assert
-      default.config.programs.pi-coding-agent.extensions.pi-idle-compact
-      == ./config/extensions/pi-idle-compact;
+      !(default.config.programs.pi-coding-agent.extensions or { } ? pi-idle-compact);
     assert
-      default.config.home.file."${default.config.programs.pi-coding-agent.configDir}/extensions/pi-idle-compact".source
-      == ./config/extensions/pi-idle-compact;
-    assert default.config.home.sessionVariables.PI_IDLE_COMPACT_THRESHOLD_TOKENS == "150000";
-    assert default.config.home.sessionVariables.PI_IDLE_COMPACT_DELAY_MS == "5000";
+      !(default.config.home.file ? "${default.config.programs.pi-coding-agent.configDir}/extensions/pi-idle-compact");
+    assert !(default.config.home.sessionVariables ? PI_IDLE_COMPACT_THRESHOLD_TOKENS);
+    assert !(default.config.home.sessionVariables ? PI_IDLE_COMPACT_DELAY_MS);
     assert !default.config.programs.pi-coding-agent.plugins.pi-messaging-relay.enable;
     assert !(default.config.home.sessionVariables ? PI_MESSAGING_RELAY_URL);
     assert !default.config.home.activation ? messagingRelayConfig;

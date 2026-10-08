@@ -926,7 +926,9 @@ in
 
     programs.pi-coding-agent = {
       enable = lib.mkDefault true;
-      idleCompact.enable = lib.mkDefault true;
+      # Disabled 2026-10-07: pi-blackhole owns compaction (turn_end/agent_end
+      # auto-compact + /pi-vcc). Re-enable only if blackhole is removed.
+      idleCompact.enable = lib.mkDefault false;
       package = lib.mkIf cfg.enable (lib.mkDefault pinnedPkgs.pi-coding-agent);
       settings = lib.mkMerge [
         (lib.mapAttrsRecursive (_: lib.mkDefault) defaultSettings)
