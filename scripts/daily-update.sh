@@ -75,13 +75,22 @@ push_inputs_checked() {
 }
 
 update_inputs() {
-  local old_nix old_home
+  local old_nix old_home attempt
   old_nix=$(jq -r '.nodes["nixpkgs-unstable"].locked.rev' flake.lock)
   old_home=$(jq -r '.nodes["home-manager"].locked.rev' flake.lock)
-  if ! nix flake update nixpkgs-unstable home-manager; then
-    error "input update command failed"
-    return 1
-  fi
+  # Transient GitHub API 5xx storms abort `nix flake update` while it resolves
+  # the unpinned home-manager input; a bounded retry outlives them without
+  # masking persistent breakage. Mirrors nix's own short internal retries.
+  for attempt in 1 2 3; do
+    if nix flake update nixpkgs-unstable home-manager; then
+      break
+    fi
+    [ "$attempt" -lt 3 ] || {
+      error "input update command failed"
+      return 1
+    }
+    sleep 30
+  done
   if ! changed flake.lock; then
     say "- inputs: unchanged ($old_nix, $old_home)"
     return 0
