@@ -37,7 +37,7 @@ const paths: Record<string, string> = {
   dev_journal: "/config/extensions/dev-journal/index.ts",
   host_artifact: "/config/extensions/artifact-preview/index.ts",
   recall: "/nix/store/pi-blackhole/index.js",
-  todo: "/nix/store/pi-todo-herdr/index.ts",
+  todo: "/nix/store/@xynogen/pix-todo/src/todo.ts",
 };
 const tools = Object.entries(paths).map(([name, path]) => ({ name, description: "", sourceInfo: { path } }));
 

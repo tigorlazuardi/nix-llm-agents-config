@@ -26,7 +26,8 @@ buildNpmPackage {
         "@xynogen/pix-edit": "${locks."pix-edit".version}",
         "@xynogen/pix-ls": "${locks."pix-ls".version}",
         "@xynogen/pix-find": "${locks."pix-find".version}",
-        "@xynogen/pix-grep": "${locks."pix-grep".version}"
+        "@xynogen/pix-grep": "${locks."pix-grep".version}",
+        "@xynogen/pix-todo": "${locks."pix-todo".version}"
       }
     }
     EOF

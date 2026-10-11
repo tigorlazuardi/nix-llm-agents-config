@@ -144,7 +144,6 @@ let
   toon = pinnedPkgs.callPackage ../packages/toon.nix { };
   pixTools = pinnedPkgs.callPackage ../packages/pix-tools.nix { };
   pixSudo = pinnedPkgs.callPackage ../packages/pix-sudo.nix { };
-  rpivAskUserQuestion = pinnedPkgs.callPackage ../packages/rpiv-ask-user-question.nix { };
   pixToolsRoot = "${pixTools}/lib/node_modules/pix-tools/node_modules/@xynogen";
   pixToolNames = [
     "pretty"
@@ -165,7 +164,7 @@ let
   piBlackhole = pinnedPkgs.callPackage ../packages/pi-blackhole.nix { };
   piSensitiveGuard = pinnedPkgs.callPackage ../packages/pi-sensitive-guard.nix { };
   promptTemplateModel = pinnedPkgs.callPackage ../packages/pi-prompt-template-model.nix { };
-  todoHerdr = pinnedPkgs.callPackage ../packages/pi-todo-herdr.nix { };
+  rpivAskUserQuestion = pinnedPkgs.callPackage ../packages/rpiv-ask-user-question.nix { };
   rules = pinnedPkgs.callPackage ../packages/pi-rules.nix { };
   webAccess = pinnedPkgs.callPackage ../packages/pi-web-access.nix { };
   herdrSubagents = pinnedPkgs.callPackage ../packages/pi-herdr-subagents.nix { };
@@ -286,8 +285,8 @@ let
       default = true;
     }
     {
-      name = "pi-todo-herdr";
-      package = "${todoHerdr}/lib/node_modules/pi-todo-herdr";
+      name = "pix-todo";
+      package = "${pixToolsRoot}/pix-todo";
       default = true;
     }
     {

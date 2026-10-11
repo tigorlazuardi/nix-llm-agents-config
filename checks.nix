@@ -203,7 +203,7 @@ let
       pi-sensitive-guard.enable = false;
       pi-herdr-subagents.enable = false;
       pi-vision-handoff.enable = false;
-      pi-todo-herdr.enable = false;
+      pix-todo.enable = false;
     };
   };
   webAccessConfigured = evaluate {
@@ -355,6 +355,9 @@ let
     "grep"
   ];
   expectedPixToolPaths = map (name: "${expectedPixToolsRoot}/pix-${name}") expectedPixToolNames;
+  # pix-todo ships in the same pix-tools workspace but registers through the
+  # plugin registry (replacing pi-todo-herdr), not the pixToolPackages map.
+  expectedPixTodoPath = "${expectedPixToolsRoot}/pix-todo";
   expectedPixPrettyPath = "${expectedPixToolsRoot}/pix-pretty";
   expectedBlackhole = pkgs.callPackage ./packages/pi-blackhole.nix { };
   expectedBlackholePath = "${expectedBlackhole}/lib/node_modules/pi-blackhole";
@@ -362,8 +365,6 @@ let
   expectedSensitiveGuardPath = "${expectedSensitiveGuard}/lib/node_modules/pi-sensitive-guard";
   expectedPromptTemplateModel = pkgs.callPackage ./packages/pi-prompt-template-model.nix { };
   expectedPromptTemplateModelPath = "${expectedPromptTemplateModel}/lib/node_modules/pi-prompt-template-model";
-  expectedTodoHerdr = pkgs.callPackage ./packages/pi-todo-herdr.nix { };
-  expectedTodoHerdrPath = "${expectedTodoHerdr}/lib/node_modules/pi-todo-herdr";
   expectedRules = pkgs.callPackage ./packages/pi-rules.nix { };
   expectedRulesPath = "${expectedRules}/lib/node_modules/@tigorhutasuhut/pi-rules";
   expectedWebAccess = pkgs.callPackage ./packages/pi-web-access.nix { };
@@ -416,7 +417,6 @@ in
   pi-blackhole = expectedBlackhole;
   pi-sensitive-guard = expectedSensitiveGuard;
   prompt-template-model = expectedPromptTemplateModel;
-  pi-todo-herdr = expectedTodoHerdr;
   rules = expectedRules;
   web-access = expectedWebAccess;
   herdr-subagents = expectedHerdrSubagents;
@@ -547,7 +547,7 @@ in
           expectedBlackholePath
           # guard is default-off; wrapped path only present when explicitly enabled.
           expectedPromptTemplateModelPath
-          expectedTodoHerdrPath
+          expectedPixTodoPath
           expectedRulesPath
           expectedWebAccessPath
           expectedHerdrSubagentsPath
@@ -824,7 +824,8 @@ in
     assert !(builtins.hasAttr "reviewer" default.config.programs.pi-coding-agent.agents);
     assert
       default.config.programs.pi-coding-agent.agents.implementer.model == "omniroute/personal/worker";
-    assert default.config.programs.pi-coding-agent.agents.deep-reviewer.model == "omniroute/personal/frontier";
+    assert
+      default.config.programs.pi-coding-agent.agents.deep-reviewer.model == "omniroute/personal/frontier";
     assert default.config.programs.pi-coding-agent.agents.deep-reviewer.effort == "high";
     assert
       default.config.programs.pi-coding-agent.agents.standards-reviewer.model
@@ -949,7 +950,7 @@ in
     assert
       !(builtins.elem expectedHerdrSubagentsPath pluginsDisabled.config.programs.pi-coding-agent.settings.packages);
     assert
-      !(builtins.elem expectedTodoHerdrPath pluginsDisabled.config.programs.pi-coding-agent.settings.packages);
+      !(builtins.elem "${expectedPixToolsRoot}/pix-todo" pluginsDisabled.config.programs.pi-coding-agent.settings.packages);
     assert
       !(
         pluginsDisabled.config.home.file
@@ -994,7 +995,7 @@ in
       ++ [
         expectedBlackholePath
         expectedPromptTemplateModelPath
-        expectedTodoHerdrPath
+        expectedPixTodoPath
         expectedRulesPath
         expectedWebAccessPath
         expectedHerdrSubagentsPath
@@ -1284,7 +1285,7 @@ in
         ];
       }
       ''
-        nixfmt --check ${./flake.nix} ${./checks.nix} ${./modules/pi-coding-agent.nix} ${./modules/remote-pi-relay.nix} ${./modules/pi-coding-agent/agents.nix} ${./modules/pi-coding-agent/default-agents.nix} ${./modules/pi-coding-agent/pi-herdr-subagents.nix} ${./packages/pi-diet-lsp.nix} ${./packages/pi-commandcode-provider.nix} ${./packages/pi-effort.nix} ${./packages/pi-timestamps.nix} ${./packages/pi-herdr.nix} ${./packages/pi-herdr-sudo-task.nix} ${./packages/pi-herdr-rename.nix} ${./packages/pi-bg.nix} ${./packages/remote-pi-relay.nix} ${./packages/pi-vimmode.nix} ${./packages/pi-usage.nix} ${./packages/pi-cache-optimizer.nix} ${./packages/pi-mcp-adapter.nix} ${./packages/browser-goblin.nix} ${./packages/pix-optimizer.nix} ${./packages/pix-tools.nix} ${./packages/pix-sudo.nix} ${./packages/rpiv-ask-user-question.nix} ${./packages/pi-blackhole.nix} ${./packages/pi-sensitive-guard.nix} ${./packages/pi-prompt-template-model.nix} ${./packages/pi-todo-herdr.nix} ${./packages/pi-rules.nix} ${./packages/pi-web-access.nix} ${./packages/pi-herdr-subagents.nix} ${./packages/pi-vision-handoff.nix} ${./packages/pi-vision-handoff-config-updater.nix} ${./packages/supi-context.nix} ${./packages/supi-extras.nix} ${./packages/toon.nix}
+        nixfmt --check ${./flake.nix} ${./checks.nix} ${./modules/pi-coding-agent.nix} ${./modules/remote-pi-relay.nix} ${./modules/pi-coding-agent/agents.nix} ${./modules/pi-coding-agent/default-agents.nix} ${./modules/pi-coding-agent/pi-herdr-subagents.nix} ${./packages/pi-diet-lsp.nix} ${./packages/pi-commandcode-provider.nix} ${./packages/pi-effort.nix} ${./packages/pi-timestamps.nix} ${./packages/pi-herdr.nix} ${./packages/pi-herdr-sudo-task.nix} ${./packages/pi-herdr-rename.nix} ${./packages/pi-bg.nix} ${./packages/remote-pi-relay.nix} ${./packages/pi-vimmode.nix} ${./packages/pi-usage.nix} ${./packages/pi-cache-optimizer.nix} ${./packages/pi-mcp-adapter.nix} ${./packages/browser-goblin.nix} ${./packages/pix-optimizer.nix} ${./packages/pix-tools.nix} ${./packages/pix-sudo.nix} ${./packages/rpiv-ask-user-question.nix} ${./packages/pi-blackhole.nix} ${./packages/pi-sensitive-guard.nix} ${./packages/pi-prompt-template-model.nix} ${./packages/pi-rules.nix} ${./packages/pi-web-access.nix} ${./packages/pi-herdr-subagents.nix} ${./packages/pi-vision-handoff.nix} ${./packages/pi-vision-handoff-config-updater.nix} ${./packages/supi-context.nix} ${./packages/supi-extras.nix} ${./packages/toon.nix}
         WORKFLOW=${./.github/workflows/daily-update.yml} UPDATER=${./scripts/daily-update.sh} REGISTRY=${./pi-plugins.json} CHECKS=${./checks.nix} MISSING_INTEGRITY_FIXTURE=${./tests/fixtures/npm-lock-missing-integrity.json} CONTROL_RESOLVED_FIXTURE=${./tests/fixtures/npm-lock-control-resolved.json} bash ${./tests/daily-updater-self-check.sh}
         RUNNER=${./scripts/local-update.sh} PROMPT=${./scripts/local-update-recovery.md} bash ${./tests/local-updater-self-check.sh}
         touch $out
@@ -1830,6 +1831,13 @@ in
         grep -F 'import { truncateToWidth } from "@earendil-works/pi-tui";' ${expectedPixToolsRoot}/pix-footer/src/footer.ts
         grep -F 'const line = [' ${expectedPixToolsRoot}/pix-footer/src/footer.ts
         grep -F 'return line ? [truncateToWidth(line, width)] : [];' ${expectedPixToolsRoot}/pix-footer/src/footer.ts
+        # pix-todo: default export factory + tool + collapse wiring (load probe
+        # does not initialize extensions — grep contracts per version-skew skill).
+        test -f ${expectedPixToolsRoot}/pix-todo/src/todo.ts
+        grep -F 'name: "todo"' ${expectedPixToolsRoot}/pix-todo/src/todo.ts
+        grep -F 'export default function' ${expectedPixToolsRoot}/pix-todo/src/todo.ts
+        grep -F 'tickCollapse' ${expectedPixToolsRoot}/pix-todo/src/todo.ts
+        grep -F 'appendEntry("todo-state")' ${expectedPixToolsRoot}/pix-todo/src/todo.ts
         cat > "$PI_CODING_AGENT_DIR/settings.json" <<'EOF'
         {"packages":${builtins.toJSON expectedPixToolPaths}}
         EOF
@@ -1890,20 +1898,24 @@ in
         touch $out
       '';
 
-  pi-todo-herdr-load =
-    pkgs.runCommandLocal "pi-todo-herdr-load" { nativeBuildInputs = [ expectedPackage ]; }
-      ''
-        export HOME="$TMPDIR/home"
-        export XDG_CONFIG_HOME="$TMPDIR/config"
-        export PI_CODING_AGENT_DIR="$HOME/.pi/agent"
-        export PI_TELEMETRY=0
-        mkdir -p "$PI_CODING_AGENT_DIR"
-        pi --offline --no-extensions --no-skills --no-prompt-templates --no-context-files \
-          -e ${expectedTodoHerdrPath} \
-          --list-models > pi.log 2>&1
-        ! grep -E 'Extension issues|Failed to load extension|Cannot find module|Error:' pi.log
-        touch $out
-      '';
+  pix-todo-load = pkgs.runCommandLocal "pix-todo-load" { nativeBuildInputs = [ expectedPackage ]; } ''
+    export HOME="$TMPDIR/home"
+    export XDG_CONFIG_HOME="$TMPDIR/config"
+    export PI_CODING_AGENT_DIR="$HOME/.pi/agent"
+    export PI_TELEMETRY=0
+    mkdir -p "$PI_CODING_AGENT_DIR"
+    # Load probe does not initialize extensions — grep contracts first
+    # (version-skew skill): factory export, tool name, collapse wiring.
+    grep -F 'name: "todo"' ${expectedPixToolsRoot}/pix-todo/src/todo.ts
+    grep -F 'export default function' ${expectedPixToolsRoot}/pix-todo/src/todo.ts
+    grep -F 'tickCollapse' ${expectedPixToolsRoot}/pix-todo/src/todo.ts
+    grep -F 'appendEntry("todo-state"' ${expectedPixToolsRoot}/pix-todo/src/todo.ts
+    pi --offline --no-extensions --no-skills --no-prompt-templates --no-context-files \
+      -e ${expectedPixToolsRoot}/pix-todo \
+      --list-models > pi.log 2>&1
+    ! grep -E 'Extension issues|Failed to load extension|Cannot find module|Error:' pi.log
+    touch $out
+  '';
 
   rules-load = pkgs.runCommandLocal "pi-rules-load" { nativeBuildInputs = [ expectedPackage ]; } ''
     export HOME="$TMPDIR/home"
