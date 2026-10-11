@@ -2,7 +2,7 @@
   deep-reviewer = {
     description = "Deep reviewer; spec axis";
     prompt = ../../config/agents/reviewer.md;
-    model = "zai/glm-5.3";
+    model = "omniroute/personal/frontier";
     effort = "high";
     tools.allow = [
       "read"

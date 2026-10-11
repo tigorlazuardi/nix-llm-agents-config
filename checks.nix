@@ -824,7 +824,7 @@ in
     assert !(builtins.hasAttr "reviewer" default.config.programs.pi-coding-agent.agents);
     assert
       default.config.programs.pi-coding-agent.agents.implementer.model == "omniroute/personal/worker";
-    assert default.config.programs.pi-coding-agent.agents.deep-reviewer.model == "zai/glm-5.3";
+    assert default.config.programs.pi-coding-agent.agents.deep-reviewer.model == "omniroute/personal/frontier";
     assert default.config.programs.pi-coding-agent.agents.deep-reviewer.effort == "high";
     assert
       default.config.programs.pi-coding-agent.agents.standards-reviewer.model
