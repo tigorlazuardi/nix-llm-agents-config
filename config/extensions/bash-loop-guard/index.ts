@@ -15,10 +15,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
  *  3. sleep-polling while-loop (body has `sleep`, no bound exit, and no
  *     assignment updating a variable that appears in the condition);
  *  4. `tail -f/-F` — unbounded stream follower; live streams belong in the
- *     monitor tool, finite reads use plain tail;
- *  5. `cmd | tail …` — tail buffering a command stream. tail is only for
- *     finite file reads; as a later pipeline stage the stream side could be
- *     a live/infinite source and tail also buffers until stage 1 exits.
+ *     monitor tool, finite reads use plain tail.
  *
  * ponytail: guards `bash` and `bash_bg` only; extends when another tool
  * misbehaves. No command denylist yet — add when a concrete command list
@@ -105,15 +102,6 @@ function bodyHasBound(body: unknown[]): boolean {
 			(isLiteralCommand(n, BOUND_NAMES)) ||
 			(n?.type === "Assignment" && BOUND_NAMES.has(n.name as string)) === true,
 	);
-}
-
-/** `cmd | tail …` = tail as a non-first pipeline stage (stream consumer). */
-function isPipeTail(ast: unknown[]): boolean {
-	return walk(ast).some((node) => {
-		if (node?.type !== "Pipeline") return false;
-		const stages = node.commands as unknown[];
-		return stages.slice(1).some((stage) => isLiteralCommand((stage as { command?: unknown }).command, new Set(["tail"])));
-	});
 }
 
 /** Does the body assign any of the variables referenced in the condition? */
@@ -234,11 +222,6 @@ export async function inspectCommand(command: string): Promise<BashLoopFinding> 
 		return { blocked: true, rule: "tail-f", detail: "tail -f/-F" };
 	}
 
-	// 5. `cmd | tail …` (tail as a later pipeline stage).
-	if (isPipeTail([ast.ast.body])) {
-		return { blocked: true, rule: "pipe-tail", detail: "cmd | tail" };
-	}
-
 	// 4. Unparseable input: regex until fallback only (fail-open for others).
 	if ((ast.errors?.length ?? 0) > 0) {
 		const snippet = findUntilLoop(command);
@@ -281,13 +264,6 @@ const blockReason = (finding: BashLoopFinding): string => {
 				"Blocked: `tail -f` (unbounded stream follower). tail is for finite file " +
 				"reads; live log streams run in a monitor pane or a background job's " +
 				"completion notification."
-			);
-		case "pipe-tail":
-			return (
-				"Blocked: `cmd | tail …` — tail buffers its input until the producing " +
-				"stage exits, so a live source hangs and output is truncated. tail is " +
-				"only for finite file reads (`tail -n 50 f.log`); for command streams " +
-				"use grep -m, wc -l, sort -r | head, or capture to a file first."
 			);
 		default:
 			return "Blocked: unbounded bash loop.";

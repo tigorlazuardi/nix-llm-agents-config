@@ -90,29 +90,16 @@ for (const command of [
 	assert.equal(finding.rule, "tail-f", `wrong rule for: ${command}`);
 }
 
-for (const command of ["tail -n 50 f.log", "ls -f", "echo tail", "timeout 60 tail -f a.log"]) {
-	assert.equal((await inspectCommand(command)).blocked, false, `false positive: ${command}`);
-}
-
-// --- `cmd | tail …` (rule 5): tail after stage 1 = stream buffer -------------
 for (const command of [
-	"cat f | tail -5",
-	"echo a; grep x f | tail -n 2",
-	"git log --oneline | tail -20",
-	"(ps aux | tail -1)",
-	"journalctl -u x | tail -50 --no-pager",
-	"echo hi | tail", // tail with no args still a stage-2 consumer
-]) {
-	const finding = await inspectCommand(command);
-	assert.equal(finding.blocked, true, `missed: ${command}`);
-	assert.equal(finding.rule, "pipe-tail", `wrong rule for: ${command}`);
-}
-
-for (const command of [
-	"tail -n 50 f.log", // tail alone = finite read
+	"tail -n 50 f.log",
+	"ls -f",
+	"echo tail",
+	"timeout 60 tail -f a.log",
 	"tail -5 f.log | grep x", // tail first stage, file operand
 	"grep x f | grep y", // pipes without tail pass
 	"echo $(cat f | wc -l)",
+	"cat f | tail -5", // pipe-tail rule removed: finite sources must pass
+	"git log --oneline | tail -20",
 ]) {
 	assert.equal((await inspectCommand(command)).blocked, false, `false positive: ${command}`);
 }
@@ -167,9 +154,7 @@ const tailBlocked = await bashCall("tail -f /var/log/app.log");
 assert.equal(tailBlocked?.block, true);
 assert.match(tailBlocked?.reason ?? "", /monitor|background job/);
 
-const pipeTailBlocked = await bashCall("journalctl -u x | tail -50 --no-pager");
-assert.equal(pipeTailBlocked?.block, true);
-assert.match(pipeTailBlocked?.reason ?? "", /tail buffered|finite file reads/);
+assert.equal((await bashCall("journalctl -u x | tail -50 --no-pager"))?.block, undefined); // pipe-tail rule removed
 
 assert.equal((await bashCall("echo hi"))?.block, undefined);
 assert.equal((await bashCall("timeout 60 bash -c 'while :; do sleep 1; done'"))?.block, undefined);
