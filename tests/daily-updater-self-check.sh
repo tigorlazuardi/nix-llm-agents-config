@@ -82,7 +82,7 @@ tar -czf "$tmp/fixture.tgz" -C "$tmp/fixture" package
 cat >"$tmp/pi-plugins.json" <<'EOF'
 {
   "pi-rules":{"strategy":"npm","package":"@fixture/pi-rules","version":"0.5.4","src":"https://old.invalid/pi-rules-0.5.4.tgz","hash":"sha256-old-source","npmDepsHash":"sha256-old-deps","manifestTransform":{"delete":["devDependencies","peerDependencies"]},"lockFile":"packages/pi-rules-package-lock.json","check":"rules"},
-  "pi-herdr-subagents":{"strategy":"npm","package":"@fixture/pi-rules","version":"0.5.4","src":"https://old.invalid/pi-rules-0.5.4.tgz","hash":"sha256-old-source","check":"herdr"},
+  "pi-herdsman":{"strategy":"npm","package":"@fixture/pi-rules","version":"0.5.4","src":"https://old.invalid/pi-rules-0.5.4.tgz","hash":"sha256-old-source","check":"herdr"},
   "remote-pi":{"strategy":"npm","package":"@fixture/pi-rules","version":"0.5.4","src":"https://old.invalid/pi-rules-0.5.4.tgz","hash":"sha256-old-source","npmDepsHash":"sha256-old-deps","lockFile":"packages/remote-pi-package-lock.json","check":"rules"},
   "rpiv-todo":{"strategy":"npm","package":"@fixture/pi-rules","version":"0.5.4","src":"https://old.invalid/pi-rules-0.5.4.tgz","hash":"sha256-old-source","npmDepsHash":"sha256-old-deps","manifestTransform":{"delete":["peerDependencies","peerDependenciesMeta"]},"lockFile":"packages/rpiv-todo-package-lock.json","check":"rules"},
   "pi-vcc":{"strategy":"github","owner":"fixture","repo":"pi-vcc","tagPrefix":"v","version":"0.4.0","rev":"old-vcc-rev","hash":"sha256-old-vcc","removePaths":["demo.gif"],"check":"pi-vcc"},
@@ -362,11 +362,11 @@ if (
 fi
 grep -F 'update pi-rules to 0.5.5' "$tmp/git-post-commit/commits/"*/history
 ! grep -F 'update pi-rules to 0.5.5' "$tmp/git-post-commit/push-history"
-grep -F 'update pi-herdr-subagents to 0.5.5' "$tmp/git-post-commit/push-history"
-jq -e '."pi-rules".version == "0.5.4" and ."pi-herdr-subagents".version == "0.5.5"' "$tmp/git-post-commit/pushed-pi-plugins.json" >/dev/null
+grep -F 'update pi-herdsman to 0.5.5' "$tmp/git-post-commit/push-history"
+jq -e '."pi-rules".version == "0.5.4" and ."pi-herdsman".version == "0.5.5"' "$tmp/git-post-commit/pushed-pi-plugins.json" >/dev/null
 head=$(cat "$tmp/git-post-commit/HEAD")
 [ ! -e "$tmp/git-post-commit/commits/$head/packages/pi-rules-package-lock.json" ]
-[ ! -e "$tmp/git-post-commit/commits/$head/packages/pi-herdr-subagents-package-lock.json" ]
+[ ! -e "$tmp/git-post-commit/commits/$head/packages/pi-herdsman-package-lock.json" ]
 
 cp "$tmp/baseline/pi-plugins.json" "$tmp/pi-plugins.json"
 rm -f "$tmp/packages/"*-package-lock.json

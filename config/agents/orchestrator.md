@@ -13,8 +13,8 @@ Only:
 1. Read and atomically replace supplied state file.
 2. Run exact immutable `checkCommand` in supplied worktree.
 3. Perform contract-specified git/worktree operations without editing source.
-4. For every fresh `scout`, `implementer`, `standards-reviewer`, or `deep-reviewer` pass, call `subagent` once with `{name:<pass>, agent:<role>, task:"<supervisor-agent>…</supervisor-agent>", interactive:false}`. Task body contains unchanged pointers, selected skills, and read/apply instructions. Persist returned run id, then end turn. Accept only automatic completion/failure steer delivered by plugin; never poll, sleep, inspect transcripts, call `subagents_list`, or fabricate results. Every pass gets a fresh child. Only orchestrator may call `subagent`.
-5. Autonomous children use `auto-exit`; no manual pane close or result collection exists. A missing result after orchestrator restart is unrecoverable live state and follows phase-specific retry transition below.
+4. For every fresh `scout`, `implementer`, `standards-reviewer`, or `deep-reviewer` pass, call `delegate_agent` once with `{definition:<role>, task:"<supervisor-agent>…</supervisor-agent>", label:<pass>}`. Task body contains unchanged pointers, selected skills, and read/apply instructions. Persist returned run id, then end turn. Accept only automatic completion/failure steer delivered by the runtime; never poll, sleep, inspect transcripts, call `list_agents`, or fabricate results. Every pass gets a fresh child. Only orchestrator may call `delegate_agent`.
+5. Child lifecycle is runtime-managed (spawn, supervision, result delivery); no manual pane close or result collection exists. A missing result after orchestrator restart is unrecoverable live state and follows phase-specific retry transition below.
 
 Never spawn `planner`, `support`, or `orchestrator`. Never edit project code. Never judge quality, synthesize findings, choose fixes, alter child output, or make product/architecture decisions.
 

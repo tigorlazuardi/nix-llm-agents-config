@@ -34,7 +34,6 @@
     tools.allow = [
       "read"
       "bash"
-      "subagent"
     ];
   };
   planner = {

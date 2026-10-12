@@ -5,7 +5,7 @@ type Group = "browser" | "subagents" | "research" | "herdr" | "sudo" | "journal"
 const core = ["read", "bash", "bash_bg", "agent_bg", "jobs", "monitor", "ask_user_question", "rename_herdr_tab", "todo", "agent_send", "list_peers"];
 const grouped: Record<Group, string[]> = {
   browser: ["browser_open"],
-  subagents: ["subagent", "subagent_interrupt", "subagents_list", "subagent_resume"],
+  subagents: ["delegate_agent", "continue_agent", "steer_agent", "interrupt_agent", "reply_agent", "close_agent"],
   research: ["web_search", "mcp", "mcpScript"],
   herdr: ["herdr_layout"],
   sudo: ["sudo_run"],
@@ -20,10 +20,12 @@ const paths: Record<string, string> = {
   ask_user_question: "/nix/store/@juicesharp/rpiv-ask-user-question/src/index.ts",
   rename_herdr_tab: "/nix/store/pi-herdr-rename/index.ts",
   browser_open: "/nix/store/browser-goblin/index.ts",
-  subagent: "/nix/store/pi-herdr-subagents/pi-extension/subagents/index.ts",
-  subagent_interrupt: "/nix/store/pi-herdr-subagents/pi-extension/subagents/index.ts",
-  subagents_list: "/nix/store/pi-herdr-subagents/pi-extension/subagents/index.ts",
-  subagent_resume: "/nix/store/pi-herdr-subagents/pi-extension/subagents/index.ts",
+  delegate_agent: "/nix/store/pi-herdsman/dist/index.js",
+  continue_agent: "/nix/store/pi-herdsman/dist/index.js",
+  steer_agent: "/nix/store/pi-herdsman/dist/index.js",
+  interrupt_agent: "/nix/store/pi-herdsman/dist/index.js",
+  reply_agent: "/nix/store/pi-herdsman/dist/index.js",
+  close_agent: "/nix/store/pi-herdsman/dist/index.js",
   web_search: "/nix/store/pi-web-access/index.ts",
   mcp: "/nix/store/pi-mcp-adapter/index.ts",
   mcpScript: "/nix/store/pi-mcp-adapter/index.ts",
@@ -125,3 +127,19 @@ await child.loader.execute("x", { group: "browser" });
 assert.deepEqual(child.active, ["read", "bash", "subagent", "caller_ping", "subagent_done"]);
 assert(!child.toolCall({ toolName: "browser_open" })?.block);
 delete process.env.PI_SUBAGENT_ALLOWED_TOOLS;
+
+// --- pi-herdsman managed children: no gating at all; herdsman owns the tool
+// policy via --tools at spawn, and coordination tools stay active.
+process.env.PI_HERDSMAN_AGENT_DEFINITION = "orchestrator";
+const herdsmanChild = harness([
+  "read",
+  "bash",
+  "agent_bg",
+  "delegate_agent",
+  "list_agents",
+  "ask_owner",
+]);
+herdsmanChild.sessionStart({ reason: "startup" });
+assert(herdsmanChild.active.includes("delegate_agent"));
+assert(!herdsmanChild.toolCall({ toolName: "browser_open" })?.block);
+delete process.env.PI_HERDSMAN_AGENT_DEFINITION;

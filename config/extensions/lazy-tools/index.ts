@@ -6,7 +6,7 @@ const GROUP_NAMES = ["browser", "subagents", "research", "herdr", "sudo", "journ
 type Group = typeof GROUP_NAMES[number];
 const GROUP_MARKERS: Record<Group, readonly string[]> = {
   browser: ["browser-goblin"],
-  subagents: ["pi-herdr-subagents"],
+  subagents: ["pi-herdsman"],
   research: ["pi-web-access", "pi-mcp-adapter"],
   herdr: ["pi-herdr"],
   sudo: ["pix-sudo"],
@@ -24,6 +24,9 @@ export default function (pi: ExtensionAPI) {
   const childAllowedTools = process.env.PI_SUBAGENT_ALLOWED_TOOLS
     ? new Set(process.env.PI_SUBAGENT_ALLOWED_TOOLS.split(",").map((name) => name.trim()).filter(Boolean))
     : null;
+  // pi-herdsman managed children enforce their own tool policy via --tools at
+  // spawn; lazy gating must not hide their coordination tools.
+  const herdsmanChild = process.env.PI_HERDSMAN_AGENT_DEFINITION != null;
   const groupTools = (group: Group) => pi.getAllTools()
     .filter((tool) =>
       !ALWAYS_ACTIVE.has(tool.name)
@@ -73,7 +76,7 @@ export default function (pi: ExtensionAPI) {
   // answers calls to inactive tools with an opaque "Tool not found" before any tool_call
   // hook runs, so deferred tools must stay active to receive this rejection.
   pi.on("tool_call", (event) => {
-    if (childAllowedTools) return;
+    if (childAllowedTools || herdsmanChild) return;
     const group = groupOfTool(event.toolName);
     if (!group || unlocked.has(group)) return;
     return {
@@ -89,6 +92,7 @@ export default function (pi: ExtensionAPI) {
         !HIDDEN_TOOLS.has(name) && childAllowedTools.has(name)));
       return;
     }
+    if (herdsmanChild) return;
     if (event.reason === "resume" || event.reason === "fork" || event.reason === "reload") {
       // Keep transcript-restored tools active so the model can call them and get the
       // "load first" rejection above instead of "Tool not found" + bash fallback.

@@ -320,20 +320,20 @@
     "hash": "sha256-ZKKKEBvLSij2vHJ9zJa4CwUkQYjYUMXh3hiPhl7sKlI=",
     "check": "pi-timestamps-load"
   },
-  "pi-herdr-subagents": {
+  "pi-herdsman": {
     "strategy": "npm",
-    "package": "pi-herdr-subagents",
-    "version": "0.2.1",
-    "src": "https://registry.npmjs.org/pi-herdr-subagents/-/pi-herdr-subagents-0.2.1.tgz",
-    "hash": "sha256-wqwgUgKD2C0ckCKjmwRFMnsO3V++tiTr1l46sknMZ28=",
+    "package": "pi-herdsman",
+    "version": "0.26.0",
+    "src": "https://registry.npmjs.org/pi-herdsman/-/pi-herdsman-0.26.0.tgz",
+    "hash": "sha256-CtLwreV7jGTqj0auZr4LOdR01HeXVD3AQ36jVXAbTWI=",
     "manifestTransform": {
       "delete": [
         "devDependencies",
-        "peerDependencies"
+        "peerDependencies",
+        "peerDependenciesMeta"
       ]
     },
-    "lockFile": "packages/pi-herdr-subagents-package-lock.json",
-    "check": "herdr-subagents-load"
+    "check": "herdsman-load"
   },
   "pi-vision-handoff": {
     "strategy": "npm",
