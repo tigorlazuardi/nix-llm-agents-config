@@ -4,7 +4,7 @@ argument-hint: "<accepted scope/spec/ticket/fix ref>"
 ---
 Supervise execution: $@
 
-Main stays project-source read-only. All work routes through `implementer` (`omniroute/personal/worker`), `standards-reviewer` (standards axis, `standard` route, `omniroute/personal/worker`), and `deep-reviewer` (spec axis, `frontier` route, `omniroute/personal/frontier`). Exactly one child writes at a time. Every child starts fresh with immutable scope, standards, selected skills, checks, findings, and evidence pointers needed for its pass.
+Main stays project-source read-only. All work routes through the `implementer`, `standards-reviewer` (standards axis), and `deep-reviewer` (spec axis) agents. Exactly one child writes at a time. Every child starts fresh with immutable scope, standards, selected skills, checks, findings, and evidence pointers needed for its pass.
 
 1. Resolve one accepted spec, ticket, or diagnosed fix plus exact `checkCommand`; read project instructions and current diff. Stop for user decision until scope, preserved changes, risk route, skills, and check are fixed.
 2. Resolve repo-root `CODING_STANDARDS.md`. If missing, stop and request permission to invoke `coding-standards`. Reviews use `code-review` semantics.
