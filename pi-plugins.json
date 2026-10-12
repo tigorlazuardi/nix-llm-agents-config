@@ -312,14 +312,6 @@
     "lockFile": "packages/pi-usage-package-lock.json",
     "check": "pi-usage-load"
   },
-  "pi-cache-optimizer": {
-    "strategy": "npm",
-    "package": "pi-cache-optimizer",
-    "version": "2.8.24",
-    "src": "https://registry.npmjs.org/pi-cache-optimizer/-/pi-cache-optimizer-2.8.24.tgz",
-    "hash": "sha256-xTNL01NrgFjqOepowx4OCVwcH3oEd15w7+o9OfI6S48=",
-    "check": "pi-cache-optimizer-load"
-  },
   "pi-timestamps": {
     "strategy": "npm",
     "package": "pi-timestamps",

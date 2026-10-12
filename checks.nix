@@ -326,8 +326,6 @@ let
   expectedVimModePath = "${expectedVimMode}/lib/node_modules/pi-vimmode";
   expectedUsage = pkgs.callPackage ./packages/pi-usage.nix { };
   expectedUsagePath = "${expectedUsage}/lib/node_modules/@narumitw/pi-usage";
-  expectedCacheOptimizer = pkgs.callPackage ./packages/pi-cache-optimizer.nix { };
-  expectedCacheOptimizerPath = "${expectedCacheOptimizer}/lib/node_modules/pi-cache-optimizer";
   expectedMcpAdapter = pkgs.callPackage ./packages/pi-mcp-adapter.nix { };
   expectedMcpAdapterPath = "${expectedMcpAdapter}/lib/node_modules/pi-mcp-adapter";
   expectedBrowserExecutable =
@@ -407,7 +405,6 @@ in
   remote-pi-relay = expectedRemotePiRelay;
   pi-vimmode = expectedVimMode;
   pi-usage = expectedUsage;
-  pi-cache-optimizer = expectedCacheOptimizer;
   mcp-adapter = expectedMcpAdapter;
   browser-goblin = expectedBrowserGoblin;
   pix-optimizer = expectedPixOptimizer;
@@ -539,7 +536,6 @@ in
           expectedPiBgPath
           expectedVimModePath
           expectedUsagePath
-          expectedCacheOptimizerPath
           expectedMcpAdapterPath
           expectedBrowserGoblinPath
         ]
@@ -988,7 +984,6 @@ in
         expectedPiBgPath
         expectedVimModePath
         expectedUsagePath
-        expectedCacheOptimizerPath
         expectedMcpAdapterPath
         expectedBrowserGoblinPath
       ]
@@ -1285,7 +1280,7 @@ in
         ];
       }
       ''
-        nixfmt --check ${./flake.nix} ${./checks.nix} ${./modules/pi-coding-agent.nix} ${./modules/remote-pi-relay.nix} ${./modules/pi-coding-agent/agents.nix} ${./modules/pi-coding-agent/default-agents.nix} ${./modules/pi-coding-agent/pi-herdr-subagents.nix} ${./packages/pi-diet-lsp.nix} ${./packages/pi-commandcode-provider.nix} ${./packages/pi-effort.nix} ${./packages/pi-timestamps.nix} ${./packages/pi-herdr.nix} ${./packages/pi-herdr-sudo-task.nix} ${./packages/pi-herdr-rename.nix} ${./packages/pi-bg.nix} ${./packages/remote-pi-relay.nix} ${./packages/pi-vimmode.nix} ${./packages/pi-usage.nix} ${./packages/pi-cache-optimizer.nix} ${./packages/pi-mcp-adapter.nix} ${./packages/browser-goblin.nix} ${./packages/pix-optimizer.nix} ${./packages/pix-tools.nix} ${./packages/pix-sudo.nix} ${./packages/rpiv-ask-user-question.nix} ${./packages/pi-blackhole.nix} ${./packages/pi-sensitive-guard.nix} ${./packages/pi-prompt-template-model.nix} ${./packages/pi-rules.nix} ${./packages/pi-web-access.nix} ${./packages/pi-herdr-subagents.nix} ${./packages/pi-vision-handoff.nix} ${./packages/pi-vision-handoff-config-updater.nix} ${./packages/supi-context.nix} ${./packages/supi-extras.nix} ${./packages/toon.nix}
+        nixfmt --check ${./flake.nix} ${./checks.nix} ${./modules/pi-coding-agent.nix} ${./modules/remote-pi-relay.nix} ${./modules/pi-coding-agent/agents.nix} ${./modules/pi-coding-agent/default-agents.nix} ${./modules/pi-coding-agent/pi-herdr-subagents.nix} ${./packages/pi-diet-lsp.nix} ${./packages/pi-commandcode-provider.nix} ${./packages/pi-effort.nix} ${./packages/pi-timestamps.nix} ${./packages/pi-herdr.nix} ${./packages/pi-herdr-sudo-task.nix} ${./packages/pi-herdr-rename.nix} ${./packages/pi-bg.nix} ${./packages/remote-pi-relay.nix} ${./packages/pi-vimmode.nix} ${./packages/pi-usage.nix} ${./packages/pi-mcp-adapter.nix} ${./packages/browser-goblin.nix} ${./packages/pix-optimizer.nix} ${./packages/pix-tools.nix} ${./packages/pix-sudo.nix} ${./packages/rpiv-ask-user-question.nix} ${./packages/pi-blackhole.nix} ${./packages/pi-sensitive-guard.nix} ${./packages/pi-prompt-template-model.nix} ${./packages/pi-rules.nix} ${./packages/pi-web-access.nix} ${./packages/pi-herdr-subagents.nix} ${./packages/pi-vision-handoff.nix} ${./packages/pi-vision-handoff-config-updater.nix} ${./packages/supi-context.nix} ${./packages/supi-extras.nix} ${./packages/toon.nix}
         WORKFLOW=${./.github/workflows/daily-update.yml} UPDATER=${./scripts/daily-update.sh} REGISTRY=${./pi-plugins.json} CHECKS=${./checks.nix} MISSING_INTEGRITY_FIXTURE=${./tests/fixtures/npm-lock-missing-integrity.json} CONTROL_RESOLVED_FIXTURE=${./tests/fixtures/npm-lock-control-resolved.json} bash ${./tests/daily-updater-self-check.sh}
         RUNNER=${./scripts/local-update.sh} PROMPT=${./scripts/local-update-recovery.md} bash ${./tests/local-updater-self-check.sh}
         touch $out
@@ -1423,28 +1418,6 @@ in
         grep -aF 'registerCommand(`vimmode`' ${expectedVimModePath}/index.js
         pi --offline --no-extensions --no-skills --no-prompt-templates --no-context-files \
           -e ${expectedVimModePath} \
-          --list-models > pi.log 2>&1
-        ! grep -E 'Extension issues|Failed to load extension|Cannot find module|Error:' pi.log
-        touch $out
-      '';
-
-  pi-cache-optimizer-load =
-    pkgs.runCommandLocal "pi-cache-optimizer-load" { nativeBuildInputs = [ expectedPackage ]; }
-      ''
-        export HOME="$TMPDIR/home"
-        export PI_CODING_AGENT_DIR="$HOME/.pi/agent"
-        export PI_TELEMETRY=0
-        mkdir -p "$PI_CODING_AGENT_DIR"
-        optimizer=${expectedCacheOptimizerPath}
-        test -f "$optimizer/package.json"
-        test -f "$optimizer/index.ts"
-        test ! -e "$optimizer/node_modules"
-        grep -F '"name": "pi-cache-optimizer"' "$optimizer/package.json"
-        grep -F '"version": "${pluginLocks."pi-cache-optimizer".version}"' "$optimizer/package.json"
-        grep -F 'pi.registerCommand("cache-optimizer"' "$optimizer/index.ts"
-        ! grep -F 'registerTool' "$optimizer/index.ts"
-        pi --offline --no-extensions --no-skills --no-prompt-templates --no-context-files \
-          -e "$optimizer" \
           --list-models > pi.log 2>&1
         ! grep -E 'Extension issues|Failed to load extension|Cannot find module|Error:' pi.log
         touch $out

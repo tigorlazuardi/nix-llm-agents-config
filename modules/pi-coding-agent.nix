@@ -135,7 +135,6 @@ let
       { };
   vimMode = pinnedPkgs.callPackage ../packages/pi-vimmode.nix { };
   usage = pinnedPkgs.callPackage ../packages/pi-usage.nix { };
-  cacheOptimizer = pinnedPkgs.callPackage ../packages/pi-cache-optimizer.nix { };
   mcpAdapter = pinnedPkgs.callPackage ../packages/pi-mcp-adapter.nix { };
   browserGoblin = pinnedPkgs.callPackage ../packages/browser-goblin.nix {
     browserExecutable = cfg.plugins.browser-goblin.executablePath;
@@ -240,11 +239,6 @@ let
     {
       name = "pi-usage";
       package = "${usage}/lib/node_modules/@narumitw/pi-usage";
-      default = true;
-    }
-    {
-      name = "pi-cache-optimizer";
-      package = "${cacheOptimizer}/lib/node_modules/pi-cache-optimizer";
       default = true;
     }
     {
