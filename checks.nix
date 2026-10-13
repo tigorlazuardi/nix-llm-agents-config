@@ -1990,55 +1990,90 @@ in
         ];
       }
       ''
-        export HOME="$TMPDIR/home"
-        export PI_CODING_AGENT_DIR="$HOME/.pi/agent"
-        export PI_TELEMETRY=0
-        export HERDR_ENV=1
-        mkdir -p "$PI_CODING_AGENT_DIR"
-        package=${expectedHerdsmanPath}
-        entry="$package/dist/index.js"
-        test -f "$entry"
-        test -f "$package/README.md"
-        test -f "$package/SKILL.md"
-        test -d "$package/dist/agent-definitions"
-        # Pi 1.1+ aliases typebox and the @earendil-works peers to its host
-        # copies; the package ships no vendored modules.
-        test ! -e "$package/node_modules"
-        grep -F 'name: "delegate_agent"' "$entry"
-        grep -F 'name: "continue_agent"' "$entry"
-        grep -F 'name: "steer_agent"' "$entry"
-        grep -F 'name: "interrupt_agent"' "$entry"
-        grep -F 'name: "reply_agent"' "$entry"
-        grep -F 'name: "close_agent"' "$entry"
-        grep -F 'name: "list_agents"' "$entry"
-        # The definition validator rejects unknown frontmatter fields (whole
-        # roster fails), so pin the contract our renderer targets.
-        grep -F '"systemPromptMode"' "$entry"
-        grep -F 'must be append or replace' "$entry"
-        grep -F 'is not a supported agent-definition field' "$entry"
-        grep -F '"./dist/index.js"' "$package/package.json"
-        cp -R "$package" "$TMPDIR/package"
-        chmod -R u+w "$TMPDIR/package"
-        mkdir -p "$TMPDIR/package/node_modules/@earendil-works"
-        ln -s ${expectedPackage}/lib/node_modules/pi-monorepo \
-          "$TMPDIR/package/node_modules/@earendil-works/pi-coding-agent"
-        ln -s ${expectedPackage}/lib/node_modules/pi-monorepo/node_modules/@earendil-works/pi-ai \
-          "$TMPDIR/package/node_modules/@earendil-works/pi-ai"
-        ln -s ${expectedPackage}/lib/node_modules/pi-monorepo/node_modules/@earendil-works/pi-tui \
-          "$TMPDIR/package/node_modules/@earendil-works/pi-tui"
-        ln -s ${expectedPackage}/lib/node_modules/pi-monorepo/node_modules/typebox \
-          "$TMPDIR/package/node_modules/typebox"
-        # ESM named-import smoke: catches missing peer exports (e.g. symbols
-        # only present in newer pi-ai/pi-tui) that pi's CJS-interop loader
-        # silently turns into undefined.
-        ENTRY="$TMPDIR/package/dist/index.js" node --input-type=module -e 'await import("file://" + process.env.ENTRY)'
-        node --experimental-strip-types ${./tests/pi-herdsman-definitions-self-check.mjs} \
-          ${managedImplementerFixture} ${managedOrchestratorFixture}
-        pi --offline --no-extensions --no-skills --no-prompt-templates --no-context-files \
-          -e "$package" \
-          --list-models > pi.log 2>&1
-        ! grep -E 'Extension issues|Failed to load extension|Cannot find module|Error:' pi.log
-        touch $out
+                export HOME="$TMPDIR/home"
+                export PI_CODING_AGENT_DIR="$HOME/.pi/agent"
+                export PI_TELEMETRY=0
+                export HERDR_ENV=1
+                mkdir -p "$PI_CODING_AGENT_DIR"
+                package=${expectedHerdsmanPath}
+                entry="$package/dist/index.js"
+                test -f "$entry"
+                test -f "$package/README.md"
+                test -f "$package/SKILL.md"
+                test -d "$package/dist/agent-definitions"
+                # Pi 1.1+ aliases typebox and the @earendil-works peers to its host
+                # copies; the package ships no vendored modules.
+                test ! -e "$package/node_modules"
+                grep -F 'name: "delegate_agent"' "$entry"
+                grep -F 'name: "continue_agent"' "$entry"
+                grep -F 'name: "steer_agent"' "$entry"
+                grep -F 'name: "interrupt_agent"' "$entry"
+                grep -F 'name: "reply_agent"' "$entry"
+                grep -F 'name: "close_agent"' "$entry"
+                grep -F 'name: "list_agents"' "$entry"
+                # The definition validator rejects unknown frontmatter fields (whole
+                # roster fails), so pin the contract our renderer targets.
+                grep -F '"systemPromptMode"' "$entry"
+                grep -F 'must be append or replace' "$entry"
+                grep -F 'is not a supported agent-definition field' "$entry"
+                grep -F '"./dist/index.js"' "$package/package.json"
+                cp -R "$package" "$TMPDIR/package"
+                chmod -R u+w "$TMPDIR/package"
+                mkdir -p "$TMPDIR/package/node_modules/@earendil-works"
+                ln -s ${expectedPackage}/lib/node_modules/pi-monorepo \
+                  "$TMPDIR/package/node_modules/@earendil-works/pi-coding-agent"
+                ln -s ${expectedPackage}/lib/node_modules/pi-monorepo/node_modules/@earendil-works/pi-ai \
+                  "$TMPDIR/package/node_modules/@earendil-works/pi-ai"
+                ln -s ${expectedPackage}/lib/node_modules/pi-monorepo/node_modules/@earendil-works/pi-tui \
+                  "$TMPDIR/package/node_modules/@earendil-works/pi-tui"
+                ln -s ${expectedPackage}/lib/node_modules/pi-monorepo/node_modules/typebox \
+                  "$TMPDIR/package/node_modules/typebox"
+                # ESM named-import smoke: catches missing peer exports (e.g. symbols
+                # only present in newer pi-ai/pi-tui) that pi's CJS-interop loader
+                # silently turns into undefined.
+                ENTRY="$TMPDIR/package/dist/index.js" node --input-type=module -e 'await import("file://" + process.env.ENTRY)'
+                node --experimental-strip-types ${./tests/pi-herdsman-definitions-self-check.mjs} \
+                  ${managedImplementerFixture} ${managedOrchestratorFixture}
+                # Discovery walk regression: the renderer writes agent files as
+                # symlinks and herdsman 0.26.0 skipped them (Dirent.isFile() is
+                # false for symlinks), silently degrading every roster to the
+                # bundled definitions. Reproduce the home-manager layout (store
+                # fixtures reached through symlinks) and drive the patched dist's
+                # exported discovery walk directly.
+                mkdir -p "$PI_CODING_AGENT_DIR/agents"
+                ln -s ${managedOrchestratorFixture} "$PI_CODING_AGENT_DIR/agents/orchestrator.md"
+                for n in standards-reviewer deep-reviewer support planner; do
+                  cat > "$TMPDIR/fleet-$n.md" <<EOF
+        ---
+        name: "$n"
+        description: "Fleet agent $n"
+        tools: ["read"]
+        systemPromptMode: "replace"
+        agents: []
+        ---
+        Fleet body for $n.
+        EOF
+                  ln -s "$TMPDIR/fleet-$n.md" "$PI_CODING_AGENT_DIR/agents/$n.md"
+                done
+                ENTRY="$TMPDIR/package/dist/index.js" node --input-type=module -e '
+                  const { discoverEffectiveDefinitions } = await import("file://" + process.env.ENTRY);
+                  const defs = discoverEffectiveDefinitions();
+                  const names = defs.map((d) => d.name);
+                  const required = ["orchestrator", "implementer", "scout", "standards-reviewer", "deep-reviewer", "support", "planner"];
+                  const missing = required.filter((n) => !names.includes(n));
+                  if (missing.length > 0) throw new Error("roster missing fleet agents: " + missing.join(", ") + " (got: " + names.join(", ") + ")");
+                  const orch = defs.find((d) => d.name === "orchestrator");
+                  const wantAgents = JSON.stringify(["scout", "implementer", "standards-reviewer", "deep-reviewer"]);
+                  if (JSON.stringify(orch.frontmatter.agents) !== wantAgents) {
+                    throw new Error("orchestrator agents override lost: " + JSON.stringify(orch.frontmatter.agents));
+                  }
+                  console.log("roster: " + names.join(", "));
+                '
+                pi --offline --no-extensions --no-skills --no-prompt-templates --no-context-files \
+                  -e "$package" \
+                  --list-models > pi.log 2>&1
+                ! grep -E 'Extension issues|Failed to load extension|Cannot find module|Error:' pi.log
+                touch $out
       '';
 
   supi-context-load =
