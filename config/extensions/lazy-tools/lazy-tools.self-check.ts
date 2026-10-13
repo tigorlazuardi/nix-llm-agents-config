@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import lazyTools from "./index.ts";
 
-type Group = "browser" | "subagents" | "research" | "herdr" | "sudo" | "journal" | "artifact" | "memory";
-const core = ["read", "bash", "bash_bg", "agent_bg", "jobs", "monitor", "ask_user_question", "rename_herdr_tab", "todo", "agent_send", "list_peers"];
+type Group = "browser" | "subagents" | "research" | "herdr" | "sudo" | "journal" | "artifact";
+const core = ["read", "bash", "bash_bg", "agent_bg", "jobs", "monitor", "ask_user_question", "rename_herdr_tab", "todo", "recall"];
 const grouped: Record<Group, string[]> = {
   browser: ["browser_open"],
   subagents: ["delegate_agent", "continue_agent", "steer_agent", "interrupt_agent", "reply_agent", "close_agent"],
@@ -11,7 +11,6 @@ const grouped: Record<Group, string[]> = {
   sudo: ["sudo_run"],
   journal: ["dev_journal"],
   artifact: ["host_artifact"],
-  memory: ["recall"],
 };
 const paths: Record<string, string> = {
   read: "<builtin:read>",
@@ -94,6 +93,9 @@ for (const group of Object.keys(grouped) as Group[]) {
 // Loaded tools are unlocked: gate must not block them.
 assert(!fresh.toolCall({ toolName: "browser_open" })?.block);
 assert(!fresh.toolCall({ toolName: "bash" })?.block);
+// pi-blackhole recall is eager (in no deferred group) and never gated.
+assert(fresh.active.includes("recall"));
+assert(!fresh.toolCall({ toolName: "recall" })?.block);
 
 // --- Reload: transcript-restored tools stay active but gated until load_tools.
 const reloaded = harness([...core.filter((name) => name !== "agent_bg"), "browser_open", "web_search", "load_tools"]);
