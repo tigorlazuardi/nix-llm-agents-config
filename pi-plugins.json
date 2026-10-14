@@ -26,11 +26,11 @@
   "pi-blackhole": {
     "strategy": "npm",
     "package": "pi-blackhole",
-    "version": "0.5.12",
-    "src": "https://registry.npmjs.org/pi-blackhole/-/pi-blackhole-0.5.12.tgz",
-    "hash": "sha256-DemeUNYKnbGJWeqHLnkrq/n8Cj+3iWZeOFGX6MX+s1c=",
+    "version": "0.5.13",
+    "src": "https://registry.npmjs.org/pi-blackhole/-/pi-blackhole-0.5.13.tgz",
+    "hash": "sha256-0/+xUVjdcxqLkpaE3aGQCzeZV/P2vJmcVn9xxF34+GU=",
     "lockFile": "packages/pi-blackhole-package-lock.json",
-    "npmDepsHash": "sha256-uHNIjSXoJx7Tz8vNByNnr3WyZWDU76wLwkxhkwvjs0E=",
+    "npmDepsHash": "sha256-VDjkkP5vHX4nGI3ogi0lF2+cxPPlx1Uo9YEUMq4xG7g=",
     "check": "pi-blackhole-load"
   },
   "pi-sensitive-guard": {
