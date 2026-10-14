@@ -1,0 +1,52 @@
+--- a/pi-extension/subagents/herdr.ts
++++ b/pi-extension/subagents/herdr.ts
+@@ -258,5 +258,10 @@
+ }
+
++export function buildHerdrEscapeArgs(surface: string): string[] {
++  // First Escape leaves Vim insert mode; second cancels the active Pi turn.
++  return ["pane", "send-keys", surface, "Escape", "Escape"];
++}
++
+ export function sendHerdrEscape(surface: string): void {
+-  herdrExec(["pane", "send-keys", surface, "Escape"]);
++  herdrExec(buildHerdrEscapeArgs(surface));
+ }
+--- a/pi-extension/subagents/subagent-done.ts
++++ b/pi-extension/subagents/subagent-done.ts
+@@ -3 +3 @@
+- * - Shows agent identity + available tools as a styled widget above the editor (toggle with Ctrl+J)
++ * - Shows agent identity + active tools as a styled widget above the editor
+@@ -6 +6 @@
+-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
++import { rawKeyHint, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
+@@ -8,4 +8,6 @@
+ import { writeFileSync } from "node:fs";
+ import { createSubagentActivityRecorder } from "./activity.ts";
+
++const TOGGLE_SHORTCUT = "ctrl+shift+o";
++
+ export function shouldMarkUserTookOver(agentStarted: boolean): boolean {
+@@ -106 +107 @@
+-          const hint = theme.fg("muted", "  (Ctrl+J to collapse)");
++          const hint = theme.fg("muted", `  (${rawKeyHint(TOGGLE_SHORTCUT, "to collapse")})`);
+@@ -133 +134 @@
+-          const hint = theme.fg("muted", "  (Ctrl+J to expand)");
++          const hint = theme.fg("muted", `  (${rawKeyHint(TOGGLE_SHORTCUT, "to expand")})`);
+@@ -150,2 +151 @@
+-    const tools = pi.getAllTools();
+-    toolNames = tools.map((t) => t.name).sort();
++    toolNames = pi.getActiveTools().sort();
+@@ -263,2 +264 @@
+-  // Toggle expand/collapse with Ctrl+J
+-  pi.registerShortcut("ctrl+j", {
++  pi.registerShortcut(TOGGLE_SHORTCUT, {
+--- a/pi-extension/subagents/harness/drivers/pi.ts
++++ b/pi-extension/subagents/harness/drivers/pi.ts
+@@ -128,2 +128,6 @@
+     envParts.push(`PI_SUBAGENT_NAME=${shellQuote(params.name)}`);
++    if (toolAllowlist) {
++      envParts.push(`PI_SUBAGENT_ALLOWED_TOOLS=${shellQuote(toolAllowlist)}`);
++    }
++
+     if (params.agent) {

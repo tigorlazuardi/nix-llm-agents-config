@@ -166,7 +166,7 @@ let
   rpivAskUserQuestion = pinnedPkgs.callPackage ../packages/rpiv-ask-user-question.nix { };
   rules = pinnedPkgs.callPackage ../packages/pi-rules.nix { };
   webAccess = pinnedPkgs.callPackage ../packages/pi-web-access.nix { };
-  herdsman = pinnedPkgs.callPackage ../packages/pi-herdsman.nix { };
+  herdrSubagents = pinnedPkgs.callPackage ../packages/pi-herdr-subagents.nix { };
   visionHandoff = pinnedPkgs.callPackage ../packages/pi-vision-handoff.nix { };
   supiContext = pinnedPkgs.callPackage ../packages/supi-context.nix { };
   supiExtras = pinnedPkgs.callPackage ../packages/supi-extras.nix { };
@@ -294,8 +294,8 @@ let
       default = true;
     }
     {
-      name = "pi-herdsman";
-      package = "${herdsman}/lib/node_modules/pi-herdsman";
+      name = "pi-herdr-subagents";
+      package = "${herdrSubagents}/lib/node_modules/pi-herdr-subagents";
       default = true;
     }
     {
@@ -346,7 +346,6 @@ let
       reserveTokens = 128000;
       keepRecentTokens = 20000;
     };
-    subagents.disableBuiltins = true;
   };
   defaultKeybindings = {
     "app.tools.expand" = "ctrl+o";
@@ -481,7 +480,7 @@ in
   imports = [
     (import ./remote-pi-relay.nix { inherit nixpkgs-unstable; })
     ./pi-coding-agent/agents.nix
-    ./pi-coding-agent/pi-herdsman.nix
+    ./pi-coding-agent/pi-herdr-subagents.nix
   ];
 
   options.programs.pi-coding-agent.localUpdater = {

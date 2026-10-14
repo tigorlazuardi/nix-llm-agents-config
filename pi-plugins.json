@@ -68,10 +68,10 @@
     "owner": "nicobailon",
     "repo": "pi-mcp-adapter",
     "track": "main",
-    "version": "unstable-2026-10-13",
-    "rev": "1cf56829ce84df38d06022f466793c773d0132a9",
-    "hash": "sha256-B2PFwkuRF4MPUc7x7HtrRHZP2NZgDEcNugaTZXwIJJk=",
-    "npmDepsHash": "sha256-ArsOXtlmpVEoIlLECt8Um35mz6D0UWacmJI1pByYFus=",
+    "version": "unstable-2026-10-10",
+    "rev": "4b08a153da1e8bd557b549e17cc01196639a25b0",
+    "hash": "sha256-SfuPKyRKQsgNLADoNJx9p2Buc6ibin+LSp97yPCntwg=",
+    "npmDepsHash": "sha256-lFVfpkPrLwvLz5JyiTdYXsS2MTZnCDxoALJhDl1BzWA=",
     "lockFile": "packages/pi-mcp-adapter-package-lock.json",
     "manifestTransform": {
       "delete": [
@@ -259,10 +259,10 @@
   "pi-web-access": {
     "strategy": "npm",
     "package": "pi-web-access",
-    "version": "0.40.0",
-    "src": "https://registry.npmjs.org/pi-web-access/-/pi-web-access-0.40.0.tgz",
-    "hash": "sha256-XMGJZr1Gl6CZ0xGXLGDNP6KprQG3GTDlUqn9+n5ECzQ=",
-    "npmDepsHash": "sha256-XoaoXWRFXzEKt3/G/vA3Q8VxcTlbBtKYsR6glC0A0bk=",
+    "version": "0.38.0",
+    "src": "https://registry.npmjs.org/pi-web-access/-/pi-web-access-0.38.0.tgz",
+    "hash": "sha256-BeuZsvWo8AiN/jzj2kRABLfxHLOGfWMnGP+fnMu2Vr0=",
+    "npmDepsHash": "sha256-UBZKO6fpzOWJTFPkPwl1WpH5cYSTwSoPxJ/8SH9m8cE=",
     "manifestTransform": {
       "delete": [
         "devDependencies",
@@ -299,10 +299,10 @@
   "pi-usage": {
     "strategy": "npm",
     "package": "@narumitw/pi-usage",
-    "version": "0.66.0",
-    "src": "https://registry.npmjs.org/@narumitw/pi-usage/-/pi-usage-0.66.0.tgz",
-    "hash": "sha256-LybisrArTFQJnDqtx8s3dYxzrjIDnZEehdiiY/aucxM=",
-    "npmDepsHash": "sha256-D8SIVuAmOrcXZuc/WpMm9a6WQkVDKWpNiVAkUmXjNVI=",
+    "version": "0.65.0",
+    "src": "https://registry.npmjs.org/@narumitw/pi-usage/-/pi-usage-0.65.0.tgz",
+    "hash": "sha256-OWGMAsOc7oNfr9lhRbFpwN6HiiyfBrLpmkbFbE7V3Vw=",
+    "npmDepsHash": "sha256-fiE+eKNRwodK7+mcfszsqMCciw4X6ESYpjygxuz82vM=",
     "manifestTransform": {
       "delete": [
         "devDependencies",
@@ -320,20 +320,20 @@
     "hash": "sha256-ZKKKEBvLSij2vHJ9zJa4CwUkQYjYUMXh3hiPhl7sKlI=",
     "check": "pi-timestamps-load"
   },
-  "pi-herdsman": {
+  "pi-herdr-subagents": {
     "strategy": "npm",
-    "package": "pi-herdsman",
-    "version": "0.26.0",
-    "src": "https://registry.npmjs.org/pi-herdsman/-/pi-herdsman-0.26.0.tgz",
-    "hash": "sha256-CtLwreV7jGTqj0auZr4LOdR01HeXVD3AQ36jVXAbTWI=",
+    "package": "pi-herdr-subagents",
+    "version": "0.2.1",
+    "src": "https://registry.npmjs.org/pi-herdr-subagents/-/pi-herdr-subagents-0.2.1.tgz",
+    "hash": "sha256-wqwgUgKD2C0ckCKjmwRFMnsO3V++tiTr1l46sknMZ28=",
     "manifestTransform": {
       "delete": [
         "devDependencies",
-        "peerDependencies",
-        "peerDependenciesMeta"
+        "peerDependencies"
       ]
     },
-    "check": "herdsman-load"
+    "lockFile": "packages/pi-herdr-subagents-package-lock.json",
+    "check": "herdr-subagents-load"
   },
   "pi-vision-handoff": {
     "strategy": "npm",
@@ -346,11 +346,11 @@
   "rpiv-ask-user-question": {
     "strategy": "npm",
     "package": "@juicesharp/rpiv-ask-user-question",
-    "version": "2.13.8",
-    "src": "https://registry.npmjs.org/@juicesharp/rpiv-ask-user-question/-/rpiv-ask-user-question-2.13.8.tgz",
-    "hash": "sha256-HCftZWz1awr360XR5CQPw8nj4GSgWIDxWsw4CJMVnNU=",
+    "version": "2.13.3",
+    "src": "https://registry.npmjs.org/@juicesharp/rpiv-ask-user-question/-/rpiv-ask-user-question-2.13.3.tgz",
+    "hash": "sha256-VpOmcFatwMqz87r7jvs30K9fTBpbC9wVCzB0lqLXO4Y=",
     "lockFile": "packages/rpiv-ask-user-question-package-lock.json",
-    "npmDepsHash": "sha256-dmaTEg1zTpLxSjtNOm1l5WnvKM2jVOJCp9BEZTRpNvg=",
+    "npmDepsHash": "sha256-16XYX5lon0JDv8xNZ+5hWhlmgk+7Uga2+/BvPlCMGuk=",
     "check": "rpiv-ask-user-question-load"
   },
   "pix-todo": {

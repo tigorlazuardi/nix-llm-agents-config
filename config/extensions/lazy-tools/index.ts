@@ -2,16 +2,17 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { StringEnum } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
 
-const GROUP_NAMES = ["browser", "subagents", "research", "herdr", "sudo", "journal", "artifact"] as const;
+const GROUP_NAMES = ["browser", "subagents", "research", "herdr", "sudo", "journal", "artifact", "memory"] as const;
 type Group = typeof GROUP_NAMES[number];
 const GROUP_MARKERS: Record<Group, readonly string[]> = {
   browser: ["browser-goblin"],
-  subagents: ["pi-herdsman"],
+  subagents: ["pi-herdr-subagents"],
   research: ["pi-web-access", "pi-mcp-adapter"],
   herdr: ["pi-herdr"],
   sudo: ["pix-sudo"],
   journal: ["dev-journal"],
   artifact: ["artifact-preview"],
+  memory: ["pi-blackhole"],
 };
 const ALWAYS_ACTIVE = new Set(["bash", "bash_bg", "ask_user_question", "rename_herdr_tab", "todo", "load_tools"]);
 // Permanently hidden every session — NOT deferrable via load_tools. Models mistake
@@ -23,9 +24,6 @@ export default function (pi: ExtensionAPI) {
   const childAllowedTools = process.env.PI_SUBAGENT_ALLOWED_TOOLS
     ? new Set(process.env.PI_SUBAGENT_ALLOWED_TOOLS.split(",").map((name) => name.trim()).filter(Boolean))
     : null;
-  // pi-herdsman managed children enforce their own tool policy via --tools at
-  // spawn; lazy gating must not hide their coordination tools.
-  const herdsmanChild = process.env.PI_HERDSMAN_AGENT_DEFINITION != null;
   const groupTools = (group: Group) => pi.getAllTools()
     .filter((tool) =>
       !ALWAYS_ACTIVE.has(tool.name)
@@ -45,9 +43,9 @@ export default function (pi: ExtensionAPI) {
   pi.registerTool({
     name: "load_tools",
     label: "Load Tools",
-    description: "Enable an installed tool group for this session. Groups: browser, subagents, research/web/MCP, Herdr/elevation, journal, artifact hosting.",
+    description: "Enable an installed tool group for this session. Groups: browser, subagents, research/web/MCP, Herdr/elevation, journal, artifact hosting, memory/recall.",
     promptSnippet: "Enable deferred tool groups when needed",
-    promptGuidelines: ["Use load_tools before browser automation; /supervise or delegation; web/current-source/MCP research; explicit Herdr or elevated work; journal access; or artifact preview."],
+    promptGuidelines: ["Use load_tools before browser automation; /supervise or delegation; web/current-source/MCP research; explicit Herdr or elevated work; journal access; artifact preview; or memory recall search."],
     parameters: Type.Object({
       group: StringEnum(GROUP_NAMES),
     }),
@@ -75,7 +73,7 @@ export default function (pi: ExtensionAPI) {
   // answers calls to inactive tools with an opaque "Tool not found" before any tool_call
   // hook runs, so deferred tools must stay active to receive this rejection.
   pi.on("tool_call", (event) => {
-    if (childAllowedTools || herdsmanChild) return;
+    if (childAllowedTools) return;
     const group = groupOfTool(event.toolName);
     if (!group || unlocked.has(group)) return;
     return {
@@ -91,7 +89,6 @@ export default function (pi: ExtensionAPI) {
         !HIDDEN_TOOLS.has(name) && childAllowedTools.has(name)));
       return;
     }
-    if (herdsmanChild) return;
     if (event.reason === "resume" || event.reason === "fork" || event.reason === "reload") {
       // Keep transcript-restored tools active so the model can call them and get the
       // "load first" rejection above instead of "Tool not found" + bash fallback.

@@ -1,16 +1,17 @@
 import assert from "node:assert/strict";
 import lazyTools from "./index.ts";
 
-type Group = "browser" | "subagents" | "research" | "herdr" | "sudo" | "journal" | "artifact";
-const core = ["read", "bash", "bash_bg", "agent_bg", "jobs", "monitor", "ask_user_question", "rename_herdr_tab", "todo", "recall"];
+type Group = "browser" | "subagents" | "research" | "herdr" | "sudo" | "journal" | "artifact" | "memory";
+const core = ["read", "bash", "bash_bg", "agent_bg", "jobs", "monitor", "ask_user_question", "rename_herdr_tab", "todo", "agent_send", "list_peers"];
 const grouped: Record<Group, string[]> = {
   browser: ["browser_open"],
-  subagents: ["delegate_agent", "continue_agent", "steer_agent", "interrupt_agent", "reply_agent", "close_agent"],
+  subagents: ["subagent", "subagent_interrupt", "subagents_list", "subagent_resume"],
   research: ["web_search", "mcp", "mcpScript"],
   herdr: ["herdr_layout"],
   sudo: ["sudo_run"],
   journal: ["dev_journal"],
   artifact: ["host_artifact"],
+  memory: ["recall"],
 };
 const paths: Record<string, string> = {
   read: "<builtin:read>",
@@ -19,12 +20,10 @@ const paths: Record<string, string> = {
   ask_user_question: "/nix/store/@juicesharp/rpiv-ask-user-question/src/index.ts",
   rename_herdr_tab: "/nix/store/pi-herdr-rename/index.ts",
   browser_open: "/nix/store/browser-goblin/index.ts",
-  delegate_agent: "/nix/store/pi-herdsman/dist/index.js",
-  continue_agent: "/nix/store/pi-herdsman/dist/index.js",
-  steer_agent: "/nix/store/pi-herdsman/dist/index.js",
-  interrupt_agent: "/nix/store/pi-herdsman/dist/index.js",
-  reply_agent: "/nix/store/pi-herdsman/dist/index.js",
-  close_agent: "/nix/store/pi-herdsman/dist/index.js",
+  subagent: "/nix/store/pi-herdr-subagents/pi-extension/subagents/index.ts",
+  subagent_interrupt: "/nix/store/pi-herdr-subagents/pi-extension/subagents/index.ts",
+  subagents_list: "/nix/store/pi-herdr-subagents/pi-extension/subagents/index.ts",
+  subagent_resume: "/nix/store/pi-herdr-subagents/pi-extension/subagents/index.ts",
   web_search: "/nix/store/pi-web-access/index.ts",
   mcp: "/nix/store/pi-mcp-adapter/index.ts",
   mcpScript: "/nix/store/pi-mcp-adapter/index.ts",
@@ -93,9 +92,6 @@ for (const group of Object.keys(grouped) as Group[]) {
 // Loaded tools are unlocked: gate must not block them.
 assert(!fresh.toolCall({ toolName: "browser_open" })?.block);
 assert(!fresh.toolCall({ toolName: "bash" })?.block);
-// pi-blackhole recall is eager (in no deferred group) and never gated.
-assert(fresh.active.includes("recall"));
-assert(!fresh.toolCall({ toolName: "recall" })?.block);
 
 // --- Reload: transcript-restored tools stay active but gated until load_tools.
 const reloaded = harness([...core.filter((name) => name !== "agent_bg"), "browser_open", "web_search", "load_tools"]);
@@ -129,19 +125,3 @@ await child.loader.execute("x", { group: "browser" });
 assert.deepEqual(child.active, ["read", "bash", "subagent", "caller_ping", "subagent_done"]);
 assert(!child.toolCall({ toolName: "browser_open" })?.block);
 delete process.env.PI_SUBAGENT_ALLOWED_TOOLS;
-
-// --- pi-herdsman managed children: no gating at all; herdsman owns the tool
-// policy via --tools at spawn, and coordination tools stay active.
-process.env.PI_HERDSMAN_AGENT_DEFINITION = "orchestrator";
-const herdsmanChild = harness([
-  "read",
-  "bash",
-  "agent_bg",
-  "delegate_agent",
-  "list_agents",
-  "ask_owner",
-]);
-herdsmanChild.sessionStart({ reason: "startup" });
-assert(herdsmanChild.active.includes("delegate_agent"));
-assert(!herdsmanChild.toolCall({ toolName: "browser_open" })?.block);
-delete process.env.PI_HERDSMAN_AGENT_DEFINITION;
