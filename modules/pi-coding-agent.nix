@@ -35,11 +35,13 @@ let
     domain-modeling = mattpocock-skills + "/skills/engineering/domain-modeling";
     grill-with-docs = mattpocock-skills + "/skills/engineering/grill-with-docs";
     implement = mattpocock-skills + "/skills/engineering/implement";
+    implement-spec = mattpocock-skills + "/skills/engineering/implement-spec";
     improve-codebase-architecture =
       mattpocock-skills + "/skills/engineering/improve-codebase-architecture";
+    pr = mattpocock-skills + "/skills/engineering/pr";
     prototype = mattpocock-skills + "/skills/engineering/prototype";
     research = mattpocock-skills + "/skills/engineering/research";
-    resolving-merge-conflicts = mattpocock-skills + "/skills/engineering/resolving-merge-conflicts";
+    retro = mattpocock-skills + "/skills/engineering/retro";
     setup-matt-pocock-skills = mattpocock-skills + "/skills/engineering/setup-matt-pocock-skills";
     tdd = mattpocock-skills + "/skills/engineering/tdd";
     to-spec = mattpocock-skills + "/skills/engineering/to-spec";

@@ -799,6 +799,8 @@ in
     assert !(default.config.programs.pi-coding-agent.skills ? dynamic-workflow);
     assert !(default.config.programs.pi-coding-agent.skills ? codebase-pattern-preview);
     assert !(default.config.programs.pi-coding-agent.skills ? feature-contract-preview);
+    # resolving-merge-conflicts was deleted upstream (2026-09-24); must not come back via mapping.
+    assert !(default.config.programs.pi-coding-agent.skills ? resolving-merge-conflicts);
     assert
       default.config.home.file."${default.config.programs.pi-coding-agent.configDir}/rules".source
       == ./config/rules;
