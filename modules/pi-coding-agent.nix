@@ -20,6 +20,7 @@ let
     )
   );
   grillingStopInstruction = "Stop asking questions when we reach a shared understanding and big decision was already made, because relatively smaller decisions would automatically derive.";
+  toTicketsSeamInstruction = "Fleet addition: every implementation ticket is at most one testable seam — one behavior provable by a single focused test or runnable check. Split tickets larger than that during slicing. When a ticket grows beyond one seam during implementation or review, never grow its scope: carve the overflow into a new ticket. That new ticket blocks this one only when this ticket genuinely cannot be finished without it; otherwise leave the new ticket independent with no blocking edge.";
   appendMattSkillInstruction =
     name: source: instruction:
     pkgs.runCommand "mattpocock-skill-${name}" { } ''
@@ -60,6 +61,9 @@ let
   patchedMattSkills = mattSkills // {
     # ponytail: v1.2 grilling uses frontier rounds; keep local stop patch disabled.
     # grilling = appendMattSkillInstruction "grilling" mattSkills.grilling grillingStopInstruction;
+    # Fleet rule: implementation tickets are capped at one testable seam; overflow
+    # becomes a new ticket, blocking only when it truly gates this ticket.
+    to-tickets = appendMattSkillInstruction "to-tickets" mattSkills.to-tickets toTicketsSeamInstruction;
   };
   defaultModels = builtins.fromJSON (builtins.readFile ../config/models.json);
   mcpPlugin = cfg.plugins.pi-mcp-adapter;

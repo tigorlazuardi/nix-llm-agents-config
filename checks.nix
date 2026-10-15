@@ -791,6 +791,16 @@ in
     assert builtins.pathExists (
       default.config.programs.pi-coding-agent.skills.to-questionnaire + "/SKILL.md"
     );
+    # to-tickets carries the fleet seam-cap patch; assert its markers survive rendering.
+    let
+      toTicketsSkillMd = builtins.readFile (
+        default.config.programs.pi-coding-agent.skills.to-tickets + "/SKILL.md"
+      );
+    in
+    assert pkgs.lib.hasInfix "at most one testable seam" toTicketsSkillMd;
+    assert pkgs.lib.hasInfix "carve the overflow into a new ticket" toTicketsSkillMd;
+    assert pkgs.lib.hasInfix "blocks this one only when this ticket genuinely cannot be finished"
+      toTicketsSkillMd;
     # ponytail: assert required/excluded skills only; upstream additions must not block input updates.
     assert !(default.config.programs.pi-coding-agent.skills ? tuxedo-todo);
     assert !(default.config.programs.pi-coding-agent.skills ? design-an-interface);
