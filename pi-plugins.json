@@ -338,9 +338,9 @@
   "pi-vision-handoff": {
     "strategy": "npm",
     "package": "pi-vision-handoff",
-    "version": "0.10.9",
-    "src": "https://registry.npmjs.org/pi-vision-handoff/-/pi-vision-handoff-0.10.9.tgz",
-    "hash": "sha256-wx6RGOm4UHqq9NHqM4tANzh1c5hKlEadlwaoRpdN4Ks=",
+    "version": "0.10.10",
+    "src": "https://registry.npmjs.org/pi-vision-handoff/-/pi-vision-handoff-0.10.10.tgz",
+    "hash": "sha256-KQaNfNela3brrxXZJPvLddIksqkHHwALLg7OMCTifkU=",
     "check": "vision-handoff-load"
   },
   "rpiv-ask-user-question": {
