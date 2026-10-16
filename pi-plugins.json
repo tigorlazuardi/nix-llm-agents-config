@@ -166,7 +166,7 @@
     "version": "0.5.4",
     "sharedPackage": "pix-tools",
     "lockFile": "packages/pix-tools-package-lock.json",
-    "npmDepsHash": "sha256-7iMUtuuF4Z4VYHZdh1uRWyS2fbzyNiaAehYYqNpoTJI=",
+    "npmDepsHash": "sha256-Iir0Yf/fn4daSeMdL5wfD/INUG3/9pTi1TClIqXETy8=",
     "check": "pix-tools-load"
   },
   "pix-footer": {
@@ -175,7 +175,7 @@
     "version": "0.2.8",
     "sharedPackage": "pix-tools",
     "lockFile": "packages/pix-tools-package-lock.json",
-    "npmDepsHash": "sha256-7iMUtuuF4Z4VYHZdh1uRWyS2fbzyNiaAehYYqNpoTJI=",
+    "npmDepsHash": "sha256-Iir0Yf/fn4daSeMdL5wfD/INUG3/9pTi1TClIqXETy8=",
     "check": "pix-tools-load",
     "manifestTransform": {
       "delete": [
@@ -189,7 +189,7 @@
     "version": "1.30.0",
     "sharedPackage": "pix-tools",
     "lockFile": "packages/pix-tools-package-lock.json",
-    "npmDepsHash": "sha256-7iMUtuuF4Z4VYHZdh1uRWyS2fbzyNiaAehYYqNpoTJI=",
+    "npmDepsHash": "sha256-Iir0Yf/fn4daSeMdL5wfD/INUG3/9pTi1TClIqXETy8=",
     "check": "pix-tools-load"
   },
   "pix-read": {
@@ -198,7 +198,7 @@
     "version": "0.4.3",
     "sharedPackage": "pix-tools",
     "lockFile": "packages/pix-tools-package-lock.json",
-    "npmDepsHash": "sha256-7iMUtuuF4Z4VYHZdh1uRWyS2fbzyNiaAehYYqNpoTJI=",
+    "npmDepsHash": "sha256-Iir0Yf/fn4daSeMdL5wfD/INUG3/9pTi1TClIqXETy8=",
     "check": "pix-tools-load"
   },
   "pix-write": {
@@ -207,16 +207,16 @@
     "version": "0.2.8",
     "sharedPackage": "pix-tools",
     "lockFile": "packages/pix-tools-package-lock.json",
-    "npmDepsHash": "sha256-7iMUtuuF4Z4VYHZdh1uRWyS2fbzyNiaAehYYqNpoTJI=",
+    "npmDepsHash": "sha256-Iir0Yf/fn4daSeMdL5wfD/INUG3/9pTi1TClIqXETy8=",
     "check": "pix-tools-load"
   },
   "pix-edit": {
     "strategy": "npm",
     "package": "@xynogen/pix-edit",
-    "version": "0.2.8",
+    "version": "0.2.9",
     "sharedPackage": "pix-tools",
     "lockFile": "packages/pix-tools-package-lock.json",
-    "npmDepsHash": "sha256-7iMUtuuF4Z4VYHZdh1uRWyS2fbzyNiaAehYYqNpoTJI=",
+    "npmDepsHash": "sha256-Iir0Yf/fn4daSeMdL5wfD/INUG3/9pTi1TClIqXETy8=",
     "check": "pix-tools-load"
   },
   "pix-ls": {
@@ -225,7 +225,7 @@
     "version": "0.3.4",
     "sharedPackage": "pix-tools",
     "lockFile": "packages/pix-tools-package-lock.json",
-    "npmDepsHash": "sha256-7iMUtuuF4Z4VYHZdh1uRWyS2fbzyNiaAehYYqNpoTJI=",
+    "npmDepsHash": "sha256-Iir0Yf/fn4daSeMdL5wfD/INUG3/9pTi1TClIqXETy8=",
     "check": "pix-tools-load"
   },
   "pix-find": {
@@ -234,7 +234,7 @@
     "version": "0.3.4",
     "sharedPackage": "pix-tools",
     "lockFile": "packages/pix-tools-package-lock.json",
-    "npmDepsHash": "sha256-7iMUtuuF4Z4VYHZdh1uRWyS2fbzyNiaAehYYqNpoTJI=",
+    "npmDepsHash": "sha256-Iir0Yf/fn4daSeMdL5wfD/INUG3/9pTi1TClIqXETy8=",
     "check": "pix-tools-load"
   },
   "pix-grep": {
@@ -243,7 +243,7 @@
     "version": "0.3.4",
     "sharedPackage": "pix-tools",
     "lockFile": "packages/pix-tools-package-lock.json",
-    "npmDepsHash": "sha256-7iMUtuuF4Z4VYHZdh1uRWyS2fbzyNiaAehYYqNpoTJI=",
+    "npmDepsHash": "sha256-Iir0Yf/fn4daSeMdL5wfD/INUG3/9pTi1TClIqXETy8=",
     "check": "pix-tools-load"
   },
   "pix-sudo": {
@@ -359,7 +359,7 @@
     "version": "0.4.6",
     "sharedPackage": "pix-tools",
     "lockFile": "packages/pix-tools-package-lock.json",
-    "npmDepsHash": "sha256-7iMUtuuF4Z4VYHZdh1uRWyS2fbzyNiaAehYYqNpoTJI=",
+    "npmDepsHash": "sha256-Iir0Yf/fn4daSeMdL5wfD/INUG3/9pTi1TClIqXETy8=",
     "check": "pix-todo-load"
   }
 }
