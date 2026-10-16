@@ -249,11 +249,11 @@
   "pix-sudo": {
     "strategy": "npm",
     "package": "@xynogen/pix-sudo",
-    "version": "0.3.33",
-    "src": "https://registry.npmjs.org/@xynogen/pix-sudo/-/pix-sudo-0.3.33.tgz",
-    "hash": "sha256-J1Dx9yYvOGgiI1k75jkJTDU6GDROv+sf+rlB87WuLEU=",
+    "version": "0.3.34",
+    "src": "https://registry.npmjs.org/@xynogen/pix-sudo/-/pix-sudo-0.3.34.tgz",
+    "hash": "sha256-BvA27RgPStH2sP40TthZDlEGRc3MpLTgpM2+1qv+q7I=",
     "lockFile": "packages/pix-sudo-package-lock.json",
-    "npmDepsHash": "sha256-GR5v87KmoC9FWbSRnB5sR9bLTljkke45hlnqs5yo+5I=",
+    "npmDepsHash": "sha256-Jd+cz2F7ge8K12KMl+0pnpKOtZz8ojXmBLb/HwLnrSY=",
     "check": "pix-sudo-load"
   },
   "pi-web-access": {
