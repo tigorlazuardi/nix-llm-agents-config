@@ -299,10 +299,10 @@
   "pi-usage": {
     "strategy": "npm",
     "package": "@narumitw/pi-usage",
-    "version": "0.66.0",
-    "src": "https://registry.npmjs.org/@narumitw/pi-usage/-/pi-usage-0.66.0.tgz",
-    "hash": "sha256-LybisrArTFQJnDqtx8s3dYxzrjIDnZEehdiiY/aucxM=",
-    "npmDepsHash": "sha256-D8SIVuAmOrcXZuc/WpMm9a6WQkVDKWpNiVAkUmXjNVI=",
+    "version": "0.67.0",
+    "src": "https://registry.npmjs.org/@narumitw/pi-usage/-/pi-usage-0.67.0.tgz",
+    "hash": "sha256-61qTJreOMmAeNQXLJbhDwMNTfmJIbdbJmWlPneJpINQ=",
+    "npmDepsHash": "sha256-jnezDO7wafceNHII/MTxyjPtlL0+5SoWhzjdcqIpzUY=",
     "manifestTransform": {
       "delete": [
         "devDependencies",
