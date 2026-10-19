@@ -346,11 +346,11 @@
   "rpiv-ask-user-question": {
     "strategy": "npm",
     "package": "@juicesharp/rpiv-ask-user-question",
-    "version": "2.13.8",
-    "src": "https://registry.npmjs.org/@juicesharp/rpiv-ask-user-question/-/rpiv-ask-user-question-2.13.8.tgz",
-    "hash": "sha256-HCftZWz1awr360XR5CQPw8nj4GSgWIDxWsw4CJMVnNU=",
+    "version": "2.13.9",
+    "src": "https://registry.npmjs.org/@juicesharp/rpiv-ask-user-question/-/rpiv-ask-user-question-2.13.9.tgz",
+    "hash": "sha256-59Qebht5otYyvNimhwoiVS2TPmDSLQ/5P4ntF9CmzqE=",
     "lockFile": "packages/rpiv-ask-user-question-package-lock.json",
-    "npmDepsHash": "sha256-dmaTEg1zTpLxSjtNOm1l5WnvKM2jVOJCp9BEZTRpNvg=",
+    "npmDepsHash": "sha256-ZVXkHIdpchoIUGlmMwHo+f7KSF1L14RzAO4iA6S1RpE=",
     "check": "rpiv-ask-user-question-load"
   },
   "pix-todo": {
