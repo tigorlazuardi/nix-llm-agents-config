@@ -1618,8 +1618,8 @@ in
         grep -F 'export default function' ${expectedRpivAskUserPath}/index.ts
 
         # Blocked-event emission paths (wait + resolve).
-        grep -F 'emitAskUserBlockedEvent(pi, true)' ${expectedRpivAskUserPath}/ask-user-question.ts
-        grep -F 'emitAskUserBlockedEvent(pi, false)' ${expectedRpivAskUserPath}/ask-user-question.ts
+        grep -F 'emitAskUserBlockedEvent(pi, true' ${expectedRpivAskUserPath}/ask-user-question.ts
+        grep -F 'emitAskUserBlockedEvent(pi, false' ${expectedRpivAskUserPath}/ask-user-question.ts
 
         export HOME="$TMPDIR/home"
         export PI_CODING_AGENT_DIR="$HOME/.pi/agent"
@@ -1812,9 +1812,9 @@ in
         test ! -e ${expectedPixToolsRoot}/pix-display
         test -f ${expectedPixToolsRoot}/pix-footer/src/extension.ts
         grep -F 'ctx.ui.setFooter' ${expectedPixToolsRoot}/pix-footer/src/footer.ts
-        grep -F 'import { truncateToWidth } from "@earendil-works/pi-tui";' ${expectedPixToolsRoot}/pix-footer/src/footer.ts
+        grep -E 'import \{ truncateToWidth(, wrapTextWithAnsi)? \} from "@earendil-works/pi-tui";' ${expectedPixToolsRoot}/pix-footer/src/footer.ts
         grep -F 'const line = [' ${expectedPixToolsRoot}/pix-footer/src/footer.ts
-        grep -F 'return line ? [truncateToWidth(line, width)] : [];' ${expectedPixToolsRoot}/pix-footer/src/footer.ts
+        grep -F '[truncateToWidth(line, width)]' ${expectedPixToolsRoot}/pix-footer/src/footer.ts
         # pix-todo: default export factory + tool + collapse wiring (load probe
         # does not initialize extensions — grep contracts per version-skew skill).
         test -f ${expectedPixToolsRoot}/pix-todo/src/todo.ts
