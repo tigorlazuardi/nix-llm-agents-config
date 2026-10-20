@@ -332,7 +332,6 @@
         "peerDependencies"
       ]
     },
-    "lockFile": "packages/pi-herdr-subagents-package-lock.json",
     "check": "herdr-subagents-load"
   },
   "pi-vision-handoff": {
