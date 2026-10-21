@@ -732,6 +732,14 @@ in
     assert
       default.config.home.file."${default.config.programs.pi-coding-agent.configDir}/extensions/env-loader".force;
     assert
+      default.config.programs.pi-coding-agent.extensions.glossary-loader
+      == ./config/extensions/glossary-loader;
+    assert
+      default.config.home.file."${default.config.programs.pi-coding-agent.configDir}/extensions/glossary-loader".source
+      == ./config/extensions/glossary-loader;
+    assert
+      default.config.home.file."${default.config.programs.pi-coding-agent.configDir}/extensions/glossary-loader".force;
+    assert
       default.config.programs.pi-coding-agent.extensions.bash-loop-guard
       == ./config/extensions/bash-loop-guard;
     assert
@@ -1150,6 +1158,30 @@ in
         mkdir -p "$PI_CODING_AGENT_DIR"
         pi --offline --no-extensions --no-skills --no-prompt-templates --no-context-files \
           -e ${./config/extensions/env-loader}/index.ts \
+          --list-models > pi.log 2>&1
+        ! grep -E 'Extension issues|Failed to load extension|Cannot find module|Error:' pi.log
+        touch $out
+      '';
+
+  glossary-loader =
+    pkgs.runCommandLocal "pi-glossary-loader"
+      {
+        nativeBuildInputs = [
+          expectedPackage
+          pkgs.nodejs_22
+        ];
+      }
+      ''
+        cp -R ${./config/extensions/glossary-loader} glossary-loader
+        chmod -R u+w glossary-loader
+        node --experimental-strip-types glossary-loader/glossary-loader.self-check.ts
+
+        export HOME="$TMPDIR/home"
+        export PI_CODING_AGENT_DIR="$HOME/.pi/agent"
+        export PI_TELEMETRY=0
+        mkdir -p "$PI_CODING_AGENT_DIR"
+        pi --offline --no-extensions --no-skills --no-prompt-templates --no-context-files \
+          -e ${./config/extensions/glossary-loader}/index.ts \
           --list-models > pi.log 2>&1
         ! grep -E 'Extension issues|Failed to load extension|Cannot find module|Error:' pi.log
         touch $out

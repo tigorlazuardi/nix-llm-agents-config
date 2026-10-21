@@ -942,6 +942,7 @@ in
           artifact-preview = lib.mkDefault ../config/extensions/artifact-preview;
           dev-journal = lib.mkDefault ../config/extensions/dev-journal;
           env-loader = lib.mkDefault ../config/extensions/env-loader;
+          glossary-loader = lib.mkDefault ../config/extensions/glossary-loader;
           lazy-tools = lib.mkDefault ../config/extensions/lazy-tools;
           bash-loop-guard = lib.mkDefault ../config/extensions/bash-loop-guard;
         }
@@ -967,6 +968,10 @@ in
       };
       "${cfg.configDir}/extensions/env-loader" = {
         source = cfg.extensions.env-loader;
+        force = true;
+      };
+      "${cfg.configDir}/extensions/glossary-loader" = {
+        source = cfg.extensions.glossary-loader;
         force = true;
       };
       "${cfg.configDir}/extensions/pi-idle-compact" = lib.mkIf idleCompact.enable {
