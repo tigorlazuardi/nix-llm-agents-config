@@ -52,7 +52,12 @@
             nixpkgs-unstable
             piModule
             ;
-          pkgs = nixpkgs-unstable.legacyPackages.${system};
+          # nixpkgs now marks rtk unfree (ASL-2.0 + BUSL-1.1) and the checks
+          # reference it directly, so evaluate a scope that explicitly allowlists it.
+          pkgs = import nixpkgs-unstable {
+            inherit system;
+            config.allowUnfreePredicate = pkg: nixpkgs-unstable.lib.getName pkg == "rtk";
+          };
         }
       );
 

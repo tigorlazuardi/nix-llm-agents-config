@@ -1488,28 +1488,35 @@ in
         grep -F '"./dist/index.ts"' "$usage/package.json"
         grep -F 'pi.registerCommand("usage"' "$usage/dist/index.ts"
 
-        # ponytail: .js aliases let dependency-free Node strip-types run exact packaged .ts files.
+        # Load via the same jiti transform the pi extension loader uses; Node's
+        # strip-only mode rejects upstream parameter properties (core.ts).
         cp -R "$usage/src" "$TMPDIR/usage-src"
         chmod -R u+w "$TMPDIR/usage-src"
-        mkdir -p "$TMPDIR/node_modules/@earendil-works"
-        ln -s ${expectedPackage}/lib/node_modules/pi-monorepo \
-          "$TMPDIR/node_modules/@earendil-works/pi-coding-agent"
-        ln -s ${expectedPackage}/lib/node_modules/pi-monorepo/node_modules/@earendil-works/pi-ai \
-          "$TMPDIR/node_modules/@earendil-works/pi-ai"
-        ln -s ${expectedPackage}/lib/node_modules/pi-monorepo/node_modules/@earendil-works/pi-tui \
-          "$TMPDIR/node_modules/@earendil-works/pi-tui"
-        find "$TMPDIR/usage-src" -type f -name '*.ts' -print0 | while IFS= read -r -d ''' source; do
-          ln -s "$(basename "$source")" "''${source%.ts}.js"
-        done
+        export PI_MONOREPO_PATH="${expectedPackage}/lib/node_modules/pi-monorepo"
         cd "$TMPDIR"
-        node --experimental-strip-types --input-type=module <<'EOF'
+        node --input-type=module <<'EOF'
         import assert from "node:assert/strict";
-        import { redactUsageError } from "./usage-src/core.ts";
-        import {
-          queryProviderUsage,
-          resolveUsageAuth,
-          SUPPORTED_ADAPTERS,
-        } from "./usage-src/query.ts";
+        import { createRequire } from "node:module";
+        import { pathToFileURL } from "node:url";
+        const require = createRequire(
+          pathToFileURL(process.env.PI_MONOREPO_PATH + "/package.json"),
+        );
+        const { createJiti } = require("jiti");
+        const jiti = createJiti(process.cwd(), {
+          moduleCache: false,
+          tryNative: false,
+          alias: {
+            "@earendil-works/pi-coding-agent": process.env.PI_MONOREPO_PATH + "/dist/index.js",
+            "@earendil-works/pi-ai":
+              process.env.PI_MONOREPO_PATH + "/node_modules/@earendil-works/pi-ai/dist/compat.js",
+            "@earendil-works/pi-tui":
+              process.env.PI_MONOREPO_PATH + "/node_modules/@earendil-works/pi-tui/dist/index.js",
+          },
+        });
+        const core = await jiti.import("./usage-src/core.ts", { default: true });
+        const query = await jiti.import("./usage-src/query.ts", { default: true });
+        const { redactUsageError } = core;
+        const { queryProviderUsage, resolveUsageAuth, SUPPORTED_ADAPTERS } = query;
 
         const originalFetch = globalThis.fetch;
         const originalSetTimeout = globalThis.setTimeout;

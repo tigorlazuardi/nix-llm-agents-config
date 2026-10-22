@@ -125,6 +125,12 @@ let
   };
   jsonFormat = pkgs.formats.json { };
   pinnedPkgs = nixpkgs-unstable.legacyPackages.${pkgs.stdenv.hostPlatform.system};
+  # nixpkgs now marks rtk unfree (ASL-2.0 + BUSL-1.1); the pinned input carries no
+  # user config, so resolve rtk through a scope that explicitly allowlists it.
+  unfreeRtkPkgs = import nixpkgs-unstable {
+    system = pkgs.stdenv.hostPlatform.system;
+    config.allowUnfreePredicate = pkg: nixpkgs-unstable.lib.getName pkg == "rtk";
+  };
   dietLsp = pinnedPkgs.callPackage ../packages/pi-diet-lsp.nix { };
   commandCodeProvider = pinnedPkgs.callPackage ../packages/pi-commandcode-provider.nix { };
   effort = pinnedPkgs.callPackage ../packages/pi-effort.nix { };
@@ -903,7 +909,7 @@ in
     home = {
       packages = lib.mkIf cfg.enable (
         [ pinnedPkgs.oscclip ]
-        ++ lib.optional optimizerPlugin.enable pinnedPkgs.rtk
+        ++ lib.optional optimizerPlugin.enable unfreeRtkPkgs.rtk
         ++ lib.optional optimizerPlugin.enable toon
       );
       sessionVariables = lib.mkIf cfg.enable (
