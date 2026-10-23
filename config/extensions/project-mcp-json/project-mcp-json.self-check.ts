@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { expandServer, expandString, runShell } from "./expand.ts";
 import { parseDotEnv } from "./dotenv.ts";
-import { parseMcpJson } from "./parse.ts";
+import { mergeServers, parseMcpJson } from "./parse.ts";
 
 // parse
 const ok = parseMcpJson('{"mcpServers":{"a":{"command":"x","args":["1"]},"b":{"url":"http://h/mcp"}}}');
@@ -13,6 +13,15 @@ assert.equal(parseMcpJson('{"mcpServers":[]}').warnings.length, 1);
 const mixed = parseMcpJson('{"mcpServers":{"good":{"command":"x"},"bad":"str","arr":[]}}');
 assert.deepEqual(mixed.servers.map((s) => s.name), ["good"]);
 assert.equal(mixed.warnings.length, 2);
+
+// label + merge: local overrides same name, keeps others
+assert.match(parseMcpJson("{nope", ".mcp.local.json").warnings[0], /^\.mcp\.local\.json is not valid/);
+const base = parseMcpJson('{"mcpServers":{"a":{"command":"base"},"b":{"command":"b"}}}').servers;
+const local = parseMcpJson('{"mcpServers":{"a":{"command":"local"},"c":{"command":"c"}}}', ".mcp.local.json").servers;
+const merged = mergeServers(base, local);
+assert.deepEqual(merged.map((s) => s.name).sort(), ["a", "b", "c"]);
+assert.equal(merged.find((s) => s.name === "a")?.config.command, "local");
+assert.deepEqual(mergeServers([], local).map((s) => s.name), ["a", "c"]);
 
 // dotenv
 assert.deepEqual(parseDotEnv('A=1\n# c\nB="two words"\nexport C=3'), { A: "1", B: "two words", C: "3" });

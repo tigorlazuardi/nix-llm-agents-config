@@ -22,6 +22,9 @@ It also expands `${VAR}`, `${VAR:-default}` and inline `!(shell command)` (`sh -
 `env`/`headers` (Pi itself expands `$VAR`, `${VAR}`, whole-value `!cmd` there).
 Unset variable or failed command skips that server with a warning. It loads
 `${cwd}/.env` itself because load order against `env-loader` is not guaranteed.
+Per-machine servers go in `${cwd}/.mcp.local.json` (same format; gitignore it). Both
+files share the trust gate, `.env` and expansion; a server with the same name in
+`.mcp.local.json` replaces the one in `.mcp.json`.
 
 pi 1.0 ships a native built-in MCP extension (`builtin:mcp`). The lazy
 `pi-mcp-adapter` plugin replaces `/mcp` per session, and on startup tries to
