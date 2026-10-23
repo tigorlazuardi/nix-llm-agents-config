@@ -217,6 +217,7 @@ let
   };
   rulesEnabled = evaluate { programs.pi-coding-agent.plugins.pi-rules.enable = true; };
   secretWrappedMcp = evaluate {
+    programs.pi-coding-agent.plugins.pi-mcp-adapter.enable = true;
     programs.mcp.servers.secret = {
       command = "/bin/secret-mcp";
       args = [ "serve" ];
@@ -224,6 +225,12 @@ let
         PUBLIC = "visible";
         TOKEN.file = "/run/secrets/token";
       };
+    };
+  };
+  nativeMcp = evaluate {
+    programs.mcp.servers.secret = {
+      command = "/bin/secret-mcp";
+      env.TOKEN.file = "/run/secrets/token";
     };
   };
   resolvedAgent = evaluate {
@@ -514,10 +521,7 @@ in
         theme = "dark";
         hideThinkingBlock = false;
         showCacheMissNotices = false;
-        projectServers = "allow";
-        extensions = [
-          "-builtin:mcp"
-        ];
+        defaultTools = [ "+codemode" ];
         compaction = {
           enabled = true;
           reserveTokens = 128000;
@@ -535,7 +539,6 @@ in
           expectedPiBgPath
           expectedVimModePath
           expectedUsagePath
-          expectedMcpAdapterPath
           expectedBrowserGoblinPath
         ]
         ++ [
@@ -586,7 +589,20 @@ in
       };
     assert default.config.programs.pi-coding-agent.models == expectedModels;
     assert default.config.programs.pi-coding-agent.context == ./config/AGENTS.md;
-    assert default.config.programs.pi-coding-agent.plugins.pi-mcp-adapter.enable;
+    # Adapter is default-off (its approval prompts block subagents); native MCP + codemode.
+    assert !default.config.programs.pi-coding-agent.plugins.pi-mcp-adapter.enable;
+    assert !(default.config.programs.pi-coding-agent.settings ? projectServers);
+    assert !(default.config.programs.pi-coding-agent.settings ? extensions);
+    assert builtins.elem "${nativeMcp.config.programs.pi-coding-agent.configDir}/mcp.json" (
+      builtins.attrNames nativeMcp.config.home.file
+    );
+    assert
+      !(
+        nativeMcp.config.home.file
+          ? "${nativeMcp.config.programs.pi-coding-agent.configDir}/mcp-adapter.json"
+      );
+    assert secretWrappedMcp.config.programs.pi-coding-agent.settings.extensions == [ "-builtin:mcp" ];
+    assert secretWrappedMcp.config.programs.pi-coding-agent.settings.projectServers == "allow";
     assert default.config.programs.pi-coding-agent.plugins.pi-mcp-adapter.enableMcpIntegration;
     assert default.config.programs.pi-coding-agent.plugins.pi-blackhole.enable;
     # guard is default-off (enabled explicitly in sensitiveGuardConfigured).
@@ -1003,7 +1019,6 @@ in
         expectedPiBgPath
         expectedVimModePath
         expectedUsagePath
-        expectedMcpAdapterPath
         expectedBrowserGoblinPath
       ]
       ++ [

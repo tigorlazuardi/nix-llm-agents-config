@@ -5,6 +5,13 @@ description: pi 1.0 built-in MCP vs pi-mcp-adapter plugin coexistence. Use when 
 
 # pi built-in MCP vs pi-mcp-adapter
 
+**Current default (2026-10): adapter OFF, native MCP + codemode.** The adapter
+prompts for project-server/tool approval, which blocks subagents; native MCP has
+no approval dialog. `plugins.pi-mcp-adapter.enable = false` renders
+`programs.mcp.servers` to `~/.pi/agent/mcp.json` (read-only symlink) and sets
+`defaultTools = ["+codemode"]`. Setting `enable = true` restores the adapter,
+`-builtin:mcp` and `projectServers = "allow"`; the notes below apply then.
+
 pi 1.0 ships a native built-in MCP extension (`builtin:mcp`). The lazy
 `pi-mcp-adapter` plugin replaces `/mcp` per session, and on startup tries to
 disable the builtin by **writing `settings.json`**. On Nix/home-manager setups

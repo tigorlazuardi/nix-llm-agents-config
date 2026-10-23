@@ -256,7 +256,9 @@ let
     {
       name = "pi-mcp-adapter";
       package = "${mcpAdapter}/lib/node_modules/pi-mcp-adapter";
-      default = true;
+      # Default off: the adapter prompts for project/tool approval, which blocks
+      # subagents. Pi's native MCP has no approval dialog; set true to go back.
+      default = false;
     }
     {
       name = "browser-goblin";
@@ -344,20 +346,23 @@ let
     theme = "dark";
     hideThinkingBlock = false;
     showCacheMissNotices = false;
-    # pi-mcp-adapter: allow project-scoped MCP servers in trusted headless
-    # sessions without the per-server approval prompt (user decision: trust).
-    projectServers = "allow";
-    # pi 1.0 ships a native built-in MCP extension; this config uses the
-    # lazy pi-mcp-adapter plugin instead. Disable the builtin so they do not
-    # run side by side. The adapter checks this entry before writing
-    # settings.json itself, so a read-only (home-manager) settings file no
-    # longer triggers its EROFS warning.
-    extensions = [ "-builtin:mcp" ];
+    # Native MCP servers are callable from codemode scripts; enable it by default.
+    defaultTools = [ "+codemode" ];
     compaction = {
       enabled = true;
       reserveTokens = 128000;
       keepRecentTokens = 20000;
     };
+  }
+  // lib.optionalAttrs mcpPlugin.enable {
+    # pi-mcp-adapter: allow project-scoped MCP servers in trusted headless
+    # sessions without the per-server approval prompt (user decision: trust).
+    projectServers = "allow";
+    # Only when the adapter replaces pi 1.0's native built-in MCP extension:
+    # disable the builtin so they do not run side by side. The adapter checks
+    # this entry before writing settings.json itself, so a read-only
+    # (home-manager) settings file no longer triggers its EROFS warning.
+    extensions = [ "-builtin:mcp" ];
   };
   defaultKeybindings = {
     "app.tools.expand" = "ctrl+o";
@@ -370,7 +375,7 @@ let
     lib.filterAttrs (name: _: !(builtins.hasAttr name enabledMcpServers)) config.programs.mcp.servers
   );
   renderedMcpServers =
-    if mcpPlugin.enable && mcpPlugin.enableMcpIntegration && config.programs.mcp.enable then
+    if mcpPlugin.enableMcpIntegration && config.programs.mcp.enable then
       lib.mapAttrs (
         name: server:
         lib.hm.mcp.transformMcpServer {
@@ -822,7 +827,7 @@ in
       }
     ];
 
-    programs.mcp.enable = lib.mkIf (cfg.enable && mcpPlugin.enable) (lib.mkDefault true);
+    programs.mcp.enable = lib.mkIf (cfg.enable && mcpPlugin.enableMcpIntegration) (lib.mkDefault true);
 
     home.activation.localUpdaterState =
       lib.mkIf (cfg.enable && localUpdater.enable && pkgs.stdenv.hostPlatform.isLinux)
@@ -1014,6 +1019,11 @@ in
       };
       "${cfg.configDir}/mcp-adapter.json" = lib.mkIf (mcpPlugin.enable && renderedMcpConfig != { }) {
         source = jsonFormat.generate "pi-mcp-adapter.json" renderedMcpConfig;
+      };
+      # Native MCP (adapter off). Read-only: /mcp exposure edits cannot persist;
+      # change programs.mcp.servers and switch instead.
+      "${cfg.configDir}/mcp.json" = lib.mkIf (!mcpPlugin.enable && renderedMcpServers != { }) {
+        source = jsonFormat.generate "pi-mcp.json" { mcpServers = renderedMcpServers; };
       };
       # ponytail: immutable config disables /optimizer persistence; change module options and switch.
       "${cfg.configDir}/optimizer.json" = lib.mkIf optimizerPlugin.enable {
