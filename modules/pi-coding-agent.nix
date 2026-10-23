@@ -964,6 +964,10 @@ in
           bash-judge = lib.mkDefault ../config/extensions/bash-judge;
         })
         { rpiv-herdr-bridge = lib.mkDefault ../config/extensions/rpiv-herdr-bridge; }
+        # Native MCP only reads .pi/mcp.json; the adapter already reads .mcp.json itself.
+        (lib.mkIf (!mcpPlugin.enable) {
+          project-mcp-json = lib.mkDefault ../config/extensions/project-mcp-json;
+        })
       ];
       skills = lib.mapAttrs (_: lib.mkDefault) (repoSkills // patchedMattSkills);
     };
@@ -987,6 +991,10 @@ in
       };
       "${cfg.configDir}/extensions/pi-idle-compact" = lib.mkIf idleCompact.enable {
         source = cfg.extensions.pi-idle-compact;
+        force = true;
+      };
+      "${cfg.configDir}/extensions/project-mcp-json" = lib.mkIf (!mcpPlugin.enable) {
+        source = cfg.extensions.project-mcp-json;
         force = true;
       };
       "${cfg.configDir}/extensions/lazy-tools" = {

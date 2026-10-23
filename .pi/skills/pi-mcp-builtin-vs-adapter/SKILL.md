@@ -12,6 +12,12 @@ no approval dialog. `plugins.pi-mcp-adapter.enable = false` renders
 `defaultTools = ["+codemode"]`. Setting `enable = true` restores the adapter,
 `-builtin:mcp` and `projectServers = "allow"`; the notes below apply then.
 
+Native Pi reads only `.pi/mcp.json`, not a root `.mcp.json`. The local extension
+`config/extensions/project-mcp-json` registers `${cwd}/.mcp.json` servers via
+`pi.registerMcpServer` (no dialog; gated only by Pi project trust, honouring
+`trust.json` and `defaultProjectTrust`). It loads only when the adapter is off,
+because the adapter already reads `.mcp.json` itself.
+
 pi 1.0 ships a native built-in MCP extension (`builtin:mcp`). The lazy
 `pi-mcp-adapter` plugin replaces `/mcp` per session, and on startup tries to
 disable the builtin by **writing `settings.json`**. On Nix/home-manager setups
