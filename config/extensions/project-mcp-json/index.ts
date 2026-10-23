@@ -7,6 +7,8 @@ import {
 	ProjectTrustStore,
 	SettingsManager,
 } from "@earendil-works/pi-coding-agent";
+import { parseDotEnv } from "./dotenv.ts";
+import { expandServer, runShell } from "./expand.ts";
 import { parseMcpJson } from "./parse.ts";
 
 /**
@@ -42,11 +44,24 @@ export default function (pi: ExtensionAPI) {
 		} catch {
 			return;
 		}
+		// Load `.env` here too: env-loader is a sibling extension and load order
+		// between the two is not guaranteed. Real environment always wins.
+		try {
+			for (const [key, value] of Object.entries(parseDotEnv(readFileSync(join(ctx.cwd, ".env"), "utf8")))) {
+				if (process.env[key] === undefined) process.env[key] = value;
+			}
+		} catch {}
 		const { servers, warnings } = parseMcpJson(content);
+		const commandCache = new Map<string, string | undefined>();
+		const run = (command: string) => {
+			if (!commandCache.has(command)) commandCache.set(command, runShell(command, ctx.cwd));
+			return commandCache.get(command);
+		};
 		for (const { name, config } of servers) {
 			try {
+				const expanded = expandServer(config, { env: process.env, run });
 				// Pi validates the entry; cast because the shape is user JSON.
-				pi.registerMcpServer(name, config as Parameters<typeof pi.registerMcpServer>[1]);
+				pi.registerMcpServer(name, expanded as Parameters<typeof pi.registerMcpServer>[1]);
 			} catch (error) {
 				warnings.push(`.mcp.json server "${name}" not registered: ${error instanceof Error ? error.message : String(error)}`);
 			}

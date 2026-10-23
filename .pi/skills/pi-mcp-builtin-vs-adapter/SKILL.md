@@ -17,6 +17,11 @@ Native Pi reads only `.pi/mcp.json`, not a root `.mcp.json`. The local extension
 `pi.registerMcpServer` (no dialog; gated only by Pi project trust, honouring
 `trust.json` and `defaultProjectTrust`). It loads only when the adapter is off,
 because the adapter already reads `.mcp.json` itself.
+It also expands `${VAR}`, `${VAR:-default}` and inline `!(shell command)` (`sh -c`,
+10s timeout) in `command`/`args`/`url`/`cwd`, and `${VAR:-default}` + `!(...)` in
+`env`/`headers` (Pi itself expands `$VAR`, `${VAR}`, whole-value `!cmd` there).
+Unset variable or failed command skips that server with a warning. It loads
+`${cwd}/.env` itself because load order against `env-loader` is not guaranteed.
 
 pi 1.0 ships a native built-in MCP extension (`builtin:mcp`). The lazy
 `pi-mcp-adapter` plugin replaces `/mcp` per session, and on startup tries to
