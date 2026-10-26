@@ -259,10 +259,10 @@
   "pi-web-access": {
     "strategy": "npm",
     "package": "pi-web-access",
-    "version": "0.44.0",
-    "src": "https://registry.npmjs.org/pi-web-access/-/pi-web-access-0.44.0.tgz",
-    "hash": "sha256-7zkrXtAhAKmPQYB8gmNxd144+FrXA/ZjkG+U8caJPps=",
-    "npmDepsHash": "sha256-0X+oXL4wvF3QFBpoKg8dEuVDmkhYuoDCWg656wCtfPE=",
+    "version": "0.45.0",
+    "src": "https://registry.npmjs.org/pi-web-access/-/pi-web-access-0.45.0.tgz",
+    "hash": "sha256-rfbUnFjeu/5J/p73B2qCKvEi+hM0fcHiDh6b4zPZpL0=",
+    "npmDepsHash": "sha256-OdZ1wtUk+igVk0AcHvVsshvZ7R7QJ10aPSd1Za25v1g=",
     "manifestTransform": {
       "delete": [
         "devDependencies",
