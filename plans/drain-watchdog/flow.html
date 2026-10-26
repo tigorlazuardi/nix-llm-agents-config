@@ -1,0 +1,572 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>drain-watchdog — flow, parameter, stop, handoff, backoff</title>
+<style>
+  :root { --bg:#0f1218; --panel:#171c26; --line:#2a3242; --fg:#d7dde8; --dim:#8b95a8; --ac:#7aa2f7; --ok:#9ece6a; --warn:#e0af68; --bad:#f7768e; }
+  * { box-sizing:border-box }
+  body { margin:0; background:var(--bg); color:var(--fg); font:15px/1.55 system-ui,sans-serif }
+  header { padding:28px 40px 12px; border-bottom:1px solid var(--line) }
+  h1 { margin:0 0 6px; font-size:24px }
+  header p { margin:0; color:var(--dim); max-width:980px }
+  nav { position:sticky; top:0; background:var(--bg); border-bottom:1px solid var(--line); padding:10px 40px; z-index:5; display:flex; gap:18px; flex-wrap:wrap }
+  nav a { color:var(--ac); text-decoration:none; font-size:14px }
+  main { padding:8px 40px 80px; max-width:1280px }
+  section { margin-top:44px }
+  h2 { font-size:20px; border-left:4px solid var(--ac); padding-left:12px; margin:0 0 6px }
+  .lead { color:var(--dim); margin:0 0 16px; max-width:980px }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:18px; overflow-x:auto }
+  .mermaid { text-align:center }
+  table { border-collapse:collapse; width:100%; font-size:14px }
+  th,td { border:1px solid var(--line); padding:8px 10px; text-align:left; vertical-align:top }
+  th { background:#1d2433; color:var(--ac) }
+  code { background:#1d2433; padding:1px 6px; border-radius:4px; font-size:13px }
+  .tag { display:inline-block; padding:1px 8px; border-radius:99px; font-size:12px; border:1px solid var(--line) }
+  .ok { color:var(--ok) } .warn { color:var(--warn) } .bad { color:var(--bad) }
+  ul { margin:6px 0 0 18px; padding:0 }
+  .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(340px,1fr)); gap:16px }
+  .note { border-left:3px solid var(--warn); padding:8px 12px; background:#1d1a12; margin-top:14px; border-radius:0 6px 6px 0 }
+</style>
+</head>
+<body>
+<header>
+  <h1>drain-watchdog — enforcement unattended drain</h1>
+  <p>Watchdog berbasis <b>interval</b>, bukan akhir turn. Tujuannya: sesi unattended tidak idle berjam-jam saat masih ada tiket <b>pickable</b> (definisi per project, lihat bagian 8), dan tidak diam menunggu input user. Idle karena menunggu child itu sah dan tidak diganggu.</p>
+  <p class="warn">Status: DRAFT desain. Entry point: <code>/watchdog [ref]</code>. Belum ada kode. Angka default masih usulan.</p>
+</header>
+<nav>
+  <a href="#s0">0 Flow user</a>
+  <a href="#s1">1 Trigger &amp; lifecycle</a>
+  <a href="#s2">2 Tick</a>
+  <a href="#s3">3 Parameter</a>
+  <a href="#s4">4 Stop</a>
+  <a href="#s5">5 Exit untuk human</a>
+  <a href="#s6">6 Backoff provider</a>
+  <a href="#s7">7 Banding</a>
+  <a href="#s8">8 Sumber queue</a>
+  <a href="#s9">9 Terbuka</a>
+  <a href="#s10">10 Executor</a>
+</nav>
+<main>
+
+<section id="s0">
+  <h2>0. Flow yang dilihat user: <code>/watchdog [ref]</code></h2>
+  <p class="lead">Satu perintah. User hanya melihat tiga hal: target yang ditemukan, rencana, dan hasil akhir. Semua di antaranya otomatis.</p>
+  <div class="card">
+<pre class="mermaid">
+flowchart TD
+  U(["/watchdog [ref]"]) --> A{"ref diberikan?"}
+  A -- ya --> R["resolve ref: map, spec, atau tiket"]
+  A -- tidak --> C["cari dari konteks sesi:<br/>issue yang disebut di percakapan,<br/>lalu branch git yang memuat nomor issue"]
+  C --> K{"ketemu tepat 1?"}
+  K -- tidak --> Q["tanya user dengan daftar kandidat<br/>(tidak pernah memilih diam-diam)"]
+  Q --> R
+  K -- ya --> R
+  R --> V["jalankan drain-queue<br/>hitung pickable, terblokir, in-flight"]
+  V --> Z{"pickable = 0?"}
+  Z -- ya --> X["TOLAK: tampilkan alasan<br/>(typo label, semua terblokir, belum di-triage)"]
+  Z -- tidak --> P["tampilkan RENCANA<br/>target, N pickable, M terblokir,<br/>lebar paralel, integration branch,<br/>apa yang akan dikecualikan"]
+  P --> OK{"user setuju?"}
+  OK -- tidak --> X2["selesai, tidak ada yang berubah"]
+  OK -- ya --> S["arm watchdog + mulai executor (bagian 10)"]
+  S --> L["jalan sampai promise tercapai<br/>atau PAUSED (bagian 4)"]
+  L --> D["laporan akhir:<br/>selesai N, handoff M, sisa terblokir"]
+</pre>
+  </div>
+  <div class="grid">
+    <div class="card">
+      <b>Resolve <code>ref</code></b>
+      <ul style="margin:6px 0 0 18px;padding:0">
+        <li>Label skill yang ada hanya <code>wayfinder:map</code>, <code>research</code>, <code>prototype</code>, <code>grilling</code>, <code>task</code>. <b>Tidak ada</b> <code>wayfinder:spec</code> atau <code>wayfinder:ticket</code>.</li>
+        <li>Spec dan tiket hasil <code>to-spec</code> / <code>to-tickets</code> adalah issue biasa, tiketnya sub-issue spec. Jadi argumen cukup satu referensi issue. Jenisnya dideteksi: ada label map berarti map, punya anak berarti spec, selain itu satu tiket.</li>
+        <li>Jira: ref berupa epic atau key (<code>XP-32</code>), dengan aturan yang sama.</li>
+      </ul>
+    </div>
+    <div class="card">
+      <b>Yang dihitung pickable</b>
+      <ul style="margin:6px 0 0 18px;padding:0">
+        <li>Open, tanpa blocker terbuka, dan berstatus setara <code>ready-for-agent</code> (Jira: <code>Ready</code>).</li>
+        <li><b><code>wayfinder:task</code>, <code>grilling</code>, <code>prototype</code>, dan <code>research</code> tidak diambil</b> kecuali tiketnya juga berstatus setara <code>ready-for-agent</code>. Tidak ada tebakan AFK/HITL dari tipe.</li>
+        <li>Akibatnya di nixvim-config: 8 tiket <code>wayfinder:task</code> (#11 sampai #18) tidak berlabel <code>ready-for-agent</code>, jadi <code>/watchdog</code> menolak arm sampai di-triage. Itu perilaku yang benar.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section id="s1">
+  <h2>1. Trigger &amp; lifecycle</h2>
+  <p class="lead">Satu state machine per sesi main. State disimpan lewat <code>appendEntry</code> supaya selamat dari compaction dan restart. Sesi child (<code>PI_SUBAGENT_ID</code> ada) selalu no-op.</p>
+  <div class="card">
+<pre class="mermaid">
+stateDiagram-v2
+  direction LR
+  [*] --> OFF
+  OFF --> ARMED: "/drain-watch on" atau auto saat /supervise /drain mulai
+  ARMED --> ARMED: tick (cek idle)
+  ARMED --> BACKOFF: run terakhir berakhir dengan error provider
+  BACKOFF --> ARMED: probe sukses
+  BACKOFF --> PAUSED: budget outage habis atau auth error
+  ARMED --> DONE: frontier 0 dan child 0
+  ARMED --> FINALIZING: frontier 0, flow punya langkah penutup
+  FINALIZING --> DONE: drain_stop done
+  ARMED --> PAUSED: breaker, hard cap, gh gagal, Esc, atau drain_stop
+  PAUSED --> ARMED: "/drain-watch resume"
+  ARMED --> OFF: "/drain-watch off"
+  DONE --> [*]
+</pre>
+  </div>
+  <div class="grid" style="margin-top:16px">
+    <div class="card">
+      <b>Yang menyalakan</b>
+      <ul>
+        <li><code>/drain-watch on</code> — manual (usulan default)</li>
+        <li>Auto saat prompt <code>/supervise</code> atau <code>/drain</code> di-input <span class="tag">keputusan #1</span></li>
+        <li><code>session_start</code> dengan entry <code>active</code> tersimpan → ARMED lagi setelah restart</li>
+      </ul>
+    </div>
+    <div class="card">
+      <b>Yang me-reset jam idle</b>
+      <ul>
+        <li><code>agent_start</code>, <code>turn_start</code>, <code>input</code></li>
+        <li>Steer completion dari child masuk (jalur <code>sendMessage + triggerTurn</code> milik pi-herdr-subagents)</li>
+        <li>UI prompt blocking terbuka (<code>ui_prompt_start</code>)</li>
+      </ul>
+    </div>
+    <div class="card">
+      <b>Yang tidak pernah dipaksa</b>
+      <ul>
+        <li>Esc, abort, atau outcome <code>aborted</code> → PAUSED, tidak lanjut sendiri</li>
+        <li>Sesi child</li>
+        <li>Timer tidak dibuat di factory (aturan pi). Mulai dari command atau <code>session_start</code>, bersih di <code>session_shutdown</code></li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section id="s2">
+  <h2>2. Cara kerja satu tick</h2>
+  <p class="lead">Tiap interval, urutannya selalu sama. Nudge adalah jalan terakhir, bukan reaksi pertama.</p>
+  <div class="card">
+<pre class="mermaid">
+flowchart TD
+  T(["tick tiap tickInterval"]) --> B{"state = ARMED?"}
+  B -- tidak --> E(["tunggu tick berikut"])
+  B -- ya --> C{"main sedang jalan?<br/>!isIdle / pending msgs / UI prompt"}
+  C -- ya --> R1["reset idleSince"] --> E
+  C -- tidak --> D{"idle terus-menerus<br/>&ge; idleGrace?"}
+  D -- belum --> E
+  D -- ya --> F{"cooldown aktif?<br/>now &lt; nextAllowedAt"}
+  F -- ya --> E
+  F -- tidak --> G["OBSERVE<br/>jalankan drain-queue command dari docs/agents<br/>hasil: pickable, in-flight, terblokir<br/>+ hitung child berjalan + baca error terakhir"]
+  G --> H{"gh gagal?"}
+  H -- ya --> P1["PAUSED + notify<br/>(tidak menebak)"]
+  H -- tidak --> I{"frontier = 0<br/>DAN child = 0?"}
+  I -- ya --> I2{"ada ready terblokir<br/>atau flow punya finalisasi?"}
+  I2 -- "terblokir oleh tiket non-agent" --> DONEB["DONE-dengan-sisa + notify<br/>'B terblokir oleh A (needs-info)'"]
+  I2 -- "flow punya finalisasi" --> FIN["FINALIZING: satu nudge<br/>'selesaikan code-review, PR, cleanup,<br/>lalu drain_stop(done)'"]
+  I2 -- tidak --> DONE["DONE + notify ringkasan<br/>selesai N, handoff M"]
+  I -- tidak --> J{"ada child berjalan?"}
+  J -- ya --> K{"ada progress<br/>dalam stallLimit?"}
+  K -- ya --> E
+  K -- tidak --> N1["notify user: child stall<br/>(JANGAN nudge main)"] --> E
+  J -- tidak --> L{"error provider<br/>di run terakhir?"}
+  L -- ya --> BO["jalur BACKOFF<br/>(bagian 6)"]
+  L -- tidak --> M{"no-progress streak &ge; breakerK<br/>atau nudge total &ge; hardCap?"}
+  M -- ya --> P2["PAUSED + notify<br/>stuck di tiket #N"]
+  M -- tidak --> NUDGE["NUDGE<br/>sendMessage triggerTurn, steer<br/>nextAllowedAt += nudge backoff"]
+  NUDGE --> E
+</pre>
+  </div>
+  <div class="grid" style="margin-top:16px">
+    <div class="card">
+      <b>Isi pesan nudge</b>
+      <ul>
+        <li>Daftar tiket tersisa (nomor + judul)</li>
+        <li>"Jangan bertanya ke user. Lanjutkan flow: spawn pass berikutnya."</li>
+        <li>"Tiket ambigu/butuh info/butuh manusia → <code>drain_handoff</code>, lalu lanjut."</li>
+        <li>"Tiket low-tolerance (auth, secrets, migrasi, dll.) → <code>drain_handoff ready-for-human</code>, jangan dikerjakan."</li>
+      </ul>
+    </div>
+    <div class="card">
+      <b>Yang dihitung "progress"</b>
+      <ul>
+        <li>Set nomor tiket di queue berubah</li>
+        <li>Label atau status tiket berubah (<code>updatedAt</code>)</li>
+        <li>Child selesai atau steer masuk</li>
+        <li>Handoff terekam</li>
+      </ul>
+      <p style="margin:8px 0 0;color:var(--dim)">Progress mereset <code>noProgressStreak</code> dan ladder nudge.</p>
+    </div>
+  </div>
+</section>
+
+<section id="s3">
+  <h2>3. Parameter yang bisa berubah</h2>
+  <p class="lead">Default dari env (pola yang sama dengan <code>pi-idle-compact</code>, di-wire lewat opsi Nix <code>drainWatch.*</code> → <code>sessionVariables</code>). Flag di <code>/drain-watch on</code> menimpa untuk sesi itu dan ikut tersimpan di entry state.</p>
+  <div class="card">
+    <table>
+      <tr><th>Parameter</th><th>Default (usulan)</th><th>Fungsi</th></tr>
+      <tr><td><code>tickInterval</code></td><td>60 s</td><td>Seberapa sering watchdog memeriksa</td></tr>
+      <tr><td><code>idleGrace</code></td><td>3 menit</td><td>Idle minimal sebelum dianggap perlu nudge. Memberi waktu untuk steer child yang baru masuk</td></tr>
+      <tr><td><code>nudgeBackoff</code></td><td>3 → 6 → 12 → 24 → 30 menit (cap)</td><td>Jarak antar nudge naik tiap nudge tanpa progress</td></tr>
+      <tr><td><code>stallLimit</code></td><td>45 menit</td><td>Batas tanpa progress saat child berjalan. Lewat batas → hanya notify</td></tr>
+      <tr><td><code>breakerK</code></td><td>4</td><td>Nudge berturut-turut tanpa progress sebelum PAUSED</td></tr>
+      <tr><td><code>hardCap</code></td><td>30 nudge/sesi</td><td>Pengaman max-iterations ala Ralph</td></tr>
+      <tr><td><code>transientLadder</code></td><td>1, 2, 5, 10, 20, 30 menit + jitter</td><td>Jarak probe untuk error transien provider</td></tr>
+      <tr><td><code>quotaLadder</code></td><td>30 m, 1 j, 2 j, 3 j (cap)</td><td>Jarak probe untuk kuota/billing habis</td></tr>
+      <tr><td><code>outageBudget</code></td><td>6 jam transien, 12 jam kuota</td><td>Total waktu BACKOFF sebelum PAUSED + notify</td></tr>
+      <tr><td><code>drain-queue</code></td><td>blok di <code>docs/agents/issue-tracker.md</code></td><td>Perintah yang mencetak jumlah tiket pickable. Menggantikan <code>readyLabel</code>. Tidak ada blok = tolak arm. Lihat bagian 8</td></tr>
+            <tr><td><code>notify</code></td><td><code>ui.notify</code></td><td>Unattended perlu kanal di luar sesi <span class="tag">keputusan #3</span></td></tr>
+    </table>
+    <div class="note">Yang <b>tidak</b> bisa diubah: sesi child selalu no-op, Esc selalu menang, dan model tidak bisa menyatakan promise selesai. Hanya state tracker yang bisa.</div>
+  </div>
+</section>
+
+<section id="s4">
+  <h2>4. Kapan berhenti</h2>
+  <p class="lead">Hanya ini. Setelah berhenti, selalu ada audit entry dan notify beserta alasannya.</p>
+  <div class="card">
+    <table>
+      <tr><th>State akhir</th><th>Kondisi</th><th>Lanjut?</th></tr>
+      <tr><td class="ok"><b>DONE</b></td><td><b>pickable</b> (hasil <code>drain-queue</code>) = 0 <b>dan</b> tidak ada child berjalan. Mencakup: tiket habis, semua sisa jadi <code>needs-info</code> / <code>ready-for-human</code> / <code>wontfix</code>, atau ditutup. Tiket ready yang terblokir tiket non-agent dilaporkan sebagai sisa, bukan di-nudge. Flow ber-finalisasi (implement-spec) lewat FINALIZING dulu</td><td>Tidak. Selesai</td></tr>
+      <tr><td class="warn"><b>PAUSED</b> breaker</td><td><code>breakerK</code> nudge tanpa progress, atau <code>hardCap</code> tercapai</td><td><code>/drain-watch resume</code></td></tr>
+      <tr><td class="warn"><b>PAUSED</b> user</td><td>Esc / abort / outcome <code>aborted</code></td><td><code>/drain-watch resume</code></td></tr>
+      <tr><td class="warn"><b>PAUSED</b> infra</td><td><code>gh</code> gagal, budget outage habis, atau error auth</td><td>Perbaiki lalu <code>resume</code></td></tr>
+      <tr><td class="warn"><b>PAUSED</b> LLM</td><td>LLM memanggil <code>drain_stop(reason)</code> (lingkungan rusak, bukan soal satu tiket)</td><td>Human menangani lalu <code>resume</code></td></tr>
+      <tr><td class="dim"><b>OFF</b></td><td><code>/drain-watch off</code></td><td>Manual <code>on</code></td></tr>
+    </table>
+  </div>
+</section>
+
+<section id="s5">
+  <h2>5. Bagaimana LLM keluar saat tiket butuh manusia</h2>
+  <p class="lead">Model tidak boleh berhenti dengan bertanya "mau yang mana?". Satu-satunya jalan keluar yang sah adalah <b>mengeluarkan tiket dari queue</b>. Itu langsung dibaca watchdog sebagai progress, jadi breaker tidak menyala.</p>
+  <div class="card">
+<pre class="mermaid">
+sequenceDiagram
+  participant C as Child (implementer / reviewer)
+  participant M as Main (orchestrator)
+  participant H as Harness (drain-watchdog)
+  participant G as GitHub
+  participant U as User
+  C-->>M: steer: BLOCKED / ESCALATE / NEEDS_HUMAN_REVIEW
+  M->>H: drain_handoff(issue, kind, reason)
+  H->>G: komentar(reason) + ganti label<br/>keluar dari pickable (cara per tracker, lihat bagian 8)
+  H->>H: audit entry, progress++, noProgressStreak = 0
+  H-->>M: ok, queue sisa N, tiket berikutnya #X
+  M->>M: lanjut tiket berikutnya (tanpa tanya user)
+  Note over H: tick berikut melihat queue berkurang = progress
+  alt queue habis
+    H->>U: DONE: selesai N, handoff M (daftar + alasan)
+  end
+  opt masalah level lingkungan (auth gh hilang, repo kotor, disk penuh)
+    M->>H: drain_stop(reason)
+    H->>U: PAUSED + notify (alasan)
+  end
+</pre>
+  </div>
+  <div class="grid" style="margin-top:16px">
+    <div class="card">
+      <b>Peta <code>kind</code> → label</b>
+      <table style="margin-top:8px">
+        <tr><th>kind</th><th>Label baru</th><th>Pakai saat</th></tr>
+        <tr><td><code>needs-info</code></td><td><code>needs-info</code></td><td>Tiket ambigu / spec kurang / ada pertanyaan produk</td></tr>
+        <tr><td><code>human</code></td><td><code>ready-for-human</code></td><td>Butuh keputusan/aksi manusia, ESCALATE, atau risiko low-tolerance (auth, secrets, migrasi, public API, uang, penghapusan data)</td></tr>
+        <tr><td><code>wontfix</code></td><td><code>wontfix</code></td><td>Tidak akan dikerjakan, dengan alasan</td></tr>
+      </table>
+    </div>
+    <div class="card">
+      <b>Kenapa tool, bukan <code>gh</code> langsung</b>
+      <ul>
+        <li>Label dan komentar selalu konsisten: tiket yang di-handoff pasti keluar dari hasil <code>drain-queue</code>, tidak ada tiket "mati tapi masih di queue" (Jira: harus ganti status, label saja tidak cukup)</li>
+        <li>Audit dan progress terekam otomatis</li>
+        <li>Nudge bisa menyebut nama tool, jadi jalan keluar tidak ambigu</li>
+        <li>Hanya main yang bisa memanggil. Child tidak</li>
+      </ul>
+      <p style="margin:8px 0 0;color:var(--dim)">Fallback kalau tidak mau tool: model menjalankan <code>gh issue edit</code> sendiri. Lebih sederhana tapi rawan label menggantung <span class="tag">keputusan #4</span>.</p>
+    </div>
+  </div>
+  <div class="note">Safety: tiket low-tolerance tidak pernah dikerjakan di drain. Ia di-handoff <i>sebelum</i> claim. Tujuannya menjaga aturan AGENTS.md (auth, secrets, migrasi, dst.) tetap berlaku walau loop memaksa lanjut.</div>
+</section>
+
+<section id="s6">
+  <h2>6. Backoff: kuota habis &amp; provider penuh/network</h2>
+  <p class="lead">Fakta dari source pi: retry bawaan hanya 3 kali (2 s, 4 s, 8 s, maks 60 s). Setelah itu run berakhir <code>error</code> dan main idle. Error kuota/billing ditandai <i>non-retryable</i>, jadi pi menyerah <b>langsung</b>. Di titik itulah watchdog mengambil alih dengan ladder yang jauh lebih panjang.</p>
+  <div class="card">
+<pre class="mermaid">
+flowchart TD
+  E["agent_end: stopReason = error<br/>simpan errorMessage"] --> C{"klasifikasi errorMessage"}
+  C -- "isRetryableAssistantError = true<br/>429, 5xx, overloaded, timeout,<br/>network, stream ended" --> T
+  C -- "quota / billing / usage limit /<br/>insufficient_quota / balance" --> Q
+  C -- "401 / 403 / invalid key / unauthorized" --> A
+  C -- "lainnya" --> U
+
+  T["TRANSIENT<br/>pi sudah retry 3x lalu menyerah"] --> TL["ladder 1, 2, 5, 10, 20, 30 m<br/>+ jitter &plusmn;20%"]
+  Q["QUOTA<br/>pi tidak retry sama sekali"] --> QL["ladder 30 m, 1 j, 2 j, 3 j<br/>pakai waktu reset dari pesan bila ada"]
+  A["AUTH"] --> PA["PAUSED + notify<br/>butuh human. tidak ada retry"]
+  U["UNKNOWN"] --> UL["perlakukan seperti TRANSIENT<br/>tapi tetap dihitung ke breaker"]
+
+  TL --> P
+  QL --> P
+  UL --> P
+  P["PROBE: nudge minimal<br/>'lanjutkan flow' tanpa daftar panjang"] --> R{"turn probe sukses?<br/>assistant tanpa stopReason=error"}
+  R -- ya --> OK["reset ladder<br/>kembali ARMED (normal)"]
+  R -- gagal lagi --> N{"total waktu BACKOFF<br/>&gt; outageBudget?"}
+  N -- belum --> NX["naik satu rung ladder<br/>set nextAllowedAt"] --> P
+  N -- sudah --> PB["PAUSED + notify<br/>'provider down / kuota habis X jam'"]
+</pre>
+  </div>
+  <div class="grid" style="margin-top:16px">
+    <div class="card">
+      <b>Aturan penting</b>
+      <ul>
+        <li><b>Backoff tidak menambah breaker</b> (kecuali UNKNOWN). Outage bukan "agent buntu". Ia punya budget sendiri (<code>outageBudget</code>).</li>
+        <li><b>Probe = nudge minimal.</b> Satu request murah, bukan prompt panjang yang akan gagal berulang.</li>
+        <li><b>Jitter</b> supaya beberapa sesi tidak menembak provider bersamaan saat pulih.</li>
+        <li>Selama BACKOFF, idle <b>tidak</b> memicu nudge normal. Hanya ladder yang jalan.</li>
+        <li>Probe sukses satu kali cukup untuk kembali ARMED. Ladder di-reset.</li>
+      </ul>
+    </div>
+    <div class="card">
+      <b>Ketika child yang kena error</b>
+      <ul>
+        <li>Child gagal → completion failure datang ke main sebagai steer. Itu terhitung <b>progress</b> (ada event), bukan stall.</li>
+        <li>Main memutuskan sesuai flow (retry pass, atau <code>drain_handoff</code> kalau habis budget).</li>
+        <li>Watchdog tidak menyentuh child dan tidak mem-poll transcript.</li>
+        <li>Kalau <i>semua</i> child kena kuota yang sama, main akan kena juga → jalur BACKOFF di atas.</li>
+      </ul>
+    </div>
+    <div class="card">
+      <b>Tabel ringkas</b>
+      <table style="margin-top:8px">
+        <tr><th>Kelas</th><th>pi native</th><th>Watchdog</th></tr>
+        <tr><td>TRANSIENT</td><td>3 retry, ≤ 60 s</td><td>ladder ≤ 30 m, budget 6 j</td></tr>
+        <tr><td>QUOTA</td><td>0 retry</td><td>ladder ≤ 3 j, budget 12 j</td></tr>
+        <tr><td>AUTH</td><td>0 retry</td><td>PAUSED langsung</td></tr>
+        <tr><td>UNKNOWN</td><td>0 retry</td><td>ladder transien + breaker</td></tr>
+        <tr><td>Context overflow</td><td>compaction</td><td>tidak ikut campur</td></tr>
+      </table>
+    </div>
+  </div>
+  <div class="note">
+    Ceiling (ponytail): klasifikasi memakai <code>isRetryableAssistantError</code> dari pi-ai (tidak menyalin regex) plus satu regex kecil untuk quota dan auth. Fallback model/provider lain (ganti model saat kuota habis) sengaja belum dimasukkan. Tambahkan saat ada kebutuhan nyata. Parameter ladder disimpan di state supaya bisa disesuaikan per sesi.
+  </div>
+</section>
+
+<section id="s7">
+  <h2>7. Banding: supervise, implement-spec, /drain, drain-watchdog</h2>
+  <p class="lead">Keempatnya menjawab pertanyaan yang berbeda, jadi bukan pengganti satu sama lain. <b>supervise</b> dan <b>implement-spec</b> adalah <i>executor</i>. <b>/drain</b> executor plus loop antar-tiket. <b>drain-watchdog</b> bukan executor sama sekali: ia lapisan <i>liveness</i> yang bisa dipasang di atas salah satunya.</p>
+  <div class="card">
+<pre class="mermaid">
+flowchart TB
+  W["drain-watchdog<br/>LIVENESS: sesi tidak boleh idle<br/>saat masih ada kerja"]
+  O["ORCHESTRATOR: tiket mana berikutnya<br/>implement-spec (task graph + integration branch)<br/>atau /drain (queue tracker + ledger)"]
+  S["/supervise: SATU tiket<br/>writer, standards-reviewer, check, deep-reviewer"]
+  W -. "memantau &amp; menyuruh lanjut" .-> O
+  O -- "1 accepted scope" --> S
+  S -- "verdict + evidence" --> O
+  O -- "tiket tidak bisa lanjut" --> H["drain_handoff<br/>needs-info / ready-for-human"]
+</pre>
+  </div>
+  <div class="card" style="margin-top:16px">
+    <table>
+      <tr><th>Aspek</th><th>/supervise (sekarang)</th><th>implement-spec</th><th>/drain (sekarang)</th><th>drain-watchdog (usulan)</th></tr>
+      <tr><td><b>Pertanyaan</b></td><td>"Satu tiket ini sudah benar?"</td><td>"Seluruh spec sudah jadi di satu branch?"</td><td>"Tiket apa berikutnya di tracker, dan kirim sampai MR"</td><td>"Apakah sesi masih bergerak?"</td></tr>
+      <tr><td><b>Scope</b></td><td>1 accepted scope (spec/tiket/fix)</td><td>1 spec dengan banyak tiket (task graph, ada <i>frontier</i>)</td><td>Queue tiket lintas project, satu tiket per putaran</td><td>Sesi main. Tidak tahu isi kerja</td></tr>
+      <tr><td><b>Pegang loop antar-tiket</b></td><td class="bad">Tidak ada</td><td>Main, lewat prosa skill</td><td>Main, lewat prompt state machine</td><td>Harness (timer)</td></tr>
+      <tr><td><b>Concurrency</b></td><td>Tepat satu writer sekali waktu</td><td>Banyak implementer paralel, masing-masing worktree + branch sendiri</td><td>Satu tiket aktif. Housekeeper berjalan paralel sebagai sibling</td><td>Mengamati N child. Tidak mengatur</td></tr>
+      <tr><td><b>Quality gate</b></td><td>Standards review, <code>checkCommand</code>, spec review. Fix loop maks 10</td><td><code>tdd</code> per tiket. <code>code-review</code> <b>sekali di akhir</b>, fix oleh satu implementer</td><td>build-lead, quick-reviewer, deep-reviewer. Budget 10</td><td>Tidak ada. Bukan tugasnya</td></tr>
+      <tr><td><b>State</b></td><td>Path report/evidence per run</td><td>Tracker + integration branch. Tidak ada state loop</td><td>Ledger JSON di komentar tracker, contract ber-hash, singleton</td><td><code>appendEntry</code> di sesi (nudge, streak, state)</td></tr>
+      <tr><td><b>Selesai kalau</b></td><td>PASS / blocked / 10 fix gagal</td><td class="warn">Semua tiket selesai, <b>dinilai model</b></td><td>Ticket kosong terbukti di semua project/tier</td><td>Queue frontier 0 dan child 0, <b>dinilai harness</b></td></tr>
+      <tr><td><b>Jalan keluar human</b></td><td>Return terminal <code>BLOCKED</code>/<code>ESCALATE</code> ke user</td><td class="bad">Tidak didefinisikan</td><td>Pindah ke role <code>needsHumanReview</code></td><td><code>drain_handoff</code> (label + komentar) dan <code>drain_stop</code></td></tr>
+      <tr><td><b>Enforcement dari harness</b></td><td class="bad">Tidak ada</td><td class="bad">Tidak ada</td><td class="warn">Hanya di prompt. Bisa berhenti sendiri</td><td class="ok">Ada. Inilah isinya</td></tr>
+      <tr><td><b>Setup</b></td><td>Tidak ada</td><td>Tracker + <code>/setup-matt-pocock-skills</code></td><td>Berat: <code>/drain-wizard</code>, contract, 7 agent, mapping role</td><td>Ringan: satu extension + satu tombol</td></tr>
+    </table>
+  </div>
+  <h3 style="margin:26px 0 8px;font-size:16px">Yang ketemu dari perbandingan ini</h3>
+  <div class="grid">
+    <div class="card">
+      <b class="warn">1. Queue harus frontier-aware</b>
+      <p style="margin:6px 0 0">implement-spec memperlakukan tiket sebagai <i>task graph</i> dengan relasi blocking, bukan daftar. Desain gw sebelumnya menghitung semua label <code>ready-for-agent</code>. Itu salah: tiket yang diblokir tiket lain tidak bisa dimulai.</p>
+      <ul>
+        <li>Skenario deadlock: tiket B <code>ready-for-agent</code> tapi diblokir A, lalu A di-handoff ke <code>needs-info</code>. Queue = 1, child = 0, tidak ada yang runnable. Watchdog akan nudge sia-sia sampai breaker.</li>
+        <li>Perbaikan: hitung hanya tiket <b>unblocked</b>. Kalau sisa ready semuanya terblokir oleh tiket non-agent, itu <b>DONE-dengan-sisa</b> dan notify "B terblokir oleh A (needs-info)". Bukan nudge.</li>
+        <li>Diagram lifecycle (bagian 1) dan tick (bagian 2) sudah memakai frontier dan cabang DONE-dengan-sisa.</li>
+      </ul>
+    </div>
+    <div class="card">
+      <b class="warn">2. "Selesai" bukan hanya tiket habis</b>
+      <p style="margin:6px 0 0">implement-spec masih punya langkah <b>setelah</b> tiket terakhir: <code>code-review</code> di integration branch, fix, PR ready, cleanup worktree. Kalau DONE ditetapkan saat queue = 0, watchdog berhenti sebelum fase finalisasi.</p>
+      <ul>
+        <li>Usul: state <b>FINALIZING</b>. Saat frontier habis, satu nudge khusus: "selesaikan finalisasi lalu panggil <code>drain_stop(done)</code>".</li>
+        <li>Hanya aktif untuk flow yang punya langkah penutup. Untuk flow per-tiket murni (supervise berulang, /drain) langsung DONE.</li>
+        <li>Ini sedikit melonggarkan prinsip "model tidak menyatakan selesai". Tapi hanya untuk penutup, bukan untuk tiket.</li>
+      </ul>
+    </div>
+    <div class="card">
+      <b class="warn">3. Concurrency mengubah arti "progress"</b>
+      <p style="margin:6px 0 0">supervise: satu writer. implement-spec: banyak implementer paralel. Watchdog tidak boleh berasumsi satu child.</p>
+      <ul>
+        <li>"Ada child berjalan" = hitungan, bukan boolean.</li>
+        <li>Progress = salah satu dari N child bergerak, atau satu tiket berubah. Stall hanya kalau <b>semuanya</b> diam selama <code>stallLimit</code>.</li>
+        <li>Konflik merge dua implementer bukan urusan watchdog. Itu merger subagent.</li>
+      </ul>
+    </div>
+    <div class="card">
+      <b class="warn">4. Ada celah di tengah</b>
+      <p style="margin:6px 0 0">Yang lo pakai sekarang: <code>supervise</code> per tiket, di-loop oleh main. Tapi tidak ada prompt yang melakukan loop frontier itu dengan gate level supervise.</p>
+      <ul>
+        <li>implement-spec: loop frontier ada, tapi gate tipis (review sekali di akhir).</li>
+        <li>/drain: gate kuat dan loop ada, tapi setup berat (wizard, contract, ledger) dan hanya cocok untuk tracker bermapping role.</li>
+        <li>supervise: gate kuat, tidak ada loop.</li>
+      </ul>
+      <p style="margin:6px 0 0">Watchdog sengaja <b>tidak</b> menutup celah ini. Opsi terpisah kalau lo mau: prompt ringan yang mengurus frontier dan memanggil supervise per tiket. Itu keputusan lain, bukan bagian spec ini.</p>
+    </div>
+  </div>
+  <div class="note">
+    <b>Keselamatan arming.</b> Kalau saat <code>/drain-watch on</code> frontier sudah 0, jangan langsung DONE. Tolak arm dan tampilkan alasan. Typo label (<code>ready-for-agents</code> vs <code>ready-for-agent</code>) atau repo salah kalau tidak dijaga akan terbaca sebagai "semua selesai", dan sesi unattended berhenti diam-diam tanpa ada yang dikerjakan. Label canonical di repo ini <code>ready-for-agent</code> (tanpa s), lihat <code>docs/agents/triage-labels.md</code>.
+  </div>
+</section>
+
+<section id="s8">
+  <h2>8. Sumber queue: dari <code>docs/agents</code>, bukan hardcode</h2>
+  <p class="lead">Diperiksa langsung di skill <code>setup-matt-pocock-skills</code>, <code>wayfinder</code>, <code>to-tickets</code>, <code>triage</code>.</p>
+  <div class="grid">
+    <div class="card">
+      <b>Di mana definisi queue ditulis</b>
+      <ul style="margin:6px 0 0 18px;padding:0">
+        <li><b>Bukan di ADR.</b> <code>docs/adr/</code> hanya keputusan domain (dibuat <code>domain-modeling</code>). Dicek di nixvim-config, wallhalla, zerosum, artifact-portal: tidak ada ADR soal tracker.</li>
+        <li>Setup menulis <code>docs/agents/issue-tracker.md</code>. Seed GitHub / GitLab / local-markdown punya bagian <b>Wayfinding operations</b> berisi <b>Blocking</b>, <b>Frontier query</b>, <b>Claim</b>, <b>Resolve</b>. Tracker lain ("other") ditulis bebas dari deskripsi user.</li>
+        <li>Setup menulis <code>docs/agents/triage-labels.md</code>: pemetaan 5 role ke label tracker.</li>
+        <li>Semua berbentuk <b>prosa untuk model</b>, bukan perintah yang bisa dieksekusi harness.</li>
+      </ul>
+    </div>
+    <div class="card">
+      <b>Dua vokabuler "siap" yang berbeda</b>
+      <table>
+        <tr><th></th><th>Triage</th><th>Wayfinder</th></tr>
+        <tr><td>Penanda</td><td>label <code>ready-for-agent</code> = AFK</td><td><b>frontier</b>: open, tanpa blocker terbuka, tanpa assignee</td></tr>
+        <tr><td>AFK/HITL</td><td>label</td><td>tipe <code>wayfinder:*</code>: research=AFK, prototype/grilling=HITL, <b>task=keduanya</b></td></tr>
+        <tr><td>Keluar</td><td>ganti label</td><td>close / claim (assignee)</td></tr>
+      </table>
+      <p style="margin:8px 0 0">to-tickets menaruh keduanya sekaligus: tiket berstatus <code>ready-for-agent</code> dan dikerjakan dari frontier.</p>
+    </div>
+  </div>
+  <div class="note"><b>Terjawab.</b> <code>wayfinder:task</code> tidak pernah diambil drain. Yang diambil hanya tiket berstatus setara <code>ready-for-agent</code>, apa pun tipenya. Tipe tiket tidak dipakai menebak AFK/HITL.</div>
+  <div class="card" style="margin-top:14px">
+    <b>Usulan (belum diputuskan): ekstensi skill dengan blok <code>drain-queue</code></b>
+    <p style="margin:6px 0">Setup skill ditambah satu bagian di <code>docs/agents/issue-tracker.md</code>. Watchdog hanya membaca blok ini, tanpa kode tracker di extension.</p>
+    <pre style="background:#0c0f14;padding:10px;border-radius:6px;overflow:auto">## Drain queue
+
+```drain-queue
+# stdout: satu angka = jumlah tiket pickable (AFK, unblocked, tidak HITL). exit 0 = query sukses.
+gh api graphql ... | jq ...
+```
+```drain-inflight
+# tiket yang sedang dikerjakan dan belum selesai (assignee / In Progress)
+```</pre>
+    <ul style="margin:6px 0 0 18px;padding:0">
+      <li>Blok tidak ada, atau exit non-0, atau output bukan angka: <b>tolak arm / PAUSED</b>. Tidak pernah dianggap "selesai".</li>
+      <li>GitHub: frontier dari <code>issue_dependencies_summary.blocked_by</code>. Jira: <code>status = Ready</code> (automation yang menjamin blocker selesai) ditambah pengecualian HITL. Huly/drain: role <code>ready</code>. Tiap project menulis command-nya sendiri.</li>
+      <li>Menaruh command di docs yang sudah dibaca agent berarti satu sumber kebenaran untuk model dan harness. Risiko: command bisa drift dari prosa di atasnya, jadi perlu satu check saat arm yang menjalankannya.</li>
+    </ul>
+  </div>
+</section>
+
+<section id="s9">
+  <h2>9. Keputusan terbuka &amp; hal yang belum terverifikasi</h2>
+  <div class="grid">
+    <div class="card">
+      <b>Perlu keputusan</b>
+      <ol style="margin:6px 0 0 18px;padding:0">
+        <li><b>Aktivasi:</b> manual <code>/drain-watch on</code>, atau otomatis saat <code>/supervise</code> / <code>/drain</code>?</li>
+        <li><b>Default waktu</b> di bagian 3 cocok untuk unattended semalaman?</li>
+        <li><b>Notifikasi saat PAUSED/DONE:</b> cukup <code>ui.notify</code>, atau perlu keluar sesi (relay)?</li>
+        <li><b>Jalan keluar human:</b> tool <code>drain_handoff</code> + <code>drain_stop</code> (usulan), atau model pakai <code>gh</code> langsung?</li>
+        <li><b>Cakupan:</b> GitHub label saja dulu, atau <code>/drain</code> dengan ledger juga?</li>
+        <li><b>Blocking:</b> terjawab. GitHub pakai dependency native (<code>blocked_by</code>, open saja), Jira link <code>Blocks</code>. Sisa: blok <code>drain-queue</code> di docs (bagian 8) diterima atau tidak?</li>
+        <li><b>Sisa risiko (bagian 10):</b> pengukuran durasi review per axis belum ada mekanismenya di harness (perlu diukur sebelum kode).</li>
+        <li><b>Finalisasi:</b> pakai state FINALIZING untuk flow implement-spec, atau cukup DONE saat frontier habis?</li>
+        <li><b>Celah di tengah:</b> mau prompt ringan loop-frontier yang memanggil supervise per tiket? Terpisah dari spec ini.</li>
+      </ol>
+    </div>
+    <div class="card">
+      <b>Belum terverifikasi (cek sebelum kode)</b>
+      <ol style="margin:6px 0 0 18px;padding:0">
+        <li>Deteksi "ada child berjalan" dari extension lain. <code>runningSubagents</code> milik runtime pi-herdr-subagents; belum tentu bisa dibaca. Fallback: hitung dari <code>tool_call subagent</code> dan steer completion (rapuh setelah restart).</li>
+        <li><code>pi.sendMessage(..., {triggerTurn:true})</code> dari timer saat idle benar-benar memulai turn. Perlu diuji.</li>
+        <li>Tiket yang sedang dikerjakan masih berlabel <code>ready-for-agent</code>? Kalau ya, promise "queue = 0" hanya bisa benar bersama "child = 0".</li>
+        <li>Teks error kuota dari provider yang dipakai (apakah cocok regex quota).</li>
+      </ol>
+    </div>
+  </div>
+</section>
+
+<section id="s10">
+  <h2>10. Executor: integration branch + gate dua axis + batas waktu</h2>
+  <p class="lead">Dasarnya <code>implement-spec</code> (worktree paralel, merger, integration branch). Gate per tiket memakai pola <code>/supervise</code> (standards + check + spec). Prompt baru, bukan perubahan <code>/supervise</code>.</p>
+  <div class="card">
+<pre class="mermaid">
+flowchart TD
+  F["frontier: tiket pickable"] --> W["tiap tiket: worktree + branch sendiri<br/>(paralel antar tiket)"]
+  W --> I["writer: tdd, merge ujung integration branch"]
+  I --> SR["standards-review (axis standards)"]
+  SR --> T1{"FAIL<br/>setelah &gt;10 menit?"}
+  T1 -- ya --> SPLIT
+  T1 -- tidak, FAIL cepat --> FIX["fix pass (maks 10, budget bersama)"] --> SR
+  SR -- PASS --> CK["checkCommand oleh main"]
+  CK -- gagal --> FIX
+  CK -- hijau --> DR["deep-review (axis spec)"]
+  DR --> T2{"FAIL<br/>setelah &gt;20 menit?"}
+  T2 -- ya --> SPLIT
+  T2 -- tidak, FAIL cepat --> FIX
+  DR -- PASS --> M["merger subagent ke integration branch"]
+  M --> CK2["checkCommand pada integration branch"]
+  CK2 -- gagal --> FIX
+  CK2 -- hijau --> F2["hitung ulang frontier, spawn tiket baru"]
+  F2 --> F
+  SPLIT["BUAT TIKET ANAK:<br/>scope implementasi dan review lebih kecil<br/>tiket asal di-BLOCK oleh tiket anak"]
+  SPLIT --> F
+</pre>
+  </div>
+  <div class="grid">
+    <div class="card">
+      <b>Beda dari implement-spec</b>
+      <ul style="margin:6px 0 0 18px;padding:0">
+        <li>Review <b>per tiket</b>, bukan sekali di akhir. Review besar di akhir bisa berjam-jam karena banyak command bash.</li>
+        <li>Dua axis dipertahankan: standards dan spec. Keduanya menangkap isu yang berbeda.</li>
+        <li><code>checkCommand</code> dijalankan setelah tiap merge, jadi integrasi rusak ketahuan sejak merge pertama.</li>
+        <li>Review tidak pernah lebih besar dari satu tiket, karena tiket besar dipecah.</li>
+      </ul>
+    </div>
+    <div class="card">
+      <b>Beda dari /supervise</b>
+      <ul style="margin:6px 0 0 18px;padding:0">
+        <li>Satu writer <b>per worktree</b>, bukan satu writer global. Ini aturan otoritas baru, jadi harus prompt sendiri.</li>
+        <li>Banyak tiket berjalan bersamaan. Kecepatan didapat dari lebar frontier, yang ditentukan engineering spec.</li>
+        <li>Ditambah merger, integration branch, dan aturan pecah tiket.</li>
+      </ul>
+    </div>
+  </div>
+  <div class="card" style="margin-top:14px">
+    <b>Aturan pecah tiket (SPLIT)</b>
+    <ol style="margin:6px 0 0 18px;padding:0">
+      <li>Pemicu (DIPUTUSKAN): review yang <b>selesai dengan FAIL</b> setelah durasinya melewati 10 menit (standards) atau 20 menit (deep). Bukan kill paksa. Review yang selesai cepat dengan FAIL tetap masuk fix loop biasa. Review yang menggantung tidak memicu SPLIT; ia jatuh ke stall watchdog.</li>
+      <li>Buat tiket anak berisi scope implementasi dan review yang lebih kecil. Tiket asal di-block oleh tiket anak lewat blocking native tracker.</li>
+      <li>Karena tiket asal terblokir, ia keluar dari pickable sampai anaknya selesai. Watchdog membacanya sebagai progress, bukan stall.</li>
+      <li>Hasil kerja parsial di worktree tiket asal tidak dibuang diam-diam. Ia dicatat di tiket anak sebagai pointer.</li>
+    </ol>
+  </div>
+  <div class="note"><b>Keputusan.</b> Depth cap pemecahan dibuat besar (misal 5), jadi rekursi praktis berhenti sendiri sebelum cap; cap hanya pengaman. Di atas cap, tiket jadi <code>ready-for-human</code>. Tiket anak hasil SPLIT boleh ditandai setara <code>ready-for-agent</code> oleh agent, khusus untuk tiket SPLIT dan tercatat di audit. Pengecualian ini tidak berlaku untuk tiket lain.</div>
+  <div class="note"><b>Yang belum ada mekanismenya.</b> Untuk mengukur durasi per review, state executor perlu mencatat mulai dan selesai tiap review per axis. Di luar jangkauan extension watchdog; itu tugas prompt executor (catat di state/laporan pass). Angka durasinya butuh pembuktian sebelum dipakai sebagai pemicu.</div>
+</section>
+
+</main>
+<script type="module">
+  import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+  mermaid.initialize({ startOnLoad: true, theme: "dark", securityLevel: "loose", flowchart: { htmlLabels: true, curve: "basis" } });
+</script>
+</body>
+</html>
