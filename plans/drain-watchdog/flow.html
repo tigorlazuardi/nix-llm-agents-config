@@ -68,9 +68,10 @@ flowchart TD
   V --> Z{"pickable = 0?"}
   Z -- ya --> X["TOLAK: tampilkan alasan<br/>(typo label, semua terblokir, belum di-triage)"]
   Z -- tidak --> P["tampilkan RENCANA<br/>target, N pickable, M terblokir,<br/>lebar paralel, integration branch,<br/>apa yang akan dikecualikan"]
-  P --> OK{"user setuju?"}
-  OK -- tidak --> X2["selesai, tidak ada yang berubah"]
-  OK -- ya --> S["arm watchdog + mulai executor (bagian 10)"]
+  P --> PR["PREP interaktif: pertanyaan masih sah<br/>cek kesiapan: drain-queue jalan,<br/>checkCommand jalan, target benar"]
+  PR --> RD{"model nyatakan READY,<br/>user konfirmasi unattended?"}
+  RD -- tidak --> X2["selesai, tidak ada yang berubah"]
+  RD -- ya --> S["arm watchdog + mulai executor (bagian 10)<br/>dari sini model tidak bertanya lagi"]
   S --> L["jalan sampai promise tercapai<br/>atau PAUSED (bagian 4)"]
   L --> D["laporan akhir:<br/>selesai N, handoff M, sisa terblokir"]
 </pre>
@@ -83,6 +84,7 @@ flowchart TD
         <li>Spec dan tiket hasil <code>to-spec</code> / <code>to-tickets</code> adalah issue biasa, tiketnya sub-issue spec. Jadi argumen cukup satu referensi issue. Jenisnya dideteksi: ada label map berarti map, punya anak berarti spec, selain itu satu tiket.</li>
         <li>Jira: ref berupa epic atau key (<code>XP-32</code>), dengan aturan yang sama.</li>
       </ul>
+      <p style="margin:8px 0 0"><b>Dua fase.</b> PREP interaktif: user masih ada, model boleh bertanya, wajib membuktikan kesiapan (command queue dan check benar-benar dijalankan, target dikonfirmasi), lalu menyatakan READY. ARMED: user sudah pergi, pertanyaan ke user adalah bug; model yang menutup turn dengan pertanyaan justru sasaran nudge.</p>
     </div>
     <div class="card">
       <b>Yang dihitung pickable</b>
