@@ -27,6 +27,22 @@ const guarded: NodeJS.ProcessEnv = { PROBE_A: "from-real-env" };
 assert.equal(loadDotEnvInto(guarded, dir), 1);
 assert.equal(guarded.PROBE_A, "from-real-env");
 
+// reload: owned keys refresh and get removed; real env still untouched
+const owned = new Set<string>();
+const live: NodeJS.ProcessEnv = { REAL: "keep" };
+writeFileSync(join(dir, ".env"), "PROBE_A=1\nPROBE_B=2\nREAL=shadow\n");
+assert.equal(loadDotEnvInto(live, dir, owned), 2);
+writeFileSync(join(dir, ".env"), "PROBE_A=changed\nREAL=shadow\n");
+assert.equal(loadDotEnvInto(live, dir, owned), 1);
+assert.equal(live.PROBE_A, "changed");
+assert.equal(live.PROBE_B, undefined);
+assert.equal(live.REAL, "keep");
+// .env gone: owned keys cleaned
+rmSync(join(dir, ".env"));
+assert.equal(loadDotEnvInto(live, dir, owned), 0);
+assert.equal(live.PROBE_A, undefined);
+assert.equal(live.REAL, "keep");
+
 rmSync(dir, { recursive: true, force: true });
 rmSync(missingDir, { recursive: true, force: true });
 console.log("env-loader self-check passed");

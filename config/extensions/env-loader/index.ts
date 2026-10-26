@@ -9,7 +9,8 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
  * stdio servers (inheritEnv), so values land in both mcp.json substitution and
  * the server process itself.
  *
- * Real environment always wins: existing variables are never overwritten.
+ * Real environment always wins: pre-existing variables are never overwritten.
+ * Keys the loader set itself are refreshed on /reload and removed when deleted.
  * Values are never logged or echoed (may contain secrets).
  *
  * ponytail: fixed to simple `KEY=VALUE` lines (optional `export`, single-level
@@ -36,28 +37,47 @@ export function parseDotEnv(content: string): Record<string, string> {
 	return vars;
 }
 
-/** Load `.env` from `dir` into `env`. Returns the number of variables set. */
-export function loadDotEnvInto(env: NodeJS.ProcessEnv, dir: string): number {
-	let content: string;
+/**
+ * Load `.env` from `dir` into `env`. Returns the number of variables set.
+ *
+ * `owned` tracks keys this loader set earlier. Owned keys are refreshed on
+ * reload and removed when gone from `.env`; keys from the real environment
+ * (not in `owned`) are never touched.
+ */
+export function loadDotEnvInto(env: NodeJS.ProcessEnv, dir: string, owned: Set<string> = new Set()): number {
+	let content = "";
 	try {
 		content = readFileSync(join(dir, ".env"), "utf8");
 	} catch {
-		return 0;
+		// missing .env: treated as empty so stale owned keys get cleaned up
+	}
+	const vars = parseDotEnv(content);
+	for (const key of [...owned]) {
+		if (!(key in vars)) {
+			delete env[key];
+			owned.delete(key);
+		}
 	}
 	let loaded = 0;
-	for (const [key, value] of Object.entries(parseDotEnv(content))) {
-		if (env[key] === undefined) {
+	for (const [key, value] of Object.entries(vars)) {
+		if (env[key] === undefined || owned.has(key)) {
 			env[key] = value;
+			owned.add(key);
 			loaded++;
 		}
 	}
 	return loaded;
 }
 
+// globalThis, not module state: /reload re-imports this module, and the set
+// must survive so the new runtime knows which keys it may overwrite.
+const OWNED = Symbol.for("env-loader.owned");
+const ownedKeys = (): Set<string> => ((globalThis as any)[OWNED] ??= new Set<string>());
+
 export default function (pi: ExtensionAPI) {
 	// session_start re-fires (and extensions rebind) on new/resume/fork, so a
 	// session that starts in a different cwd picks up that directory's .env.
 	pi.on("session_start", (_event, ctx) => {
-		loadDotEnvInto(process.env, ctx.cwd);
+		loadDotEnvInto(process.env, ctx.cwd, ownedKeys());
 	});
 }
