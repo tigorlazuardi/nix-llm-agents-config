@@ -768,6 +768,9 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 
 	const env = process.env as Record<string, string | undefined>;
 	const tickMs = readIntEnv(env, "PI_WATCHDOG_TICK_MS", 60_000);
+	// The core's handleTick also floors on its own IDLE_GRACE_MS (3m, frozen in
+	// the #29 core): a value configured below that floor still waits the full
+	// 3m before a tick can act, it just no longer widens the window beyond it.
 	const idleGraceMs = readIntEnv(env, "PI_WATCHDOG_IDLE_GRACE_MS", IDLE_GRACE_MS);
 	const stallLimitMs = readIntEnv(env, "PI_WATCHDOG_STALL_LIMIT_MS", STALL_LIMIT_MS);
 	// ponytail: only the three timing knobs are env-wired; BREAKER_K and HARD_CAP
