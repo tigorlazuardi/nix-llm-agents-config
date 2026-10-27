@@ -315,7 +315,8 @@ let
     {
       name = "pi-vision-handoff";
       package = "${visionHandoff}/lib/node_modules/pi-vision-handoff";
-      default = true;
+      # Overrides model vision capability; opt in explicitly.
+      default = false;
     }
     {
       name = "supi-context";

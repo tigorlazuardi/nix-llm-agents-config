@@ -77,15 +77,17 @@ let
     ];
   };
   visionHandoffConfigured = evaluate {
+    programs.pi-coding-agent.plugins.pi-vision-handoff.enable = true;
     programs.pi-coding-agent.plugins.pi-vision-handoff.visionModel = "google/gemini-2.5-pro";
   };
   invalidVisionHandoffModel = evaluate {
+    programs.pi-coding-agent.plugins.pi-vision-handoff.enable = true;
     programs.pi-coding-agent.plugins.pi-vision-handoff.visionModel = "missing-provider";
   };
   invalidVisionHandoffModelEvaluation = builtins.tryEval (
     builtins.deepSeq invalidVisionHandoffModel.config.home.activationPackage true
   );
-  visionHandoffActivation = default.config.home.activation.visionHandoffConfig.data;
+  visionHandoffActivation = visionHandoffConfigured.config.home.activation.visionHandoffConfig.data;
   expectedVisionHandoffConfigPath = "${default.config.programs.pi-coding-agent.configDir}/extensions/pi-vision-handoff.json";
   relayConfigured = evaluate {
     services.remote-pi-relay = {
@@ -549,7 +551,6 @@ in
           expectedRulesPath
           expectedWebAccessPath
           expectedHerdrSubagentsPath
-          expectedVisionHandoffPath
           expectedSupiContextExtension
           expectedSupiExtrasPath
         ]
@@ -573,7 +574,8 @@ in
       visionHandoffConfigured.config.programs.pi-coding-agent.plugins.pi-vision-handoff.visionModel
       == "google/gemini-2.5-pro";
     assert !invalidVisionHandoffModelEvaluation.success;
-    assert default.config.home.activation ? visionHandoffConfig;
+    assert !(default.config.home.activation ? visionHandoffConfig);
+    assert !default.config.programs.pi-coding-agent.plugins.pi-vision-handoff.enable;
     assert visionHandoffConfigured.config.home.activation ? visionHandoffConfig;
     assert !(pluginsDisabled.config.home.activation ? visionHandoffConfig);
     assert pkgs.lib.hasInfix expectedVisionHandoffConfigPath visionHandoffActivation;
@@ -1040,7 +1042,6 @@ in
         expectedRulesPath
         expectedWebAccessPath
         expectedHerdrSubagentsPath
-        expectedVisionHandoffPath
         expectedSupiContextExtension
         expectedSupiExtrasPath
       ]
