@@ -1,40 +1,44 @@
 /**
- * drain-watchdog pure decision core.
+ * drain-watchdog: pure decision core + the #30 live effect layer.
  *
- * Every function here is deterministic and side-effect free: no network, no
- * clock, no subprocesses, no pi API. The extension factory, timers, and Nix
- * module options that drive these decisions are ticket #30; this module is the
- * single pure seam the self-check asserts against (plans/drain-watchdog
- * flow.html sections 1-6, 10).
+ * Every function above the factory is deterministic and side-effect free: no
+ * network, no clock, no subprocesses, no pi-API calls at runtime — this module
+ * is the single pure seam the self-check asserts against (plans/drain-watchdog
+ * flow.html sections 0-6, 10). The default export at the bottom is the pi
+ * extension factory: the `/watchdog` command, the ARMED tick loop, nudges via
+ * steer, state/audit session entries, and every timer. Timers are created only
+ * on arm (never in the factory body), and child sessions never reach any of it.
  *
  * Semantics locked by the design:
  *  - Esc/abort moves a running phase to PAUSED; PAUSED only leaves via `resume`
  *    (EVENT_PHASES in `transition` makes every other event a no-op there).
- *  - Child sessions (PI_SUBAGENT_ID set): callers no-op when `isChildSession`
- *    is true; the core itself does not branch on it.
+ *  - Child sessions (PI_SUBAGENT_ID set): the factory registers nothing — no
+ *    listeners, no commands, no timers.
  *  - A queue command that fails, prints garbage, or prints multiple numbers
  *    refuses/pauses; it is never interpreted as "done" or an empty queue
  *    (docs/agents/issue-tracker.md refusal rule).
  *  - Tick order is fixed and the nudge is the last resort.
  *
- * `progress` has no caller yet; the #30 live loop is its consumer (handoff
- * recorded, child steer and queue fingerprint/label change all report as
- * `progress`). Only the harness decides completion: `llmDone` is accepted from
+ * `progress` is dispatched by the live loop for child completion steers and
+ * queue fingerprint changes (label/status changes sit behind the count-only
+ * contract). Only the harness decides completion: `llmDone` is accepted from
  * FINALIZING alone (flow.html sections 3 and 10).
  *
- * NOTE (#30 owns): the factory and timer must never start in a child session;
- * this core does not branch on it, so #30 must assert that, not #29.
- *
  * Imports `isRetryableAssistantError` from @earendil-works/pi-ai, so the module
- * needs pi-ai resolvable (checks.nix symlinks it from the pi runtime; the pi
- * runtime resolves it itself). It is not loadable from a bare directory.
+ * needs pi-ai resolvable (checks.nix symlinks it from the pi runtime into the
+ * copy's node_modules; a real session resolves it itself). It is not loadable
+ * from a bare directory.
  *
  * ponytail: ladder lengths, breaker/hard-cap thresholds, and stall/idle
- * budgets are fixed design defaults baked in below; make them env-tunable
- * when the ticket #30 factory wires sessionVariables.
+ * budgets are fixed design defaults baked in below; the factory reads
+ * PI_WATCHDOG_* env overrides wired from the Nix module as session variables.
  */
 
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+
 import { isRetryableAssistantError } from "@earendil-works/pi-ai";
+import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@earendil-works/pi-coding-agent";
 
 // The runtime only reads stopReason/errorMessage; the rest of AssistantMessage is irrelevant here.
 type RuntimeMessage = Parameters<typeof isRetryableAssistantError>[0];
@@ -258,7 +262,7 @@ export function jitteredDelayMs(baseMs: number, r: number): number {
 	return Math.round(baseMs * (1 - JITTER_FRACTION + 2 * JITTER_FRACTION * unit));
 }
 
-// NOTE (F9, recorded): the cooldown ladder is keyed on the run's TOTAL nudge
+// NOTE (recorded): the cooldown ladder is keyed on the run's TOTAL nudge
 // count, not the no-progress streak, so after 5 nudges every re-nudge waits 30
 // min even with progress in between. Design wording ("grows per nudge without
 // progress") is ambiguous; revisit when #35 shows real stall-recovery timing.
@@ -314,6 +318,209 @@ export function shouldSplit(
 	const budget = axis === "spec" ? SPEC_REVIEW_BUDGET_MS : STANDARDS_REVIEW_BUDGET_MS;
 	if (durationMs <= budget) return "fixLoop";
 	return splitDepth >= SPLIT_DEPTH_CAP ? "handoff" : "split";
+}
+
+// --- Live-loop helpers (#30 effect layer decisions) -------------------------
+// #30's factory consumes these; all decisions stay pure and asserted here so the
+// ONE test seam of #27 holds. No pi API types appear above the factory below.
+
+/** Positive-int env var reader; non-numeric or <=0 values fall back. Same
+ *  naming contract as pi-idle-compact's readIntEnv, but env is passed in so
+ *  the self-check can assert it without touching process state. */
+export function readIntEnv(env: Record<string, string | undefined>, name: string, fallback: number): number {
+	const raw = env[name];
+	if (!raw) return fallback;
+	const parsed = Number.parseInt(raw, 10);
+	return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+export type WatchdogSubcommand = { sub: "prep" | "resume" | "off" | "status"; ref: string | null };
+
+/**
+ * Argument grammar of `/watchdog`: `resume` / `off` / `status` are control
+ * subcommands; anything else (including `on` with an optional ref) enters PREP.
+ */
+export function parseWatchdogSubcommand(args: string): WatchdogSubcommand {
+	const trimmed = args.trim();
+	const first = (trimmed.split(/\s+/)[0] ?? "").toLowerCase();
+	if (first === "resume") return { sub: "resume", ref: null };
+	if (first === "off") return { sub: "off", ref: null };
+	if (first === "status") return { sub: "status", ref: null };
+	if (first === "") return { sub: "prep", ref: null };
+	if (first === "on") {
+		const rest = trimmed.slice(first.length).trim();
+		return { sub: "prep", ref: rest === "" ? null : rest };
+	}
+	return { sub: "prep", ref: trimmed };
+}
+
+/** Distinct issue numbers mentioned as `#N` tokens, ascending. */
+export function extractIssueNumbers(text: string): number[] {
+	const found = new Set<number>();
+	for (const m of text.matchAll(/(?<!\w)#\d+(?!\w)/g)) {
+		const n = Number.parseInt(m[0].slice(1), 10);
+		if (n > 0) found.add(n);
+	}
+	return [...found].sort((a, b) => a - b);
+}
+
+/** First bare number in a git branch name ("issue-30" -> 30); null when none. */
+export function issueNumberFromBranch(branch: string): number | null {
+	const m = /\d+/.exec(branch);
+	if (!m) return null;
+	const n = Number.parseInt(m[0], 10);
+	return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+/**
+ * PREP target resolution. A ref that names exactly one issue or exactly one
+ * session-context candidate resolves; anything else asks the operator — the
+ * command never silently picks a target (flow.html section 0).
+ */
+export type TargetResolution =
+	| { status: "resolved"; number: number }
+	| { status: "ask"; candidates?: number[] };
+
+export function pickTarget(ref: string | null, candidates: number[]): TargetResolution {
+	const refNumbers = ref === null ? [] : extractIssueNumbers(ref);
+	if (refNumbers.length === 1) return { status: "resolved", number: refNumbers[0] };
+	if (refNumbers.length > 1) return { status: "ask", candidates: refNumbers };
+	if (candidates.length === 1) return { status: "resolved", number: candidates[0] };
+	if (candidates.length > 1) return { status: "ask", candidates };
+	return { status: "ask" };
+}
+
+/**
+ * First fenced block with the exact info string; null when missing. The whole
+ * block body is the executable queue command (docs/agents/issue-tracker.md).
+ */
+export function extractFencedBlock(markdown: string, infoString: string): string | null {
+	const escaped = infoString.replace(/[.*+?^${}()[\]\\]/g, "\\$&");
+	const re = new RegExp(String.raw`(?:^|\n)\`\`\`${escaped}[ \t]*\r?\n([\s\S]*?)\r?\n\`\`\`[ \t]*(?:\r?\n|$)`);
+	const m = re.exec(markdown);
+	return m === null ? null : m[1].replace(/\s+$/, "");
+}
+
+/** Joined text of a message's text content parts; accepts loose shapes. */
+export function messageText(message: unknown): string {
+	if (typeof message !== "object" || message === null) return "";
+	const content = (message as { content?: unknown }).content;
+	if (typeof content === "string") return content;
+	if (!Array.isArray(content)) return "";
+	const parts: string[] = [];
+	for (const part of content) {
+		if (typeof part === "object" && part !== null) {
+			const p = part as { type?: unknown; text?: unknown };
+			if (p.type === "text" && typeof p.text === "string") parts.push(p.text);
+		}
+	}
+	return parts.join("\n");
+}
+
+/**
+ * PREP -> ARMED gate: the model declares readiness by ending a turn whose last
+ * non-empty line is exactly `READY`. Any other ending (question, prose, `not
+ * ready`) keeps PREP open; only the operator confirm then arms.
+ */
+export function isReadyDeclaration(text: string): boolean {
+	const lines = text.trimEnd().split(/\r?\n/);
+	for (let i = lines.length - 1; i >= 0; i--) {
+		const line = lines[i].trim();
+		if (line === "") continue;
+		return line === "READY";
+	}
+	return false;
+}
+
+export type RunMessage = { role?: unknown; stopReason?: unknown; errorMessage?: unknown };
+
+/**
+ * Error text of the last assistant message in the run that ended with
+ * stopReason "error" (scanned from the end); null when the run had no error.
+ * Aborted runs report `aborted` and are handled by the abort event instead.
+ */
+export function extractLastError(messages: readonly RunMessage[]): string | null {
+	for (let i = messages.length - 1; i >= 0; i--) {
+		const m = messages[i];
+		if (typeof m !== "object" || m === null) continue;
+		if (m.role !== "assistant" || m.stopReason !== "error") continue;
+		return typeof m.errorMessage === "string" && m.errorMessage !== "" ? m.errorMessage : "unknown provider error";
+	}
+	return null;
+}
+
+export const SUBAGENT_SPAWN_TOOLS = ["subagent", "subagent_resume"] as const;
+/** pi-herdr-subagents surfaces new or resumed running children via these tools.
+ *  ponytail: fragile pairing — a session restart drops armed counts while
+ *  panes keep running; count drifts after a restart until every child exits. */
+export function isSubagentSpawnTool(toolName: string): boolean {
+	return (SUBAGENT_SPAWN_TOOLS as readonly string[]).includes(toolName);
+}
+
+/** Child completion arrives in the main session as a `subagent_result` steer.
+ *  `subagent_status`/`subagent_ping` steers arrive mid-run and must NOT be
+ *  counted as completion. */
+export function isSubagentCompletionNotice(customType: unknown): boolean {
+	return customType === "subagent_result";
+}
+
+/** compare pickable/inflight between ticks: a change is a progress event. */
+export function queueFingerprint(o: { pickable: number; inflight: number }): string {
+	return `${o.pickable}/${o.inflight}`;
+}
+
+/**
+ * Nudge text (flow.html section 2): tell the model to never stop with a
+ * question, continue its flow, and hand off what it may not work on.
+ */
+export function buildNudgeText(p: { target: number | null; pickable: number }): string {
+	const target = p.target === null ? "the accepted tickets" : `#${p.target}`;
+	return [
+		`drain-watchdog: unattended run on ${target}; you are idle with ${p.pickable} pickable ticket(s) in the drain queue. Do not ask the user — continue per the drain flow now: run the next pass on the next pickable ticket.`,
+		"Ambiguous or product-question tickets, and low-tolerance work (auth/authz, secrets/credentials, DB migrations, public API contracts, money/billing, data deletion, irreversible operations), must leave the queue through the tracker's exit labels (needs-info / ready-for-human / wontfix) instead of waiting.",
+	].join("\n");
+}
+
+/** Minimal backoff probe: one cheap wake after a provider error, not a prompt. */
+export const PROBE_TEXT = "drain-watchdog probe: continue the drain flow.";
+
+/** Closing nudge of a finalizing flow (flow.html section 10; one per successful delivery). */
+export const FINALIZE_NUDGE_TEXT =
+	"drain-watchdog: frontier is empty. Finish the closing steps (final review, integration branch/PR, cleanup) and stop; do not open new work.";
+
+const STATE_ENTRY_TYPE = "drain-watchdog-state";
+
+/** Valid DrainPhase values, for restoring persisted state without trusting it. */
+const DRAIN_PHASES: readonly DrainPhase[] = ["off", "armed", "backoff", "paused", "done", "finalizing"];
+
+/**
+ * Latest valid persisted watchdog state from session entries (null when the
+ * session has none). Entries from before the last compaction may be gone, and
+ * a fresh run keeps the latest valid entry only — garbage is ignored, never
+ * half-applied. ponytail: entries pruned by a null-keeping compaction can lose
+ * the state; the watchdog then restores OFF and waits for /watchdog again.
+ */
+export function restoreDrainState(
+	entries: readonly { type?: unknown; customType?: unknown; data?: unknown }[],
+): DrainState | null {
+	for (let i = entries.length - 1; i >= 0; i--) {
+		const e = entries[i];
+		if (typeof e !== "object" || e === null) continue;
+		if (e.type !== "custom" || e.customType !== STATE_ENTRY_TYPE) continue;
+		if (typeof e.data !== "object" || e.data === null) continue;
+		const data = e.data as Record<string, unknown>;
+		if (typeof data.phase !== "string" || !DRAIN_PHASES.includes(data.phase as DrainPhase)) continue;
+		const merged: Record<string, unknown> = { ...INITIAL_STATE };
+		for (const key of Object.keys(INITIAL_STATE)) {
+			if (!Object.hasOwn(data, key)) continue;
+			const value = data[key];
+			const fallback = (INITIAL_STATE as Record<string, unknown>)[key];
+			// Only keys keep their restored value; a corrupted type falls back.
+			if (typeof value === typeof fallback && value !== null) merged[key] = value;
+		}
+		return merged as DrainState;
+	}
+	return null;
 }
 
 // --- State machine ---------------------------------------------------------------
@@ -489,9 +696,9 @@ export function transition(state: DrainState, event: DrainEvent, now: number): D
 		case "resume":
 			// A resumed run starts with a clean no-progress slate; the hard-cap
 			// total nudge count deliberately survives so resume cannot refresh it.
-			// NOTE (F10, recorded): so a resume after a hard-cap PAUSE re-pauses on the
+			// NOTE (recorded): so a resume after a hard-cap PAUSE re-pauses on the
 			// first nudge tick, and `off` + `arm` (fresh INITIAL_STATE) does refresh the
-			// cap. Semantics left as designed; pick one in #30 if it matters.
+			// cap. Semantics left as designed; revisit when a live pass shows it matters.
 			return stay({
 				...state,
 				phase: "armed",
@@ -530,4 +737,502 @@ export function transition(state: DrainState, event: DrainEvent, now: number): D
 			if (state.phase === "backoff") return stay({ ...state, noProgressStreak: 0 });
 			return stay({ ...state, noProgressStreak: 0, nextAllowedAt: now });
 	}
+}
+
+// --- Live effect layer (default factory) ----------------------------------
+// Effect layer only: every decision comes from the pure core above. Timers are
+// created on arm/restore/resume (never here in the factory body); a child
+// session leaves the factory without registering anything.
+
+const AUDIT_ENTRY_TYPE = "drain-watchdog-audit";
+const NUDGE_MESSAGE_TYPE = "drain-watchdog-nudge";
+const PROBE_MESSAGE_TYPE = "drain-watchdog-probe";
+const QUEUE_DOCS_RELPATH = "docs/agents/issue-tracker.md";
+/** Queue block execution budget: the block walks every pickable issue with one
+ *  `gh api` call each; a healthy repo finishes well under a minute. */
+const QUEUE_TIMEOUT_MS = 300_000;
+
+const PREP_INSTRUCTION = (target: number, pickable: number): string =>
+	[
+		`drain-watchdog PREP for #${target}: the drain-queue block reported ${pickable} pickable ticket(s).`,
+		"Prove readiness now: run the project's check command (nix flake check here; it is long, so give it a generous timeout and report the result).",
+		"If it is green and the drained scope covers the queue, end a turn whose last line is exactly:",
+		"READY",
+		"If it failed, report what failed. Do not write READY.",
+	].join("\n");
+
+export default function watchdogExtension(pi: ExtensionAPI) {
+	// Child sessions never run the watchdog: no listeners, no command, no timers,
+	// no state — the factory returns before registering anything (self-checked).
+	if (isChildSession(process.env)) return;
+
+	const env = process.env as Record<string, string | undefined>;
+	const tickMs = readIntEnv(env, "PI_WATCHDOG_TICK_MS", 60_000);
+	const idleGraceMs = readIntEnv(env, "PI_WATCHDOG_IDLE_GRACE_MS", IDLE_GRACE_MS);
+	const stallLimitMs = readIntEnv(env, "PI_WATCHDOG_STALL_LIMIT_MS", STALL_LIMIT_MS);
+	// ponytail: only the three timing knobs are env-wired; BREAKER_K and HARD_CAP
+	// live inside the core's recordNudge and wiring them would mean a core change.
+	// Make them env-tunable when a second consumer boots with different thresholds.
+
+	type Timer = ReturnType<typeof setTimeout>;
+
+	let latestCtx: ExtensionContext | null = null;
+	let state: DrainState = { ...INITIAL_STATE };
+	let timer: Timer | null = null;
+	let probeTimer: Timer | null = null;
+	let tickInFlight = false;
+	let uiPromptDepth = 0;
+	let childCount = 0;
+	let probeInFlight = false;
+	let idleSinceMs = Date.now();
+	let progressSinceMs = idleSinceMs;
+	let lastQueue = { pickable: 0, inflight: 0 };
+	let runTarget: number | null = null;
+	// PREP bookkeeping is deliberately not persisted: PREP is interactive, and an
+	// unconfirmed readiness dies with the session or the next command.
+	let prepTarget: number | null = null;
+	let prepPickable = 0;
+	let prepInflight = 0;
+	let readyDeclared = false;
+
+	const clearTimers = () => {
+		if (timer !== null) {
+			clearInterval(timer);
+			timer = null;
+		}
+		if (probeTimer !== null) {
+			clearTimeout(probeTimer);
+			probeTimer = null;
+		}
+	};
+
+	const notify = (message: string, level: "info" | "warning" | "error" = "info") => {
+		if (latestCtx?.hasUI) latestCtx.ui.notify(message, level);
+	};
+
+	const deliver = (customType: string, content: string) => {
+		pi.sendMessage({ customType, content, display: true }, { triggerTurn: true, deliverAs: "steer" });
+	};
+
+	const audit = (event: string, detail: Record<string, unknown> = {}) => {
+		pi.appendEntry(AUDIT_ENTRY_TYPE, { ts: new Date().toISOString(), event, phase: state.phase, ...detail });
+	};
+
+	const persist = () => {
+		pi.appendEntry(STATE_ENTRY_TYPE, { ...state });
+	};
+
+	const startLoop = () => {
+		clearTimers();
+		timer = setInterval(() => {
+			void tick();
+		}, tickMs);
+	};
+
+	const scheduleProbe = (baseDelayMs: number) => {
+		if (probeTimer !== null) clearTimeout(probeTimer);
+		// Jitter at the effect boundary: the core's ladder value is the base; the
+		// delivery widens it +-20% (jitteredDelayMs) so parallel wakes do not hit the
+		// provider together. On a failed probe delivery BACKOFF can wedge; the next
+		// real event or /watchdog resume recovers it.
+		const delay = jitteredDelayMs(baseDelayMs, Math.random());
+		probeTimer = setTimeout(() => {
+			probeTimer = null;
+			if (state.phase !== "backoff") return;
+			probeInFlight = true;
+			audit("probe-delivered", {});
+			deliver(PROBE_MESSAGE_TYPE, PROBE_TEXT);
+		}, delay);
+	};
+
+	type QueueResult = { ok: boolean; pickable: number; inflight: number; error: string };
+
+	const runQueueCommand = async (ctx: ExtensionContext): Promise<QueueResult> => {
+		const fail = (error: string): QueueResult => ({ ok: false, pickable: 0, inflight: 0, error });
+		let markdown: string;
+		try {
+			markdown = readFileSync(join(ctx.cwd, QUEUE_DOCS_RELPATH), "utf8");
+		} catch {
+			return fail(`${QUEUE_DOCS_RELPATH} is not readable`);
+		}
+		const queueBlock = extractFencedBlock(markdown, "drain-queue");
+		if (queueBlock === null || queueBlock.trim() === "") return fail(`no drain-queue block in ${QUEUE_DOCS_RELPATH}`);
+		const res = await ctx.exec("bash", ["-c", queueBlock], { timeout: QUEUE_TIMEOUT_MS });
+		const parsed = parseQueueOutput(res.stdout, res.code);
+		if (!parsed.ok) return fail(`drain-queue command failed (exit ${res.code}); refusing`);
+		// drain-inflight is optional by contract; a missing/failing block is counted
+		// as 0 (ponytail: a ticket misread inflight as 0 only matters for DONE, which
+		// also requires childCount === 0).
+		let inflight = 0;
+		const inflightBlock = extractFencedBlock(markdown, "drain-inflight");
+		if (inflightBlock !== null) {
+			const res2 = await ctx.exec("bash", ["-c", inflightBlock], { timeout: QUEUE_TIMEOUT_MS });
+			const parsed2 = parseQueueOutput(res2.stdout, res2.code);
+			if (parsed2.ok) inflight = parsed2.count;
+		}
+		return { ok: true, pickable: parsed.count, inflight, error: "" };
+	};
+
+	const armRun = (target: number | null, pickable: number, inflight: number) => {
+		const t = transition(state, { type: "arm", queueOk: true, pickable }, Date.now());
+		if (t.refusal !== null) {
+			audit("arm-refused", { reason: t.refusal });
+			notify(`drain-watchdog: refusing to arm — ${t.refusal}`, "error");
+			return false;
+		}
+		state = t.state;
+		runTarget = target;
+		lastQueue = { pickable, inflight };
+		idleSinceMs = progressSinceMs = Date.now();
+		childCount = 0;
+		probeInFlight = false;
+		persist();
+		audit("armed", { target, pickable, inflight });
+		startLoop();
+		notify(`drain-watchdog ARMED${target === null ? "" : ` on #${target}`}: tick every ${Math.round(tickMs / 1000)}s.`, "info");
+		return true;
+	};
+
+	const apply = (t: DrainTransition, source: string) => {
+		const previous = state;
+		state = t.state;
+		if (state !== previous) persist();
+		switch (t.action.type) {
+			case "wait":
+				break;
+			case "nudge":
+				audit("nudge", { source, streak: state.noProgressStreak, nudgeCount: state.nudgeCount, pickable: lastQueue.pickable });
+				deliver(NUDGE_MESSAGE_TYPE, buildNudgeText({ target: runTarget, pickable: lastQueue.pickable }));
+				break;
+			case "finalizeNudge":
+				audit("finalize-nudge", { source });
+				deliver(NUDGE_MESSAGE_TYPE, FINALIZE_NUDGE_TEXT);
+				break;
+			case "stallNotify":
+				audit("stall-notify", { children: childCount, stallLimitMs });
+				notify(`drain-watchdog: children are running but no progress for ${Math.round(stallLimitMs / 60_000)}m — inspect the herdr panes; no nudge sent.`, "warning");
+				break;
+			case "pause":
+				clearTimers();
+				audit("paused", { reason: t.action.reason, target: runTarget });
+				// The pause names the run target (the count-only queue contract cannot
+				// say WHICH queued ticket is stuck; the target and counts do).
+				notify(`drain-watchdog PAUSED: ${t.action.reason}${runTarget === null ? "" : ` (run target #${runTarget}, last queue ${lastQueue.pickable} pickable)`}; /watchdog resume when ready.`, "warning");
+				break;
+			case "done":
+				clearTimers();
+				audit("done", { leftovers: t.action.leftovers, target: runTarget });
+				notify(`drain-watchdog DONE: drain queue empty${t.action.leftovers ? " with leftover blockers" : ""}, no children running.`, "info");
+				runTarget = null;
+				break;
+			case "probe":
+				audit("probe-scheduled", { rung: state.backoffRung, delayMs: t.action.delayMs });
+				scheduleProbe(t.action.delayMs);
+				break;
+		}
+	};
+
+	const tick = async () => {
+		if (tickInFlight) return;
+		const ctx = latestCtx;
+		if (ctx === null) return;
+		const now = Date.now();
+		// Any activity resets the idle clock and skips the tick (flow.html section 2).
+		if (!ctx.isIdle() || ctx.hasPendingMessages() || uiPromptDepth > 0) {
+			idleSinceMs = now;
+			return;
+		}
+		if (state.phase !== "armed" && state.phase !== "finalizing") {
+			if (state.phase === "backoff") return; // only the probe ladder drives BACKOFF
+			clearTimers();
+			return;
+		}
+		if (now - idleSinceMs < idleGraceMs) return;
+		if (now < state.nextAllowedAt) return;
+		tickInFlight = true;
+		try {
+			const previousQueue = { ...lastQueue };
+			const q = await runQueueCommand(ctx);
+			const observedAt = Date.now();
+			const obs: TickObservation = {
+				running: false,
+				pendingMessages: false,
+				childCount,
+				allIdleForMs: observedAt - idleSinceMs,
+				queueOk: q.ok,
+				pickable: q.pickable,
+				inflight: q.inflight,
+				progressAgeMs: observedAt - progressSinceMs,
+				// Provider errors are reported once, from the run outcome, via the
+				// providerError event — re-reporting the same failure every tick would
+				// escalate the ladder without probes.
+				lastError: null,
+				// The count-only contract cannot express which tickets block which,
+				// so DONE-with-leftovers observation is not available here.
+				leftoverBlocked: false,
+				// Closing-step detection is the #34 flow; plain DONE on an empty frontier.
+				hasClosingSteps: false,
+			};
+			apply(transition(state, { type: "tick", obs }, observedAt), "tick");
+			lastQueue = { pickable: q.pickable, inflight: q.inflight };
+			if (q.ok && queueFingerprint(lastQueue) !== queueFingerprint(previousQueue)) {
+				// Queue fingerprint change counts as progress (design section 2).
+				progressSinceMs = observedAt;
+				apply(transition(state, { type: "progress" }, observedAt), "queue-change");
+			}
+		} finally {
+			tickInFlight = false;
+		}
+	};
+
+	const notifyStatus = () => {
+		const bits = [`phase ${state.phase}`];
+		if (state.pausedReason !== null) bits.push(`reason: ${state.pausedReason}`);
+		if (runTarget !== null) bits.push(`run target #${runTarget}`);
+		if (state.phase === "armed" || state.phase === "backoff" || state.phase === "finalizing") {
+			bits.push(`nudges ${state.nudgeCount}`, `no-progress ${state.noProgressStreak}`, `queue ${lastQueue.pickable}/${lastQueue.inflight}`, `children ${childCount}`);
+		}
+		notify(`drain-watchdog: ${bits.join(" ")}`);
+	};
+
+	const collectTargetCandidates = async (ctx: ExtensionCommandContext): Promise<number[]> => {
+		const found = new Set<number>();
+		// Session context: issue numbers mentioned in the conversation (best-effort
+		// scan; a failed scan leaves the branch fallback below).
+		try {
+			for (const entry of ctx.sessionManager.getEntries()) {
+				for (const n of extractIssueNumbers(JSON.stringify(entry) ?? "")) found.add(n);
+			}
+		} catch {
+			// keep whatever was collected so far
+		}
+		// Git branch containing an issue number.
+		try {
+			const branch = await ctx.exec("git", ["rev-parse", "--abbrev-ref", "HEAD"], { timeout: 10_000 });
+			const n = issueNumberFromBranch(branch.stdout.trim());
+			if (n !== null) found.add(n);
+		} catch {
+			// off-repo or no git; context scan above may already have resolved
+		}
+		return [...found].sort((a, b) => a - b);
+	};
+
+	const runPrep = async (ref: string | null, ctx: ExtensionCommandContext) => {
+		if (!ctx.hasUI) {
+			notify("drain-watchdog: PREP needs an interactive UI", "error");
+			return;
+		}
+		if (state.phase === "armed" || state.phase === "backoff") {
+			notify("drain-watchdog: run already active — /watchdog off first", "warning");
+			return;
+		}
+		if (state.phase === "paused") {
+			notify("drain-watchdog: run paused — /watchdog resume, or /watchdog off to reset", "warning");
+			return;
+		}
+		// A fresh run starts from OFF (DONE is terminal in the core; a new /watchdog
+		// invocation after DONE builds a new run).
+		state = { ...INITIAL_STATE };
+		clearTimers();
+		childCount = 0;
+		probeInFlight = false;
+		readyDeclared = false;
+		prepTarget = null;
+		runTarget = null;
+
+		const resolution = pickTarget(ref, await collectTargetCandidates(ctx));
+		if (resolution.status === "ask") {
+			const answer = resolution.candidates
+				? await ctx.ui.select("drain-watchdog: multiple issue candidates — pick the run target", resolution.candidates.map((n) => `#${n}`))
+				: await ctx.ui.input("drain-watchdog: no issue found in conversation or branch — enter the issue number");
+			const nums = answer === undefined ? [] : extractIssueNumbers(answer);
+			if (nums.length !== 1) {
+				notify("drain-watchdog: PREP cancelled (no single target chosen)");
+				return;
+			}
+			prepTarget = nums[0];
+		} else {
+			prepTarget = resolution.number;
+		}
+
+		const q = await runQueueCommand(ctx);
+		const refusal = armRefusal(q.pickable, q.ok);
+		if (refusal !== null) {
+			audit("prep-refused", { reason: refusal, error: q.error });
+			notify(`drain-watchdog: ${q.error || refusal} — not armed`, "error");
+			return;
+		}
+		prepPickable = q.pickable;
+		prepInflight = q.inflight;
+		audit("prep-proof", { target: prepTarget, pickable: q.pickable, inflight: q.inflight });
+		notify(`drain-watchdog PREP: target #${prepTarget}, ${q.pickable} pickable, ${q.inflight} inflight. Waiting for the model's readiness proof (READY) then your confirmation.`, "info");
+		pi.sendUserMessage(PREP_INSTRUCTION(prepTarget, q.pickable));
+	};
+
+	const runWatchdogCommand = async (rawArgs: string, ctx: ExtensionCommandContext) => {
+		const cmd = parseWatchdogSubcommand(rawArgs);
+		switch (cmd.sub) {
+			case "status":
+				notifyStatus();
+				return;
+			case "off": {
+				if (state.phase === "done" || state.phase === "off") {
+					state = { ...INITIAL_STATE }; // DONE is terminal; off+rearm is a fresh run
+				} else {
+					apply(transition(state, { type: "off" }, Date.now()), "off");
+				}
+				runTarget = null;
+				clearTimers();
+				childCount = 0;
+				probeInFlight = false;
+				notify("drain-watchdog: off");
+				return;
+			}
+			case "resume": {
+				if (state.phase !== "paused") {
+					notify(`drain-watchdog: nothing to resume (phase ${state.phase})`, "warning");
+					return;
+				}
+				apply(transition(state, { type: "resume" }, Date.now()), "resume");
+				if (state.phase === "armed") {
+					idleSinceMs = progressSinceMs = Date.now();
+					startLoop();
+					notify("drain-watchdog resumed");
+				}
+				return;
+			}
+			case "prep":
+				await runPrep(cmd.ref, ctx);
+				return;
+		}
+	};
+
+	// --- Event wiring ------------------------------------------------------------
+
+	pi.registerCommand("watchdog", {
+		description: "Unattended drain watchdog (PREP -> READY -> ARMED; also: resume | off | status)",
+		handler: async (args, ctx) => {
+			latestCtx = ctx;
+			await runWatchdogCommand(args, ctx);
+		},
+	});
+
+	pi.on("session_start", (_event, ctx) => {
+		latestCtx = ctx;
+		clearTimers();
+		childCount = 0;
+		probeInFlight = false;
+		uiPromptDepth = 0;
+		prepTarget = null;
+		readyDeclared = false;
+		idleSinceMs = progressSinceMs = Date.now();
+		const restored = restoreDrainState(ctx.sessionManager.getEntries());
+		if (restored === null || restored.phase === "off" || restored.phase === "done") {
+			state = { ...INITIAL_STATE };
+			return;
+		}
+		state = restored;
+		if (state.phase === "armed" || state.phase === "finalizing") {
+			audit("restored", { phase: state.phase });
+			startLoop();
+			notify(`drain-watchdog: restored live run (${state.phase}) after restart`);
+		} else if (state.phase === "backoff") {
+			audit("restored", { phase: "backoff", kind: state.backoffKind, rung: state.backoffRung });
+			scheduleProbe(nextLadderDelayMs(state.backoffKind ?? "transient", state.backoffRung));
+			// The probe timer also needs the tick loop alive for probeOk restoration.
+			startLoop();
+		} else {
+			// PAUSED stays paused (resume is the only exit from a paused run).
+			notify(`drain-watchdog: restored PAUSED — ${state.pausedReason ?? "unknown reason"}. /watchdog resume`, "warning");
+		}
+	});
+
+	pi.on("session_shutdown", () => {
+		// Timers never leak past teardown; persisted state decides the next start.
+		clearTimers();
+	});
+
+	const bumpIdle = () => {
+		idleSinceMs = Date.now();
+	};
+
+	pi.on("agent_start", () => bumpIdle());
+	pi.on("turn_start", () => bumpIdle());
+	pi.on("input", () => bumpIdle());
+	pi.on("ui_prompt_start", () => {
+		uiPromptDepth++;
+		bumpIdle();
+	});
+	pi.on("ui_prompt_end", () => {
+		uiPromptDepth = Math.max(0, uiPromptDepth - 1);
+		bumpIdle();
+	});
+
+	// pi-herdr-subagents runs children as separate pi processes that steer their
+	// completion in; the known fallback (observation) is tool_call minus the
+	// subagent_result completion steers. Counts restart at 0 on session_start.
+	pi.on("tool_call", (event) => {
+		if (isSubagentSpawnTool(event.toolName)) childCount++;
+	});
+
+	pi.on("message_end", (event) => {
+		const customType = (event.message as { customType?: unknown }).customType;
+		if (isSubagentCompletionNotice(customType)) {
+			childCount = Math.max(0, childCount - 1);
+			progressSinceMs = Date.now();
+			// A completion steer is progress; the run stays live (nextAllowedAt reset).
+			apply(transition(state, { type: "progress" }, Date.now()), "child-completion");
+		}
+		// PREP readiness proof: the model ends a turn with a bare READY line. Arm
+		// confirmation happens at agent_settled, after the turn really ended.
+		if (prepTarget !== null && !readyDeclared && isReadyDeclaration(messageText(event.message))) {
+			readyDeclared = true;
+		}
+	});
+
+	pi.on("agent_end", (event) => {
+		// Reset before classifying: a probe that itself errors must not leave a stale
+		// flag that launders an unrelated later run into a false probeOk.
+		const wasProbe = probeInFlight;
+		probeInFlight = false;
+		const err = extractLastError(event.messages);
+		if (err !== null) {
+			// One providerError per failed run; ticks never re-report it (tick
+			// observations carry lastError: null on purpose).
+			apply(transition(state, { type: "providerError", kind: classifyProviderError(err) }, Date.now()), "provider-error");
+		} else if (wasProbe) {
+			apply(transition(state, { type: "probeOk" }, Date.now()), "probe-ok");
+		}
+	});
+
+	pi.on("agent_settled", async (event, ctx) => {
+		latestCtx = ctx;
+		if (event.aborted) {
+			// Esc always wins: a live run PAUSEs and stays paused; PREP proof dies.
+			readyDeclared = false;
+			prepTarget = null;
+			apply(transition(state, { type: "abort" }, Date.now()), "abort");
+			return;
+		}
+		if (readyDeclared && prepTarget !== null) {
+			const target = prepTarget;
+			readyDeclared = false;
+			if (!ctx.hasUI) {
+				notify("drain-watchdog: READY seen but no UI to confirm arming; run /watchdog again", "warning");
+				prepTarget = null;
+				return;
+			}
+			const go = await ctx.ui.confirm(
+				"Arm unattended drain?",
+				`The model declared READY for #${target} (${prepPickable} pickable). Arm the watchdog for an unattended run?`,
+			);
+			prepTarget = null;
+			if (!go) {
+				audit("arm-declined", { target });
+				notify("drain-watchdog: operator declined; nothing armed");
+				return;
+			}
+			armRun(target, prepPickable, prepInflight);
+		}
+	});
 }

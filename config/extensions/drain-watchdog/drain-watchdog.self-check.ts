@@ -11,6 +11,7 @@
  * resolvable (checks.nix symlinks it into a node_modules next to the copy).
  */
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import {
 	BREAKER_K,
 	HARD_CAP,
@@ -30,11 +31,26 @@ import {
 	parseQueueOutput,
 	shouldSplit,
 	transition,
-	type DrainEvent,
-	type HandoffKind,
-	type DrainState,
-	type TickObservation,
+
+	buildNudgeText,
+	extractFencedBlock,
+	extractIssueNumbers,
+	extractLastError,
+	isReadyDeclaration,
+	isSubagentCompletionNotice,
+	isSubagentSpawnTool,
+	issueNumberFromBranch,
+	messageText,
+	parseWatchdogSubcommand,
+	pickTarget,
+	queueFingerprint,
+	readIntEnv,
+	restoreDrainState,
+
+// The default export is the #30 factory; imported separately so the named list
+// above stays comparable to the core's export list.
 } from "./index.ts";
+import watchdogExtension from "./index.ts";
 
 const MIN = 60_000;
 const pausedStateFor = (): DrainState => ({ ...INITIAL_STATE, phase: "paused", pausedReason: "x" });
@@ -649,7 +665,151 @@ assert.equal(shouldSplit("standards", "fail", STANDARDS_REVIEW_BUDGET_MS + 1, SP
 assert.equal(isChildSession({ PI_SUBAGENT_ID: "abc" }), true);
 assert.equal(isChildSession({ PI_SUBAGENT_ID: "" }), false);
 assert.equal(isChildSession({}), false);
-// NOTE: the core never branches on child status; #30 owns the assertion that the
-// factory and timer do not start when isChildSession is true.
+// NOTE (recorded): the core never branches on child status; the factory test
+// below proves the child-session no-op end to end.
+
+// --- Live-loop helpers (#30) --------------------------------------------------
+
+// readIntEnv: fallback wins on missing/garbage/zero.
+assert.equal(readIntEnv({ PI_WATCHDOG_TICK_MS: "120000" }, "PI_WATCHDOG_TICK_MS", 60_000), 120_000);
+assert.equal(readIntEnv({ PI_WATCHDOG_TICK_MS: "abc" }, "PI_WATCHDOG_TICK_MS", 60_000), 60_000);
+assert.equal(readIntEnv({ PI_WATCHDOG_TICK_MS: "0" }, "PI_WATCHDOG_TICK_MS", 60_000), 60_000);
+assert.equal(readIntEnv({ PI_WATCHDOG_TICK_MS: "-5" }, "PI_WATCHDOG_TICK_MS", 60_000), 60_000);
+assert.equal(readIntEnv({}, "PI_WATCHDOG_TICK_MS", 60_000), 60_000);
+
+// /watchdog argument grammar.
+assert.deepEqual(parseWatchdogSubcommand(""), { sub: "prep", ref: null });
+assert.deepEqual(parseWatchdogSubcommand("   "), { sub: "prep", ref: null });
+assert.deepEqual(parseWatchdogSubcommand("on"), { sub: "prep", ref: null });
+assert.deepEqual(parseWatchdogSubcommand("on #30"), { sub: "prep", ref: "#30" });
+assert.deepEqual(parseWatchdogSubcommand("#30"), { sub: "prep", ref: "#30" });
+assert.deepEqual(parseWatchdogSubcommand("watchdog live loop #30"), { sub: "prep", ref: "watchdog live loop #30" });
+assert.deepEqual(parseWatchdogSubcommand("resume"), { sub: "resume", ref: null });
+assert.deepEqual(parseWatchdogSubcommand("off"), { sub: "off", ref: null });
+assert.deepEqual(parseWatchdogSubcommand("status"), { sub: "status", ref: null });
+
+// Session-context issue mentions are distinct and ascending.
+assert.deepEqual(extractIssueNumbers("fix #29 and then close #30, ref #29"), [29, 30]);
+assert.deepEqual(extractIssueNumbers("no refs here, q30 x#12abc34"), []);
+
+// Branch fallback: first bare number in the branch name.
+assert.equal(issueNumberFromBranch("30-watchdog-live-loop"), 30);
+assert.equal(issueNumberFromBranch("issue-30-fix"), 30);
+assert.equal(issueNumberFromBranch("main"), null);
+assert.equal(issueNumberFromBranch("feature/no-digits"), null);
+
+// Target resolution: never silently choose when ambiguous (flow section 0).
+assert.deepEqual(pickTarget("#30", [27, 29]), { status: "resolved", number: 30 });
+assert.deepEqual(pickTarget(null, [29]), { status: "resolved", number: 29 });
+assert.deepEqual(pickTarget(null, [27, 29, 30]), { status: "ask", candidates: [27, 29, 30] });
+assert.deepEqual(pickTarget("#9 #30", [29]), { status: "ask", candidates: [9, 30] });
+assert.deepEqual(pickTarget(null, []), { status: "ask" });
+assert.deepEqual(pickTarget("no numbers at all", []), { status: "ask" });
+
+// drain-queue/drain-inflight blocks extract from the tracker doc format.
+const trackerDoc = [
+	"## Drain queue", "prose refusal rule", "```drain-queue", "set -euo pipefail", "echo 3", "```", "```drain-inflight", "echo 1", "```", "```drain-queue-extra", "echo 0", "```", "not a block", ""].join("\n");
+assert.equal(extractFencedBlock(trackerDoc, "drain-queue"), "set -euo pipefail\necho 3");
+assert.equal(extractFencedBlock(trackerDoc, "drain-inflight"), "echo 1");
+assert.equal(extractFencedBlock(trackerDoc, "drain-queue-x"), null, "info string must match exactly");
+assert.equal(extractFencedBlock("no blocks at all", "drain-queue"), null);
+if (process.env.DRAIN_QUEUE_FIXTURE) {
+	// Real repo fixture: checks.nix passes the live docs/agents/issue-tracker.md.
+	const doc = readFileSync(process.env.DRAIN_QUEUE_FIXTURE, "utf8");
+	const queueBlock = extractFencedBlock(doc, "drain-queue");
+	assert(queueBlock !== null, "docs/agents/issue-tracker.md lost its drain-queue block");
+	assert(queueBlock.includes("gh"), "drain-queue block must drive gh");
+	// drain-inflight is optional by contract; only its presence is checked here.
+	assert(extractFencedBlock(doc, "drain-inflight") !== null, "docs/agents/issue-tracker.md lost its drain-inflight block");
+}
+
+// Message text extraction and the READY gate.
+assert.equal(messageText({ content: [{ type: "text", text: "a" }, { type: "thinking", text: "b" }, { type: "text", text: "c" }] }), "a\nc");
+assert.equal(messageText({ content: "READY" }), "READY");
+assert.equal(messageText({ content: [{ type: "tool_result" }] }), "");
+assert.equal(messageText(null), "");
+assert.equal(isReadyDeclaration("done.\nREADY\n"), true);
+assert.equal(isReadyDeclaration("READY\r\n"), true);
+assert.equal(isReadyDeclaration("everything green\n== READY ==\n"), false, "only a bare final line counts");
+assert.equal(isReadyDeclaration("READY later"), false);
+assert.equal(isReadyDeclaration(""), false);
+
+// Last failed message of a run end sequence.
+assert.equal(extractLastError([{ role: "assistant", stopReason: "toolUse" }, { role: "user", stopReason: "toolUse" }, { role: "assistant", stopReason: "error", errorMessage: "429 Too Many Requests" }]), "429 Too Many Requests");
+assert.equal(extractLastError([{ role: "assistant", stopReason: "error", errorMessage: "" }]), "unknown provider error");
+assert.equal(extractLastError([{ role: "assistant", stopReason: "error" }]), "unknown provider error");
+assert.equal(extractLastError([{ role: "assistant", stopReason: "aborted", errorMessage: "user aborted" }]), null);
+assert.equal(extractLastError([]), null);
+
+// pi-herdr-subagents counters.
+assert.equal(isSubagentSpawnTool("subagent"), true);
+assert.equal(isSubagentSpawnTool("subagent_resume"), true);
+assert.equal(isSubagentSpawnTool("subagents_list"), false);
+assert.equal(isSubagentSpawnTool("bash"), false);
+assert.equal(isSubagentCompletionNotice("subagent_result"), true);
+assert.equal(isSubagentCompletionNotice("subagent_status"), false, "mid-run status steers are not completion");
+assert.equal(isSubagentCompletionNotice("subagent_ping"), false);
+assert.equal(isSubagentCompletionNotice(undefined), false);
+
+// Queue fingerprint / nudge text.
+assert.notEqual(queueFingerprint({ pickable: 2, inflight: 0 }), queueFingerprint({ pickable: 3, inflight: 0 }));
+assert.notEqual(queueFingerprint({ pickable: 2, inflight: 0 }), queueFingerprint({ pickable: 2, inflight: 1 }));
+const nudge = buildNudgeText({ target: 30, pickable: 2 });
+assert(nudge.includes("#30"), "nudge names the run target");
+assert(nudge.includes("Do not ask the user"), "nudge forbids user questions");
+assert(nudge.includes("ready-for-human"), "nudge points at the handoff exit");
+assert(buildNudgeText({ target: null, pickable: 1 }).includes("the accepted tickets"));
+
+// Restore: latest valid entry wins, garbage never half-applies.
+assert.equal(restoreDrainState([]), null);
+assert.equal(restoreDrainState([{ type: "custom", customType: "drain-watchdog-state", data: { phase: "bogus" } }]), null);
+assert.equal(restoreDrainState([{ type: "custom", customType: "other", data: { phase: "armed" } }]), null);
+assert.equal(restoreDrainState([{ type: "message", role: "user" }]), null);
+const restoredArmed = { phase: "armed", noProgressStreak: 2, nudgeCount: 5, nextAllowedAt: 123, backoffKind: null, backoffRung: 0, backoffStartMs: null, pausedReason: null };
+assert.deepEqual(restoreDrainState([{ type: "custom", customType: "drain-watchdog-state", data: { phase: "off" } }, { type: "custom", customType: "drain-watchdog-state", data: restoredArmed }]), { ...INITIAL_STATE, ...restoredArmed }, "latest entry wins");
+assert.deepEqual(restoreDrainState([{ type: "custom", customType: "drain-watchdog-state", data: { phase: "armed", nudgeCount: "30" } }]), { ...INITIAL_STATE, phase: "armed", nudgeCount: 0 }, "corrupted field types fall back, phase survives");
+assert.equal(restoreDrainState([null, "x", { type: "custom", customType: "drain-watchdog-state" }]), null, "entry without data is ignored");
+
+// --- Factory (#30): child sessions register nothing, main sessions do -------------
+
+// Minimal pi-surface replica: the child factory must neither listen nor command.
+const makeMockPi = () => {
+	const events: string[] = [];
+	const commands: string[] = [];
+	return {
+		events,
+		commands,
+		on(name: string) {
+			events.push(name);
+			return () => {};
+		},
+		registerCommand(name: string) {
+			commands.push(name);
+		},
+	};
+};
+
+// The self-check must not trust the ambient environment: it may itself run
+// inside a pi-herdr-subagents child (PI_SUBAGENT_ID set), so both branches set
+// the variable explicitly and the real value is restored at the end.
+const ambientSubagentId = process.env.PI_SUBAGENT_ID;
+
+process.env.PI_SUBAGENT_ID = "self-check-child";
+const childPi = makeMockPi() as any;
+watchdogExtension(childPi as any);
+assert.equal(childPi.events.length, 0, "child factory registers no listeners");
+assert.equal(childPi.commands.length, 0, "child factory registers no commands");
+
+delete process.env.PI_SUBAGENT_ID;
+const mainPi = makeMockPi() as any;
+watchdogExtension(mainPi as any);
+assert(mainPi.commands.includes("watchdog"), "main factory registers /watchdog");
+assert(mainPi.events.includes("session_start"), "main factory restores state");
+assert(mainPi.events.includes("agent_settled"), "main factory handles Esc and the READY confirm");
+assert(mainPi.events.includes("agent_end"), "main factory reports provider errors");
+assert(!mainPi.events.includes("tick"), "no timer surfaces: ticks are setInterval-internal and only started on arm");
+
+if (ambientSubagentId === undefined) delete process.env.PI_SUBAGENT_ID;
+else process.env.PI_SUBAGENT_ID = ambientSubagentId;
 
 console.log("drain-watchdog self-check OK");
