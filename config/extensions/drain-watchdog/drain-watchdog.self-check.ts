@@ -14,7 +14,10 @@
  * resolvable (checks.nix symlinks it into a node_modules next to the copy).
  */
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import type { DrainEvent, DrainState, HandoffKind, TickObservation } from "./index.ts";
 import {
 	BREAKER_K,
 	DEFAULT_TICK_CONFIG,
@@ -299,8 +302,6 @@ assert.equal(finisher.state.phase, "done");
 	const prog = transition(fz, { type: "progress" }, 43_000);
 	assert.equal(prog.state.phase, "finalizing");
 	assert.equal(prog.state.noProgressStreak, 0);
-	assert.equal(transition(fz, { type: "breaker" }, 43_000).state.phase, "paused");
-	assert.equal(transition(fz, { type: "hardCap" }, 43_000).state.phase, "paused");
 	assert.equal(transition(fz, { type: "off" }, 43_000).state.phase, "off");
 }
 
@@ -310,11 +311,6 @@ assert.equal(finisher.state.phase, "done");
 const steered = transition(armed({ noProgressStreak: 3, nextAllowedAt: 999_999 }), { type: "progress" }, 50_000);
 assert.equal(steered.state.noProgressStreak, 0);
 assert.equal(steered.state.nextAllowedAt, 50_000);
-
-// Breaker and hardCap events pause with a named reason.
-assert.equal(transition(armOK.state, { type: "breaker" }, 53_000).state.phase, "paused");
-const capped = transition(armed({ nudgeCount: HARD_CAP }), { type: "hardCap" }, 54_000);
-assert.equal(capped.state.phase, "paused");
 
 // --- Tick order --------------------------------------------------------------------------
 
@@ -531,8 +527,6 @@ assert.equal(JSON.stringify(snapshot), before);
 		{ type: "llmStop" },
 		{ type: "llmDone" },
 		{ type: "progress" },
-		{ type: "breaker" },
-		{ type: "hardCap" },
 	];
 	// Phases allowed to act per event; everything else must be a pure no-op.
 	const owners: Record<string, readonly string[]> = {
@@ -546,8 +540,6 @@ assert.equal(JSON.stringify(snapshot), before);
 		llmStop: ["armed", "backoff", "finalizing"],
 		llmDone: ["finalizing"],
 		progress: ["armed", "backoff", "finalizing"],
-		breaker: ["armed", "backoff", "finalizing"],
-		hardCap: ["armed", "backoff", "finalizing"],
 	};
 	let checked = 0;
 	for (const phase of phases) {
@@ -861,28 +853,33 @@ assert.deepEqual(
 	"an invalid backoffKind enum value still falls back",
 );
 
-// --- H3: a restored BACKOFF run keeps its probe timer alive ----------------------
-// startLoop() used to call clearTimers() (tick timer AND probe timer). session_start
-// restores a BACKOFF run by calling scheduleProbe(...) then startLoop() to keep ticks
-// alive for probeOk, and startLoop immediately cancelled the probe it had just
-// scheduled, wedging BACKOFF forever. Instrument the global timer functions (the
-// factory calls them directly, not through an injected clock) to prove both timers
-// survive session_start.
-{
+// --- M5(b): handler-driving harness -----------------------------------------------
+// Every self-check row above this line asserts against the pure core only; the ~500
+// line effect layer (restore/re-arm, timer wiring, tick composition, queue exec) was
+// otherwise exercised by nothing but "the factory registers these listener names"
+// (below). Fake the global timer functions and pi.exec/appendEntry/sendMessage to
+// drive the real registered handlers end-to-end.
+type FakeTimer = { id: number; kind: "interval" | "timeout"; fire: () => unknown; cleared: boolean };
+
+type FakeClock = { advance: (ms: number) => void };
+
+/** Replace the global timer functions (and Date.now) for the duration of `run`; never a real timer fires. */
+async function withFakeTimers<T>(
+	run: (timers: FakeTimer[], flush: () => Promise<void>, clock: FakeClock) => Promise<T> | T,
+): Promise<T> {
 	const realSetInterval = globalThis.setInterval;
 	const realSetTimeout = globalThis.setTimeout;
 	const realClearInterval = globalThis.clearInterval;
 	const realClearTimeout = globalThis.clearTimeout;
-	type FakeTimer = { id: number; kind: "interval" | "timeout"; cleared: boolean };
 	const timers: FakeTimer[] = [];
 	let nextId = 1;
-	(globalThis as any).setInterval = (..._args: unknown[]) => {
-		const t: FakeTimer = { id: nextId++, kind: "interval", cleared: false };
+	(globalThis as any).setInterval = (fn: (...args: unknown[]) => unknown, _delay: number, ...args: unknown[]) => {
+		const t: FakeTimer = { id: nextId++, kind: "interval", fire: () => fn(...args), cleared: false };
 		timers.push(t);
 		return t as any;
 	};
-	(globalThis as any).setTimeout = (..._args: unknown[]) => {
-		const t: FakeTimer = { id: nextId++, kind: "timeout", cleared: false };
+	(globalThis as any).setTimeout = (fn: (...args: unknown[]) => unknown, _delay: number, ...args: unknown[]) => {
+		const t: FakeTimer = { id: nextId++, kind: "timeout", fire: () => fn(...args), cleared: false };
 		timers.push(t);
 		return t as any;
 	};
@@ -892,45 +889,212 @@ assert.deepEqual(
 	(globalThis as any).clearTimeout = (t: unknown) => {
 		if (t) (t as FakeTimer).cleared = true;
 	};
-	// Must not trust the ambient environment either (see the factory section below).
-	const h3AmbientSubagentId = process.env.PI_SUBAGENT_ID;
-	delete process.env.PI_SUBAGENT_ID;
+	// The code under test fires timers via `void tick()` (fire-and-forget): calling
+	// `fire()` starts the async work but does not return its promise. `flush` drains
+	// pending microtasks via one REAL macrotask tick so `await pi.exec(...)` and
+	// everything after it inside `tick` has settled before assertions run.
+	// armed()'s idle-grace gate (`now - idleSinceMs < idleGraceMs`) and the stall/cooldown
+	// windows all read the real wall clock; a handler-driving test cannot wait 3 real
+	// minutes; fake Date.now() too so a test can jump straight past any such gate.
+	const realDateNow = Date.now;
+	let clockMs = realDateNow();
+	Date.now = () => clockMs;
+	const clock: FakeClock = { advance: (ms) => { clockMs += ms; } };
+	const flush = () => new Promise<void>((resolve) => realSetTimeout(resolve, 0));
 	try {
-		const handlers: Record<string, (...args: unknown[]) => unknown> = {};
-		const h3Pi = {
-			on(name: string, handler: (...args: unknown[]) => unknown) {
-				handlers[name] = handler;
-				return () => {};
-			},
-			registerCommand() {},
-			appendEntry() {},
-			sendMessage() {},
-			sendUserMessage() {},
-		};
-		watchdogExtension(h3Pi as any);
-		const persistedBackoff = {
-			type: "custom",
-			customType: "drain-watchdog-state",
-			data: { phase: "backoff", backoffKind: "quota", backoffRung: 1, backoffStartMs: 1000 },
-		};
-		const ctx = {
-			hasUI: false,
-			ui: { notify() {} },
-			sessionManager: { getEntries: () => [persistedBackoff] },
-		};
-		handlers.session_start({}, ctx as any);
-		const liveTimers = timers.filter((t) => !t.cleared);
-		assert.equal(liveTimers.filter((t) => t.kind === "interval").length, 1, "restoring BACKOFF starts the tick interval");
-		assert.equal(liveTimers.filter((t) => t.kind === "timeout").length, 1, "restoring BACKOFF keeps its probe timer alive (H3)");
+		return await run(timers, flush, clock);
 	} finally {
-		if (h3AmbientSubagentId === undefined) delete process.env.PI_SUBAGENT_ID;
-		else process.env.PI_SUBAGENT_ID = h3AmbientSubagentId;
 		globalThis.setInterval = realSetInterval;
 		globalThis.setTimeout = realSetTimeout;
 		globalThis.clearInterval = realClearInterval;
 		globalThis.clearTimeout = realClearTimeout;
+		Date.now = realDateNow;
 	}
 }
+
+// The self-check must not trust the ambient environment: it may itself run inside a
+// pi-herdr-subagents child (PI_SUBAGENT_ID set), so force the "main session" branch.
+async function withNoAmbientSubagent<T>(run: () => Promise<T> | T): Promise<T> {
+	const ambient = process.env.PI_SUBAGENT_ID;
+	delete process.env.PI_SUBAGENT_ID;
+	try {
+		return await run();
+	} finally {
+		if (ambient === undefined) delete process.env.PI_SUBAGENT_ID;
+		else process.env.PI_SUBAGENT_ID = ambient;
+	}
+}
+
+type Harness = {
+	handlers: Record<string, (...args: any[]) => unknown>;
+	audits: { type: string; data: Record<string, unknown> }[];
+	notifications: { message: string; level: string }[];
+	sent: { customType: string; content: string }[];
+	execCalls: { command: string; args: string[] }[];
+	setExec: (impl: (command: string, args: string[]) => Promise<{ stdout: string; stderr: string; code: number; killed: boolean }>) => void;
+	ctx: any;
+};
+
+/** A fresh factory instance wired to capturing mocks, plus a real drain-queue fixture on
+ * disk (`pi.exec` is mocked, but `runQueueCommand` reads the markdown file for real). */
+function makeHarness(cwd: string): Harness {
+	const handlers: Record<string, (...args: any[]) => unknown> = {};
+	const audits: { type: string; data: Record<string, unknown> }[] = [];
+	const notifications: { message: string; level: string }[] = [];
+	const sent: { customType: string; content: string }[] = [];
+	let execImpl: (command: string, args: string[]) => Promise<{ stdout: string; stderr: string; code: number; killed: boolean }> = async () => ({
+		stdout: "0\n",
+		stderr: "",
+		code: 0,
+		killed: false,
+	});
+	const execCalls: { command: string; args: string[] }[] = [];
+	const pi = {
+		on(name: string, handler: (...args: any[]) => unknown) {
+			handlers[name] = handler;
+			return () => {};
+		},
+		registerCommand(name: string, spec: { handler: (...args: any[]) => unknown }) {
+			handlers[`command:${name}`] = spec.handler;
+		},
+		appendEntry(type: string, data: Record<string, unknown>) {
+			if (type === "drain-watchdog-audit") audits.push({ type: String(data.event), data });
+		},
+		sendMessage(msg: { customType: string; content: string }) {
+			sent.push({ customType: msg.customType, content: msg.content });
+		},
+		sendUserMessage() {},
+		exec: async (command: string, args: string[]) => {
+			execCalls.push({ command, args });
+			return execImpl(command, args);
+		},
+	};
+	watchdogExtension(pi as any);
+	const ctx: any = {
+		hasUI: true,
+		cwd,
+		ui: { notify: (message: string, level = "info") => notifications.push({ message, level }) },
+		isIdle: () => true,
+		hasPendingMessages: () => false,
+		sessionManager: { getEntries: () => [] },
+	};
+	return { handlers, audits, notifications, sent, execCalls, setExec: (impl) => { execImpl = impl; }, ctx };
+}
+
+// A real drain-queue + drain-inflight fixture on disk at <tmp>/docs/agents/issue-tracker.md.
+// A second fenced block is what the res2/dead-code bug above needed to trigger:
+// runQueueCommand threw a ReferenceError on every real queue read while
+// docs/agents/issue-tracker.md (which carries both blocks) was armed, a regression the
+// pure-core self-check rows above could never see.
+function makeFixtureCwd(): string {
+	const cwd = mkdtempSync(join(tmpdir(), "dw-harness-"));
+	mkdirSync(join(cwd, "docs", "agents"), { recursive: true });
+	writeFileSync(join(cwd, "docs", "agents", "issue-tracker.md"), "```drain-queue\necho 0\n```\n```drain-inflight\necho 0\n```\n");
+	return cwd;
+}
+
+const armedEntry = (tweaks: Record<string, unknown> = {}) => ({
+	type: "custom",
+	customType: "drain-watchdog-state",
+	data: { phase: "armed", ...tweaks },
+});
+
+// H3 (regression guard): a restored BACKOFF run keeps its probe timer alive. startLoop()
+// used to call clearTimers() (tick timer AND probe timer). session_start restores BACKOFF
+// by calling scheduleProbe(...) then startLoop() to keep ticks alive for probeOk, and
+// startLoop immediately cancelled the probe it had just scheduled, wedging BACKOFF forever.
+await withNoAmbientSubagent(() =>
+	withFakeTimers((timers) => {
+		const h = makeHarness(makeFixtureCwd());
+		h.ctx.sessionManager = {
+			getEntries: () => [
+				{ type: "custom", customType: "drain-watchdog-state", data: { phase: "backoff", backoffKind: "quota", backoffRung: 1, backoffStartMs: 1000 } },
+			],
+		};
+		h.handlers.session_start({}, h.ctx);
+		const live = timers.filter((t) => !t.cleared);
+		assert.equal(live.filter((t) => t.kind === "interval").length, 1, "restoring BACKOFF starts the tick interval");
+		assert.equal(live.filter((t) => t.kind === "timeout").length, 1, "restoring BACKOFF keeps its probe timer alive (H3)");
+	}),
+);
+
+// M5(b): session_start restoring an ARMED run starts only the tick interval (no probe:
+// that is BACKOFF-only), and a tick that observes idle+pickable-work delivers a nudge
+// through the real pi.sendMessage/appendEntry surface — including reading the real
+// on-disk drain-queue AND drain-inflight blocks (the dead-code `res2` bug above only
+// ever showed up on this exact path).
+await withNoAmbientSubagent(() =>
+	withFakeTimers(async (timers, flush, clock) => {
+		const h = makeHarness(makeFixtureCwd());
+		h.ctx.sessionManager = { getEntries: () => [armedEntry()] };
+		h.handlers.session_start({}, h.ctx);
+		const live = timers.filter((t) => !t.cleared);
+		assert.equal(live.filter((t) => t.kind === "interval").length, 1, "restoring ARMED starts the tick interval");
+		assert.equal(live.filter((t) => t.kind === "timeout").length, 0, "restoring ARMED schedules no probe (BACKOFF-only)");
+		h.setExec(async (_cmd, args) => ({ stdout: args[1]?.includes("drain-inflight") ? "1\n" : "2\n", stderr: "", code: 0, killed: false }));
+		clock.advance(IDLE_GRACE_MS + 1000); // past the idle-grace gate so the tick actually evaluates
+		const tickTimer = timers.find((t) => t.kind === "interval" && !t.cleared)!;
+		tickTimer.fire();
+		await flush();
+		await flush();
+		assert.equal(h.sent.length, 1, "an idle armed tick with pickable work delivers exactly one nudge");
+		assert.equal(h.sent[0]!.customType, "drain-watchdog-nudge");
+		assert(h.audits.some((a) => a.type === "nudge"), "the nudge is audited");
+		assert.equal(h.execCalls.length, 2, "both the drain-queue and drain-inflight blocks ran (res2/dead-code regression guard)");
+	}),
+);
+
+// M5(b): a tick whose queue command fails (exec throws) pauses — fail-closed, never a
+// nudge, never DONE — and the pause is both audited and notified with the failure reason.
+await withNoAmbientSubagent(() =>
+	withFakeTimers(async (timers, flush, clock) => {
+		const h = makeHarness(makeFixtureCwd());
+		h.ctx.sessionManager = { getEntries: () => [armedEntry()] };
+		h.handlers.session_start({}, h.ctx);
+		h.setExec(async () => {
+			throw new Error("boom: drain-queue command threw");
+		});
+		clock.advance(IDLE_GRACE_MS + 1000); // past the idle-grace gate so the tick actually evaluates
+		const tickTimer = timers.find((t) => t.kind === "interval" && !t.cleared)!;
+		tickTimer.fire();
+		await flush();
+		await flush();
+		assert.equal(h.sent.length, 0, "a failed queue command never nudges");
+		const pauseAudit = h.audits.find((a) => a.type === "paused");
+		assert(pauseAudit !== undefined, "a failed queue command is audited as paused, not silently ignored");
+		assert(String(pauseAudit!.data.reason).includes("queue"), "the pause reason names the queue failure");
+		assert(h.notifications.some((n) => n.message.includes("PAUSED")), "the pause is also surfaced to the UI");
+	}),
+);
+
+// M1/M5(b): session_shutdown clears every live timer so no pending tick/probe survives
+// past teardown.
+await withNoAmbientSubagent(() =>
+	withFakeTimers((timers) => {
+		const h = makeHarness(makeFixtureCwd());
+		h.ctx.sessionManager = { getEntries: () => [armedEntry()] };
+		h.handlers.session_start({}, h.ctx);
+		assert(timers.some((t) => !t.cleared), "sanity: the tick interval is live before shutdown");
+		h.handlers.session_shutdown();
+		assert(timers.every((t) => t.cleared), "session_shutdown clears every timer");
+	}),
+);
+
+// L1: `/watchdog resume` goes through `apply` but had no case in its action switch (the
+// transition's action is "wait", not a dedicated "resume" action) — before the fix the
+// phase change from paused to armed was persisted but never audited.
+await withNoAmbientSubagent(() =>
+	withFakeTimers(async (timers, _flush, _clock) => {
+		const h = makeHarness(makeFixtureCwd());
+		h.ctx.sessionManager = { getEntries: () => [{ type: "custom", customType: "drain-watchdog-state", data: { phase: "paused", pausedReason: "x" } }] };
+		h.handlers.session_start({}, h.ctx);
+		await h.handlers["command:watchdog"]("resume", h.ctx);
+		const transitionAudit = h.audits.find((a) => a.type === "transition");
+		assert(transitionAudit !== undefined, "resume is audited as a transition, not silently persisted (L1)");
+		assert.equal(transitionAudit!.data.from, "paused");
+		assert.equal(transitionAudit!.data.to, "armed");
+	}),
+);
 
 // --- Factory (#30): child sessions register nothing, main sessions do -------------
 

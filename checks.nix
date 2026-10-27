@@ -1308,6 +1308,7 @@ in
         nativeBuildInputs = [
           expectedPackage
           pkgs.nodejs_22
+          pkgs.typescript
         ];
       }
       ''
@@ -1317,6 +1318,18 @@ in
         mkdir -p drain-watchdog/node_modules/@earendil-works
         piRuntime=${expectedPackage}/lib/node_modules/pi-monorepo
         ln -s "$piRuntime/node_modules/@earendil-works/pi-ai" drain-watchdog/node_modules/@earendil-works/pi-ai
+        ln -s "$piRuntime" drain-watchdog/node_modules/@earendil-works/pi-coding-agent
+
+        # M5(c): `node --experimental-strip-types` below only erases type annotations; it
+        # never checks them, so a type error (wrong import, undeclared name, a
+        # discriminated-union violation) is invisible to it. `tsc --noEmit` is the real
+        # check; `bundler` resolution (not `nodenext`) avoids an unrelated pi-ai packaging
+        # quirk (its emitted .d.ts files import JSON without the import-attribute syntax
+        # NodeNext module resolution requires), and `--skipLibCheck` skips checking
+        # dependencies' own .d.ts files, which is not this extension's problem to fix.
+        tsc --noEmit --strict --skipLibCheck --allowImportingTsExtensions \
+          --target es2022 --module esnext --moduleResolution bundler \
+          drain-watchdog/index.ts drain-watchdog/drain-watchdog.self-check.ts
         DRAIN_QUEUE_FIXTURE=${./docs/agents/issue-tracker.md} \
           node --experimental-strip-types drain-watchdog/drain-watchdog.self-check.ts
 

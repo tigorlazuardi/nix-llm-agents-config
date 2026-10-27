@@ -105,9 +105,7 @@ export type DrainEvent =
 	| { type: "probeOk" }
 	| { type: "llmStop" }
 	| { type: "llmDone" }
-	| { type: "progress" }
-	| { type: "breaker" }
-	| { type: "hardCap" };
+	| { type: "progress" };
 
 export type DrainTransition = {
 	state: DrainState;
@@ -151,7 +149,7 @@ export const INITIAL_STATE: DrainState = {
 
 // --- Queue command output parsing ---------------------------------------------
 
-export type QueueParse = { ok: boolean; count: number | null };
+export type QueueParse = { ok: true; count: number } | { ok: false; count: null };
 
 /**
  * Accept exactly one non-negative integer on stdout (exit 0). Anything else —
@@ -538,15 +536,19 @@ function isValidDrainField(key: string, value: unknown): boolean {
 	}
 }
 
-export function restoreDrainState(
-	entries: readonly { type?: unknown; customType?: unknown; data?: unknown }[],
-): DrainState | null {
+export function restoreDrainState(entries: readonly unknown[]): DrainState | null {
+	// M5(c): session entries are untrusted/heterogeneous (hence every branch below
+	// re-checks shape at runtime); a narrower object-literal parameter type only
+	// pretended to type-check and rejected tsc's own malformed-input test cases
+	// (null, a bare string, a `role`-bearing message entry) that this function
+	// must tolerate.
 	for (let i = entries.length - 1; i >= 0; i--) {
 		const e = entries[i];
 		if (typeof e !== "object" || e === null) continue;
-		if (e.type !== "custom" || e.customType !== STATE_ENTRY_TYPE) continue;
-		if (typeof e.data !== "object" || e.data === null) continue;
-		const data = e.data as Record<string, unknown>;
+		const entry = e as { type?: unknown; customType?: unknown; data?: unknown };
+		if (entry.type !== "custom" || entry.customType !== STATE_ENTRY_TYPE) continue;
+		if (typeof entry.data !== "object" || entry.data === null) continue;
+		const data = entry.data as Record<string, unknown>;
 		if (typeof data.phase !== "string" || !DRAIN_PHASES.includes(data.phase as DrainPhase)) continue;
 		const merged: Record<string, unknown> = { ...INITIAL_STATE };
 		for (const key of Object.keys(INITIAL_STATE)) {
@@ -612,8 +614,6 @@ const EVENT_PHASES: Record<DrainEvent["type"], readonly DrainPhase[]> = {
 	llmStop: ["armed", "backoff", "finalizing"],
 	llmDone: ["finalizing"],
 	progress: ["armed", "backoff", "finalizing"],
-	breaker: ["armed", "backoff", "finalizing"],
-	hardCap: ["armed", "backoff", "finalizing"],
 };
 
 function enterBackoff(
@@ -787,13 +787,10 @@ export function transition(state: DrainState, event: DrainEvent, now: number, co
 			return toPaused(state, PAUSE_REASON.llmStop);
 		case "llmDone":
 			return stay({ ...state, phase: "done", pausedReason: null });
-		// ponytail: `breaker` and `hardCap` duplicate the tick-internal gates in
-		// recordNudge and have no named consumer. Remove them if #30 does not need
-		// to force-pause from outside the tick.
-		case "breaker":
-			return toPaused(state, PAUSE_REASON.breaker);
-		case "hardCap":
-			return toPaused(state, PAUSE_REASON.hardCap);
+		// L3: `breaker`/`hardCap` DrainEvents (distinct from the tick-internal
+		// noProgressStreak/nudgeCount gates above, which still use PAUSE_REASON.breaker/
+		// hardCap) had no dispatcher anywhere in this file — removed per their own
+		// ponytail note.
 		case "progress":
 			// Handoffs, child steers and queue-fingerprint/label changes are progress,
 			// not stalls. One event: callers report all three as `progress`.
@@ -931,6 +928,15 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 
 	type QueueResult = { ok: boolean; pickable: number; inflight: number; error: string };
 
+	// L5: this runs `bash -c` on the fenced drain-queue/drain-inflight blocks read live
+	// from <ctx.cwd>'s issue-tracker doc, with the full inherited env (gh credentials
+	// included). That is accepted here because the content is repo-controlled (not
+	// user/model text) and /watchdog arm is an explicit operator action — but
+	// session_start also re-runs this unattended on every restored ARMED/BACKOFF/
+	// finalizing run, from whatever the doc contains at that moment, with no
+	// re-confirmation. ponytail: accepted risk under a trusted-repo assumption; a repo
+	// whose docs/agents/issue-tracker.md is not trusted should not enable this extension.
+
 	const runQueueCommand = async (ctx: ExtensionContext): Promise<QueueResult> => {
 		const fail = (error: string): QueueResult => ({ ok: false, pickable: 0, inflight: 0, error });
 		let markdown: string;
@@ -964,8 +970,6 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 			} catch {
 				// Optional block: a throwing command counts as 0, same as a failing one.
 			}
-			const parsed2 = parseQueueOutput(res2.stdout, res2.code);
-			if (parsed2.ok) inflight = parsed2.count;
 		}
 		return { ok: true, pickable: parsed.count, inflight, error: "" };
 	};
@@ -994,6 +998,11 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 		const previous = state;
 		state = t.state;
 		if (state !== previous) persist();
+		// L1: resume/off/probeOk/restored-paused/provider-error-to-backoff change phase but
+		// previously wrote no audit entry at all (only the persisted state entry); the
+		// ticket requires an audit trail for every state change, not just the subset of
+		// actions below that already happen to audit something.
+		if (state.phase !== previous.phase) audit("transition", { from: previous.phase, to: state.phase, source });
 		switch (t.action.type) {
 			case "wait":
 				break;
@@ -1212,8 +1221,15 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 					notify(`drain-watchdog: nothing to resume (phase ${state.phase})`, "warning");
 					return;
 				}
-				apply(transition(state, { type: "resume" }, Date.now()), "resume");
-				if (state.phase === "armed") {
+				// M5(c): read the phase off the transition result, not the (by-then
+				// mutated-via-`apply`) outer `state` — tsc cannot see across the `apply`
+				// call that `state = t.state`, so comparing the outer variable here
+				// against "armed" right after the "paused" guard above reads as an
+				// always-false, no-overlap comparison (TS2367) even though it is true
+				// at runtime.
+				const result = transition(state, { type: "resume" }, Date.now());
+				apply(result, "resume");
+				if (result.state.phase === "armed") {
 					idleSinceMs = progressSinceMs = Date.now();
 					startLoop();
 					notify("drain-watchdog resumed");
