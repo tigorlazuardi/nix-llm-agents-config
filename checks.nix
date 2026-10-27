@@ -1264,7 +1264,8 @@ in
       '';
 
   # drain-watchdog is a pure decision core (issue #29): no factory exists yet.
-  # The node import assert below is the meaningful offline load check. The
+  # The self-check imports ./index.ts, which is the offline load assertion; it
+  # needs pi-ai (isRetryableAssistantError), symlinked like dev-journal. The
   # `pi --list-models` step does not load -e extensions, so it is a placeholder
   # superseded in #30 by a real factory-load check.
   drain-watchdog =
@@ -1278,8 +1279,10 @@ in
       ''
         cp -R ${./config/extensions/drain-watchdog} drain-watchdog
         chmod -R u+w drain-watchdog
+        mkdir -p drain-watchdog/node_modules/@earendil-works
+        piRuntime=${expectedPackage}/lib/node_modules/pi-monorepo
+        ln -s "$piRuntime/node_modules/@earendil-works/pi-ai" drain-watchdog/node_modules/@earendil-works/pi-ai
         node --experimental-strip-types drain-watchdog/drain-watchdog.self-check.ts
-        (cd drain-watchdog && node --experimental-strip-types -e "import('./index.ts').then((m) => { if (typeof m.transition !== 'function') throw new Error('missing transition'); })")
 
         export HOME="$TMPDIR/home"
         export PI_CODING_AGENT_DIR="$HOME/.pi/agent"

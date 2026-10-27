@@ -5,8 +5,10 @@
  * Asserts every acceptance criterion of issue #29:
  * state transitions (incl. Esc-always-wins and child no-op), queue output
  * parsing (valid/0/garbage/non-zero — never "done"), provider error
- * classification, backoff ladder sequences, the SPLIT predicate, and the arm
- * refusal condition.
+ * classification, backoff ladder sequences and jitter bounds, the handoff
+ * label mapping, the SPLIT predicate, and the arm refusal condition.
+ * Imports index.ts, which imports @earendil-works/pi-ai: run with pi-ai
+ * resolvable (checks.nix symlinks it into a node_modules next to the copy).
  */
 import assert from "node:assert/strict";
 import {
@@ -21,17 +23,21 @@ import {
 	TRANSIENT_OUTAGE_BUDGET_MS,
 	armRefusal,
 	classifyProviderError,
+	handoffExit,
 	isChildSession,
+	jitteredDelayMs,
 	nextLadderDelayMs,
 	parseQueueOutput,
 	shouldSplit,
 	transition,
 	type DrainEvent,
+	type HandoffKind,
 	type DrainState,
 	type TickObservation,
 } from "./index.ts";
 
 const MIN = 60_000;
+const pausedStateFor = (): DrainState => ({ ...INITIAL_STATE, phase: "paused", pausedReason: "x" });
 const HOUR = 60 * MIN;
 
 const armed = (tweaks: Partial<DrainState> = {}): DrainState => ({
@@ -77,6 +83,13 @@ assert.ok(refusedFail.refusal !== null);
 // --- Transition: off / resume ---------------------------------------------------
 
 assert.equal(transition(armOK.state, { type: "off" }, 2000).state.phase, "off");
+// off is accepted from PAUSED (a paused run can be switched off) and resets the run.
+{
+	const offPaused = transition({ ...pausedStateFor(), nudgeCount: 7 }, { type: "off" }, 2001);
+	assert.equal(offPaused.state.phase, "off");
+	assert.equal(offPaused.state.nudgeCount, 0);
+	assert.equal(offPaused.state.pausedReason, null);
+}
 
 const pausedStuck: DrainState = {
 	...armed(),
@@ -174,6 +187,55 @@ assert.equal(probed.state.phase, "armed");
 assert.equal(probed.state.backoffKind, null);
 assert.equal(probed.state.backoffRung, 0);
 assert.equal(probed.state.backoffStartMs, null);
+// A probe success is not progress: the no-progress streak survives it, so a stuck run
+// still reaches the breaker through a provider blip (3 ignored nudges, blip, probeOk).
+{
+	const stuck = armed({ noProgressStreak: 3, nudgeCount: 3 });
+	const blip = transition(stuck, { type: "providerError", kind: "transient" }, 25_000).state;
+	assert.equal(blip.noProgressStreak, 3);
+	const back = transition(blip, { type: "probeOk" }, 26_000).state;
+	assert.equal(back.phase, "armed");
+	assert.equal(back.noProgressStreak, 3);
+	// Unknown-error streak increments survive the same way.
+	const uBlip = transition(armed({ noProgressStreak: 2 }), { type: "providerError", kind: "unknown" }, 25_000).state;
+	assert.equal(transition(uBlip, { type: "probeOk" }, 26_000).state.noProgressStreak, 3);
+	// 50 unknown -> probeOk cycles cannot launder the streak: the breaker fires.
+	let cyc: DrainState = armed();
+	let paused = false;
+	for (let i = 0; i < 50 && !paused; i++) {
+		cyc = transition(cyc, { type: "providerError", kind: "unknown" }, 30_000 + i).state;
+		if (cyc.phase === "paused") paused = true;
+		else cyc = transition(cyc, { type: "probeOk" }, 30_000 + i).state;
+	}
+	assert.ok(paused, "unknown/probeOk cycling reaches the breaker");
+}
+
+// Mixed-kind outage: quota after a transient-opened outage switches to the quota ladder
+// and the 12 h budget (measured from the outage start); transient/unknown keep the kind.
+{
+	const t0 = 1_000_000;
+	const tr = transition(armOK.state, { type: "providerError", kind: "transient" }, t0);
+	assert.equal(tr.state.backoffKind, "transient");
+	const up = transition(tr.state, { type: "providerError", kind: "quota" }, t0 + MIN);
+	assert.equal(up.state.phase, "backoff");
+	assert.equal(up.state.backoffKind, "quota");
+	assert.equal(up.state.backoffRung, 0);
+	assert.deepEqual(up.action, { type: "probe", delayMs: 30 * MIN });
+	assert.equal(up.state.backoffStartMs, t0);
+	// Later quota errors climb the quota ladder; the budget is 12 h, not 6 h.
+	const q2 = transition(up.state, { type: "providerError", kind: "quota" }, t0 + 7 * HOUR);
+	assert.equal(q2.state.phase, "backoff");
+	assert.deepEqual(q2.action, { type: "probe", delayMs: 60 * MIN });
+	const q3 = transition(q2.state, { type: "providerError", kind: "quota" }, t0 + 12 * HOUR + MIN);
+	assert.equal(q3.state.phase, "paused");
+	// Opposite order: a transient error inside a quota outage keeps the quota ladder + budget.
+	const qFirst = transition(armOK.state, { type: "providerError", kind: "quota" }, t0);
+	const tAfter = transition(qFirst.state, { type: "providerError", kind: "transient" }, t0 + HOUR);
+	assert.equal(tAfter.state.backoffKind, "quota");
+	assert.deepEqual(tAfter.action, { type: "probe", delayMs: 60 * MIN });
+	// Unknown inside a quota outage also keeps the quota kind (documented deviation).
+	assert.equal(transition(qFirst.state, { type: "providerError", kind: "unknown" }, t0 + HOUR).state.backoffKind, "quota");
+}
 
 // UNKNOWN rides the transient ladder but counts toward the breaker.
 const unknown1 = transition(armOK.state, { type: "providerError", kind: "unknown" }, 31_000);
@@ -196,7 +258,30 @@ assert.equal(stopped.action.type, "pause");
 
 const finisher = transition({ ...armed(), phase: "finalizing" }, { type: "llmDone" }, 41_000);
 assert.equal(finisher.state.phase, "done");
-assert.equal(transition(armOK.state, { type: "llmDone" }, 42_000).state.phase, "done");
+// The model cannot declare victory: llmDone from ARMED/BACKOFF is a no-op (flow.html
+// sections 3, 10; #27 story 9). Only FINALIZING accepts it.
+{
+	const early = transition(armOK.state, { type: "llmDone" }, 42_000);
+	assert.equal(early.state.phase, "armed");
+	assert.deepEqual(early.state, armOK.state);
+	assert.deepEqual(early.action, { type: "wait" });
+	const bo = transition(armOK.state, { type: "providerError", kind: "transient" }, 42_001).state;
+	assert.equal(transition(bo, { type: "llmDone" }, 42_002).state.phase, "backoff");
+	assert.deepEqual(transition(bo, { type: "llmDone" }, 42_002).state, bo);
+	assert.equal(finisher.state.pausedReason, null);
+}
+// FINALIZING accepts the other model/harness events too (positive owners).
+{
+	const fz: DrainState = { ...armed(), phase: "finalizing", noProgressStreak: 2 };
+	assert.equal(transition(fz, { type: "llmStop" }, 43_000).state.phase, "paused");
+	assert.equal(transition(fz, { type: "providerError", kind: "transient" }, 43_000).state.phase, "backoff");
+	const prog = transition(fz, { type: "progress" }, 43_000);
+	assert.equal(prog.state.phase, "finalizing");
+	assert.equal(prog.state.noProgressStreak, 0);
+	assert.equal(transition(fz, { type: "breaker" }, 43_000).state.phase, "paused");
+	assert.equal(transition(fz, { type: "hardCap" }, 43_000).state.phase, "paused");
+	assert.equal(transition(fz, { type: "off" }, 43_000).state.phase, "off");
+}
 
 // --- Transition: progress sources reset the streak ---------------------------------------
 
@@ -255,39 +340,38 @@ assert.equal(fin.state.nudgeCount, 1);
 assert.equal(fin.state.noProgressStreak, 1);
 assert.equal(fin.state.nextAllowedAt, T + 3 * MIN);
 
-// 6b. FINALIZING is bounded: ignored finalize nudges escalate the cooldown 3/6/12/24
-// and the Kth-after pauses (breaker) instead of nudging every 3 minutes forever.
+// 6b. FINALIZING sends exactly ONE closing nudge (design section 10, #34). Idle again with
+// closing steps still open pauses visibly: no second nudge, no infinite silent wait.
 {
 	const finObs = { ...baseObs(), pickable: 0, hasClosingSteps: true };
-	let fs: DrainState = armed();
-	let at = T;
-	const finCooldowns: number[] = [];
-	for (let i = 1; i <= BREAKER_K; i++) {
-		const r = transition(fs, { type: "tick", obs: finObs }, at);
-		assert.deepEqual(r.action, { type: "finalizeNudge" }, `finalize nudge ${i}`);
-		assert.equal(r.state.nudgeCount, i);
-		assert.equal(r.state.noProgressStreak, i);
-		finCooldowns.push(r.state.nextAllowedAt - at);
-		fs = r.state;
-		at = r.state.nextAllowedAt;
-	}
-	assert.deepEqual(finCooldowns, [3, 6, 12, 24].map((m) => m * MIN));
-	const stopped8 = transition(fs, { type: "tick", obs: finObs }, at);
-	assert.equal(stopped8.state.phase, "paused");
-	assert.equal(stopped8.action.type, "pause");
-	// 8 consecutive ignored finalize ticks never produce 8 nudges.
+	const first = transition(armed(), { type: "tick", obs: finObs }, T);
+	assert.deepEqual(first.action, { type: "finalizeNudge" });
+	assert.equal(first.state.phase, "finalizing");
+	// Inside the cooldown it just waits.
+	const during = transition(first.state, { type: "tick", obs: finObs }, T + MIN);
+	assert.deepEqual(during.action, { type: "wait" });
+	assert.equal(during.state.nudgeCount, 1);
+	// After the cooldown: pause, never a second finalizeNudge or nudge.
+	const after = transition(first.state, { type: "tick", obs: finObs }, first.state.nextAllowedAt);
+	assert.equal(after.state.phase, "paused");
+	assert.equal(after.action.type, "pause");
+	assert.equal(after.state.nudgeCount, 1);
+	// Across many idle ticks there is exactly one finalize nudge in total.
 	let nudges = 0;
 	let ph: DrainState = armed();
 	let t8 = T;
 	for (let i = 0; i < 8; i++) {
 		const r = transition(ph, { type: "tick", obs: finObs }, t8);
-		if (r.action.type === "finalizeNudge") nudges++;
+		if (r.action.type === "finalizeNudge" || r.action.type === "nudge") nudges++;
 		ph = r.state;
 		t8 = Math.max(t8, ph.nextAllowedAt);
 	}
-	assert.equal(nudges, BREAKER_K);
+	assert.equal(nudges, 1);
 	assert.equal(ph.phase, "paused");
-	// The hard cap also binds finalize nudges.
+	// Closing steps done (pickable 0, none left) completes the run from FINALIZING.
+	const completes = transition(first.state, { type: "tick", obs: { ...baseObs(), pickable: 0 } }, first.state.nextAllowedAt);
+	assert.equal(completes.state.phase, "done");
+	// The hard cap still gates the first finalize nudge.
 	const capFin = transition(armed({ nudgeCount: HARD_CAP }), { type: "tick", obs: finObs }, T);
 	assert.equal(capFin.state.phase, "paused");
 }
@@ -394,7 +478,7 @@ assert.equal(JSON.stringify(snapshot), before);
 		providerError: ["armed", "backoff", "finalizing"],
 		probeOk: ["backoff"],
 		llmStop: ["armed", "backoff", "finalizing"],
-		llmDone: ["armed", "backoff", "finalizing"],
+		llmDone: ["finalizing"],
 		progress: ["armed", "backoff", "finalizing"],
 		breaker: ["armed", "backoff", "finalizing"],
 		hardCap: ["armed", "backoff", "finalizing"],
@@ -449,6 +533,27 @@ assert.equal(classifyProviderError("Provider overloaded, high demand right now")
 assert.equal(classifyProviderError("fetch failed: ENOTFOUND api.example.com (EAI_AGAIN)"), "transient");
 assert.equal(classifyProviderError("socket hang up after status 500 response"), "transient");
 assert.equal(classifyProviderError("request timed out after status 524 (service unavailable)"), "transient");
+// Runtime-retryable strings (pi-ai isRetryableAssistantError) classify as transient.
+for (const m of [
+	"Connection error.",
+	"503 Service Temporarily Unavailable",
+	"terminated",
+	"ECONNREFUSED",
+	"connect ECONNREFUSED 127.0.0.1:443",
+	"Error 429",
+	"connection refused",
+	"Anthropic stream ended before message_stop",
+	"server_busy",
+	"model is at capacity",
+	"Provider returned error",
+]) {
+	assert.equal(classifyProviderError(m), "transient", m);
+}
+// The runtime's own non-retryable quota strings classify as quota, even with a 429.
+assert.equal(classifyProviderError("429 GoUsageLimitError"), "quota");
+assert.equal(classifyProviderError("FreeUsageLimitError"), "quota");
+assert.equal(classifyProviderError("subscription_sharing_usage_limit_exceeded"), "quota");
+assert.equal(classifyProviderError("subscription_sharing_workplace_individual_usage_limit_exceeded"), "quota");
 // Quota is checked first, then auth, then transient.
 assert.equal(classifyProviderError("You have hit your usage limit for this model"), "quota");
 assert.equal(classifyProviderError("insufficient_quota: you exceeded your current quota"), "quota");
@@ -460,10 +565,9 @@ assert.equal(classifyProviderError("403 Forbidden"), "auth");
 assert.equal(classifyProviderError("429 insufficient_quota"), "quota");
 assert.equal(classifyProviderError("403 Forbidden: network policy blocks"), "auth");
 assert.equal(classifyProviderError("Request failed with status 401: network error"), "auth");
-// Bare numbers are not HTTP status context.
+// Non-retryable, non-quota text stays unknown (runtime regex needs a whole-token 429/5xx).
 assert.equal(classifyProviderError("Request failed with status 413: 512 tokens exceeded"), "unknown");
 assert.equal(classifyProviderError("512"), "unknown");
-assert.equal(classifyProviderError("request id 503 rejected"), "unknown");
 // Retryable strings still match.
 assert.equal(classifyProviderError("429 Too Many Requests"), "transient");
 assert.equal(classifyProviderError("rate limit reached"), "transient");
@@ -489,31 +593,63 @@ assert.deepEqual(
 	[0, 1, 2, 3, 4, 5, -1].map((r) => nextLadderDelayMs("quota", r)),
 	[30, 60, 120, 180, 180, 180, 30].map((m) => m * MIN),
 );
-// Core stays deterministic; the ±20% jitter belongs to the #30 effect layer.
-assert.equal(nextLadderDelayMs("transient", 0), nextLadderDelayMs("transient", 0));
+// Jitter: injected r in [0, 1) keeps the delay within +-20% of the ladder step.
+{
+	for (const kind of ["transient", "quota"] as const) {
+		for (let rung = 0; rung < 6; rung++) {
+			const base = nextLadderDelayMs(kind, rung);
+			assert.equal(jitteredDelayMs(base, 0), Math.round(base * 0.8), `${kind}[${rung}] r=0`);
+			assert.equal(jitteredDelayMs(base, 0.5), base, `${kind}[${rung}] r=0.5`);
+			const hi = jitteredDelayMs(base, 0.999999);
+			assert.ok(hi <= Math.round(base * 1.2) && hi > base, `${kind}[${rung}] r~1 = ${hi}`);
+			for (const r of [0, 0.1, 0.25, 0.5, 0.75, 0.999999]) {
+				const d = jitteredDelayMs(base, r);
+				assert.ok(d >= base * 0.8 - 1 && d <= base * 1.2 + 1, `${kind}[${rung}] r=${r} within +-20%`);
+			}
+		}
+	}
+	// Monotonic in r; a bad random source cannot widen the band.
+	assert.ok(jitteredDelayMs(MIN, 0.2) < jitteredDelayMs(MIN, 0.8));
+	assert.equal(jitteredDelayMs(MIN, -5), jitteredDelayMs(MIN, 0));
+	assert.equal(jitteredDelayMs(MIN, 7), jitteredDelayMs(MIN, 1));
+	assert.equal(jitteredDelayMs(MIN, Number.NaN), MIN);
+}
+
+// --- Handoff exit (flow.html section 5, GitHub tracker) -----------------------------------------
+
+assert.deepEqual(handoffExit("needs-info"), { label: "needs-info" });
+assert.deepEqual(handoffExit("human"), { label: "ready-for-human" });
+assert.deepEqual(handoffExit("wontfix"), { label: "wontfix" });
+// Fail closed: an unknown kind throws; it never yields a label that leaves the ticket queued.
+assert.throws(() => handoffExit("ready-for-humans" as HandoffKind));
+assert.throws(() => handoffExit("toString" as HandoffKind));
 
 // --- SPLIT predicate --------------------------------------------------------------------------
 
 // FAIL after the axis budget splits (10 min standards, 20 min spec).
-assert.equal(shouldSplit("standards", "fail", STANDARDS_REVIEW_BUDGET_MS + 1, 0), true);
-assert.equal(shouldSplit("spec", "fail", SPEC_REVIEW_BUDGET_MS + 1, 0), true);
-// FAIL within budget stays in the fix loop; exactly at budget is not over it.
-assert.equal(shouldSplit("standards", "fail", STANDARDS_REVIEW_BUDGET_MS, 0), false);
-assert.equal(shouldSplit("spec", "fail", SPEC_REVIEW_BUDGET_MS, 0), false);
-assert.equal(shouldSplit("standards", "fail", 5 * MIN, 0), false);
+assert.equal(shouldSplit("standards", "fail", STANDARDS_REVIEW_BUDGET_MS + 1, 0), "split");
+assert.equal(shouldSplit("spec", "fail", SPEC_REVIEW_BUDGET_MS + 1, 0), "split");
+// FAIL within budget is the fix loop; exactly at budget is not over it.
+assert.equal(shouldSplit("standards", "fail", STANDARDS_REVIEW_BUDGET_MS, 0), "fixLoop");
+assert.equal(shouldSplit("spec", "fail", SPEC_REVIEW_BUDGET_MS, 0), "fixLoop");
+assert.equal(shouldSplit("standards", "fail", 5 * MIN, 0), "fixLoop");
+// Within budget at the depth cap is still the fix loop, not a handoff.
+assert.equal(shouldSplit("standards", "fail", 5 * MIN, SPLIT_DEPTH_CAP), "fixLoop");
 // PASS never splits; a hung review (no verdict) never splits.
-assert.equal(shouldSplit("standards", "pass", STANDARDS_REVIEW_BUDGET_MS * 10, 0), false);
-assert.equal(shouldSplit("spec", null, SPEC_REVIEW_BUDGET_MS * 10, 0), false);
-assert.equal(shouldSplit("spec", undefined, SPEC_REVIEW_BUDGET_MS * 10, 0), false);
-// Depth cap: at SPLIT_DEPTH_CAP the caller hands off instead of splitting.
-assert.equal(shouldSplit("standards", "fail", STANDARDS_REVIEW_BUDGET_MS + 1, SPLIT_DEPTH_CAP - 1), true);
-assert.equal(shouldSplit("standards", "fail", STANDARDS_REVIEW_BUDGET_MS + 1, SPLIT_DEPTH_CAP), false);
-assert.equal(shouldSplit("standards", "fail", STANDARDS_REVIEW_BUDGET_MS + 1, SPLIT_DEPTH_CAP + 1), false);
+assert.equal(shouldSplit("standards", "pass", STANDARDS_REVIEW_BUDGET_MS * 10, 0), "none");
+assert.equal(shouldSplit("spec", null, SPEC_REVIEW_BUDGET_MS * 10, 0), "none");
+assert.equal(shouldSplit("spec", undefined, SPEC_REVIEW_BUDGET_MS * 10, 0), "none");
+// Depth cap: an over-budget FAIL at SPLIT_DEPTH_CAP hands off (ticket -> ready-for-human).
+assert.equal(shouldSplit("standards", "fail", STANDARDS_REVIEW_BUDGET_MS + 1, SPLIT_DEPTH_CAP - 1), "split");
+assert.equal(shouldSplit("standards", "fail", STANDARDS_REVIEW_BUDGET_MS + 1, SPLIT_DEPTH_CAP), "handoff");
+assert.equal(shouldSplit("standards", "fail", STANDARDS_REVIEW_BUDGET_MS + 1, SPLIT_DEPTH_CAP + 1), "handoff");
 
 // --- Child sessions ----------------------------------------------------------------------------
 
 assert.equal(isChildSession({ PI_SUBAGENT_ID: "abc" }), true);
 assert.equal(isChildSession({ PI_SUBAGENT_ID: "" }), false);
 assert.equal(isChildSession({}), false);
+// NOTE: the core never branches on child status; #30 owns the assertion that the
+// factory and timer do not start when isChildSession is true.
 
 console.log("drain-watchdog self-check OK");
