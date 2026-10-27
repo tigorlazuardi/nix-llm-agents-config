@@ -62,6 +62,8 @@ export type DrainState = {
 	/** When the current outage (BACKOFF stretch) started, for the outage budget. */
 	backoffStartMs: number | null;
 	pausedReason: string | null;
+	/** M4: wall-clock ms of the last stallNotify; gates re-notifying every tick. */
+	lastStallNotifyAt: number | null;
 };
 
 export type TickObservation = {
@@ -144,6 +146,7 @@ export const INITIAL_STATE: DrainState = {
 	backoffRung: 0,
 	backoffStartMs: null,
 	pausedReason: null,
+	lastStallNotifyAt: null,
 };
 
 // --- Queue command output parsing ---------------------------------------------
@@ -421,9 +424,16 @@ export function messageText(message: unknown): string {
  * PREP -> ARMED gate: the model declares readiness by ending a turn whose last
  * non-empty line is exactly `READY`. Any other ending (question, prose, `not
  * ready`) keeps PREP open; only the operator confirm then arms.
+ *
+ * M3: takes the raw message, not pre-extracted text — a tool-result message
+ * (grep output, a fixture file, ...) can legitimately end with a bare "READY"
+ * line that has nothing to do with the model's own readiness proof. Only an
+ * assistant-role message's own turn-ending line counts.
  */
-export function isReadyDeclaration(text: string): boolean {
-	const lines = text.trimEnd().split(/\r?\n/);
+export function isReadyDeclaration(message: unknown): boolean {
+	if (typeof message !== "object" || message === null) return false;
+	if ((message as { role?: unknown }).role !== "assistant") return false;
+	const lines = messageText(message).trimEnd().split(/\r?\n/);
 	for (let i = lines.length - 1; i >= 0; i--) {
 		const line = lines[i].trim();
 		if (line === "") continue;
@@ -500,6 +510,34 @@ const DRAIN_PHASES: readonly DrainPhase[] = ["off", "armed", "backoff", "paused"
  * half-applied. ponytail: entries pruned by a null-keeping compaction can lose
  * the state; the watchdog then restores OFF and waits for /watchdog again.
  */
+/**
+ * Per-field shape validation for restoreDrainState. A naive `typeof value ===
+ * typeof fallback` check (the original approach) breaks every nullable field:
+ * `typeof null === "object"`, so a real persisted string/number value never
+ * matches a `null` fallback and is wrongly discarded. Each DrainState key is
+ * validated against its actual declared type instead.
+ */
+function isValidDrainField(key: string, value: unknown): boolean {
+	switch (key) {
+		case "phase":
+			return typeof value === "string" && DRAIN_PHASES.includes(value as DrainPhase);
+		case "noProgressStreak":
+		case "nudgeCount":
+		case "nextAllowedAt":
+		case "backoffRung":
+			return typeof value === "number" && Number.isFinite(value);
+		case "backoffKind":
+			return value === null || value === "transient" || value === "quota";
+		case "backoffStartMs":
+		case "lastStallNotifyAt":
+			return value === null || (typeof value === "number" && Number.isFinite(value));
+		case "pausedReason":
+			return value === null || typeof value === "string";
+		default:
+			return false;
+	}
+}
+
 export function restoreDrainState(
 	entries: readonly { type?: unknown; customType?: unknown; data?: unknown }[],
 ): DrainState | null {
@@ -514,9 +552,16 @@ export function restoreDrainState(
 		for (const key of Object.keys(INITIAL_STATE)) {
 			if (!Object.hasOwn(data, key)) continue;
 			const value = data[key];
-			const fallback = (INITIAL_STATE as Record<string, unknown>)[key];
-			// Only keys keep their restored value; a corrupted type falls back.
-			if (typeof value === typeof fallback && value !== null) merged[key] = value;
+			// H4: `typeof value === typeof fallback` broke every nullable field
+			// (backoffKind/backoffStartMs/pausedReason default to `null`, and
+			// `typeof null === "object"`), so any real persisted value — a string or
+			// number — never matched and silently fell back to null. That dropped a
+			// restored BACKOFF's kind/start time, so session_start fell back to the
+			// transient ladder (`backoffKind ?? "transient"`) and the outage budget
+			// restarted (`backoffStartMs !== null && ...` always read as a fresh
+			// outage) even when the real outage was a 12h quota backoff already
+			// hours in. Validate each key by its real shape instead.
+			if (isValidDrainField(key, value)) merged[key] = value;
 		}
 		return merged as DrainState;
 	}
@@ -644,7 +689,13 @@ function handleTick(state: DrainState, obs: TickObservation, now: number): Drain
 
 	// Children running: observe only. A stall notifies; it never nudges the main.
 	if (obs.childCount > 0) {
-		if (obs.progressAgeMs >= STALL_LIMIT_MS) return { state, action: { type: "stallNotify" }, refusal: null };
+		// M4: progressAgeMs stays >= STALL_LIMIT_MS on every tick once stalled, so
+		// without a cooldown this re-notified (and would re-run any future queue
+		// re-check tied to it) on EVERY tick of an already-reported stall. Only
+		// re-notify once another full stall window has passed since the last one.
+		if (obs.progressAgeMs >= STALL_LIMIT_MS && (state.lastStallNotifyAt === null || now - state.lastStallNotifyAt >= STALL_LIMIT_MS)) {
+			return { state: { ...state, lastStallNotifyAt: now }, action: { type: "stallNotify" }, refusal: null };
+		}
 		return stay(state);
 	}
 
@@ -1241,7 +1292,7 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 		}
 		// PREP readiness proof: the model ends a turn with a bare READY line. Arm
 		// confirmation happens at agent_settled, after the turn really ended.
-		if (prepTarget !== null && !readyDeclared && isReadyDeclaration(messageText(event.message))) {
+		if (prepTarget !== null && !readyDeclared && isReadyDeclaration(event.message)) {
 			readyDeclared = true;
 		}
 	});

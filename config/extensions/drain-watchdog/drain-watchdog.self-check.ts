@@ -406,6 +406,15 @@ const stalled = transition(
 );
 assert.deepEqual(stalled.action, { type: "stallNotify" });
 assert.equal(stalled.state.phase, "armed");
+assert.equal(stalled.state.lastStallNotifyAt, T, "stallNotify records when it fired");
+// M4: a still-stalled run must NOT re-notify (or re-run anything) on every
+// following tick; only once another full stall window has elapsed.
+const stillStalledSoon = transition(stalled.state, { type: "tick", obs: { ...baseObs(), childCount: 1, progressAgeMs: STALL_LIMIT_MS } }, T + 1000);
+assert.deepEqual(stillStalledSoon.action, { type: "wait" }, "no repeat stallNotify inside the cooldown window");
+assert.equal(stillStalledSoon.state.lastStallNotifyAt, T, "cooldown timestamp is untouched while it holds");
+const stillStalledLater = transition(stalled.state, { type: "tick", obs: { ...baseObs(), childCount: 1, progressAgeMs: STALL_LIMIT_MS } }, T + STALL_LIMIT_MS);
+assert.deepEqual(stillStalledLater.action, { type: "stallNotify" }, "a fresh stallNotify fires once the cooldown window elapses");
+assert.equal(stillStalledLater.state.lastStallNotifyAt, T + STALL_LIMIT_MS);
 
 // 8. Children running with frontier 0 is NOT done; in-flight work keeps the run alive.
 assert.deepEqual(
@@ -742,11 +751,18 @@ assert.equal(messageText({ content: [{ type: "text", text: "a" }, { type: "think
 assert.equal(messageText({ content: "READY" }), "READY");
 assert.equal(messageText({ content: [{ type: "tool_result" }] }), "");
 assert.equal(messageText(null), "");
-assert.equal(isReadyDeclaration("done.\nREADY\n"), true);
-assert.equal(isReadyDeclaration("READY\r\n"), true);
-assert.equal(isReadyDeclaration("everything green\n== READY ==\n"), false, "only a bare final line counts");
-assert.equal(isReadyDeclaration("READY later"), false);
-assert.equal(isReadyDeclaration(""), false);
+assert.equal(isReadyDeclaration({ role: "assistant", content: "done.\nREADY\n" }), true);
+assert.equal(isReadyDeclaration({ role: "assistant", content: "READY\r\n" }), true);
+assert.equal(isReadyDeclaration({ role: "assistant", content: "everything green\n== READY ==\n" }), false, "only a bare final line counts");
+assert.equal(isReadyDeclaration({ role: "assistant", content: "READY later" }), false);
+assert.equal(isReadyDeclaration({ role: "assistant", content: "" }), false);
+// M3: a tool-result (or any non-assistant) message ending in a bare READY line
+// is not the model's own readiness proof and must not count.
+assert.equal(isReadyDeclaration({ role: "tool", content: "grep output\nREADY\n" }), false, "tool output must not count as readiness");
+assert.equal(isReadyDeclaration({ role: "user", content: "READY" }), false, "user message must not count as readiness");
+assert.equal(isReadyDeclaration({ content: "READY" }), false, "missing role must not count as readiness");
+assert.equal(isReadyDeclaration("READY"), false, "a bare string (no role) must not count as readiness");
+assert.equal(isReadyDeclaration(null), false);
 
 // Last failed message of a run end sequence.
 assert.equal(extractLastError([{ role: "assistant", stopReason: "toolUse" }, { role: "user", stopReason: "toolUse" }, { role: "assistant", stopReason: "error", errorMessage: "429 Too Many Requests" }]), "429 Too Many Requests");
@@ -783,6 +799,111 @@ const restoredArmed = { phase: "armed", noProgressStreak: 2, nudgeCount: 5, next
 assert.deepEqual(restoreDrainState([{ type: "custom", customType: "drain-watchdog-state", data: { phase: "off" } }, { type: "custom", customType: "drain-watchdog-state", data: restoredArmed }]), { ...INITIAL_STATE, ...restoredArmed }, "latest entry wins");
 assert.deepEqual(restoreDrainState([{ type: "custom", customType: "drain-watchdog-state", data: { phase: "armed", nudgeCount: "30" } }]), { ...INITIAL_STATE, phase: "armed", nudgeCount: 0 }, "corrupted field types fall back, phase survives");
 assert.equal(restoreDrainState([null, "x", { type: "custom", customType: "drain-watchdog-state" }]), null, "entry without data is ignored");
+// H4: `typeof value === typeof fallback` broke every nullable field, because
+// `typeof null === "object"` never matches a real persisted string/number. A
+// restored BACKOFF run must keep its kind/start time (quota ladder, outage
+// budget already elapsed), and a restored PAUSED run must keep its reason.
+const restoredQuotaBackoff = {
+	phase: "backoff",
+	backoffKind: "quota",
+	backoffRung: 2,
+	backoffStartMs: 111_000,
+	pausedReason: null,
+};
+assert.deepEqual(
+	restoreDrainState([{ type: "custom", customType: "drain-watchdog-state", data: restoredQuotaBackoff }]),
+	{ ...INITIAL_STATE, ...restoredQuotaBackoff },
+	"restored BACKOFF keeps its non-null backoffKind/backoffStartMs",
+);
+const restoredPaused = { phase: "paused", pausedReason: "provider auth error; needs human" };
+assert.deepEqual(
+	restoreDrainState([{ type: "custom", customType: "drain-watchdog-state", data: restoredPaused }]),
+	{ ...INITIAL_STATE, ...restoredPaused },
+	"restored PAUSED keeps its non-null pausedReason",
+);
+// A field that explicitly persisted as null (never entered backoff) still restores to null.
+assert.deepEqual(
+	restoreDrainState([{ type: "custom", customType: "drain-watchdog-state", data: { phase: "armed", backoffKind: null, backoffStartMs: null } }]),
+	{ ...INITIAL_STATE, phase: "armed" },
+	"an explicit null still restores to null",
+);
+// A wrong-typed nullable field still falls back rather than being trusted.
+assert.deepEqual(
+	restoreDrainState([{ type: "custom", customType: "drain-watchdog-state", data: { phase: "backoff", backoffKind: "bogus" } }]),
+	{ ...INITIAL_STATE, phase: "backoff" },
+	"an invalid backoffKind enum value still falls back",
+);
+
+// --- H3: a restored BACKOFF run keeps its probe timer alive ----------------------
+// startLoop() used to call clearTimers() (tick timer AND probe timer). session_start
+// restores a BACKOFF run by calling scheduleProbe(...) then startLoop() to keep ticks
+// alive for probeOk, and startLoop immediately cancelled the probe it had just
+// scheduled, wedging BACKOFF forever. Instrument the global timer functions (the
+// factory calls them directly, not through an injected clock) to prove both timers
+// survive session_start.
+{
+	const realSetInterval = globalThis.setInterval;
+	const realSetTimeout = globalThis.setTimeout;
+	const realClearInterval = globalThis.clearInterval;
+	const realClearTimeout = globalThis.clearTimeout;
+	type FakeTimer = { id: number; kind: "interval" | "timeout"; cleared: boolean };
+	const timers: FakeTimer[] = [];
+	let nextId = 1;
+	(globalThis as any).setInterval = (..._args: unknown[]) => {
+		const t: FakeTimer = { id: nextId++, kind: "interval", cleared: false };
+		timers.push(t);
+		return t as any;
+	};
+	(globalThis as any).setTimeout = (..._args: unknown[]) => {
+		const t: FakeTimer = { id: nextId++, kind: "timeout", cleared: false };
+		timers.push(t);
+		return t as any;
+	};
+	(globalThis as any).clearInterval = (t: unknown) => {
+		if (t) (t as FakeTimer).cleared = true;
+	};
+	(globalThis as any).clearTimeout = (t: unknown) => {
+		if (t) (t as FakeTimer).cleared = true;
+	};
+	// Must not trust the ambient environment either (see the factory section below).
+	const h3AmbientSubagentId = process.env.PI_SUBAGENT_ID;
+	delete process.env.PI_SUBAGENT_ID;
+	try {
+		const handlers: Record<string, (...args: unknown[]) => unknown> = {};
+		const h3Pi = {
+			on(name: string, handler: (...args: unknown[]) => unknown) {
+				handlers[name] = handler;
+				return () => {};
+			},
+			registerCommand() {},
+			appendEntry() {},
+			sendMessage() {},
+			sendUserMessage() {},
+		};
+		watchdogExtension(h3Pi as any);
+		const persistedBackoff = {
+			type: "custom",
+			customType: "drain-watchdog-state",
+			data: { phase: "backoff", backoffKind: "quota", backoffRung: 1, backoffStartMs: 1000 },
+		};
+		const ctx = {
+			hasUI: false,
+			ui: { notify() {} },
+			sessionManager: { getEntries: () => [persistedBackoff] },
+		};
+		handlers.session_start({}, ctx as any);
+		const liveTimers = timers.filter((t) => !t.cleared);
+		assert.equal(liveTimers.filter((t) => t.kind === "interval").length, 1, "restoring BACKOFF starts the tick interval");
+		assert.equal(liveTimers.filter((t) => t.kind === "timeout").length, 1, "restoring BACKOFF keeps its probe timer alive (H3)");
+	} finally {
+		if (h3AmbientSubagentId === undefined) delete process.env.PI_SUBAGENT_ID;
+		else process.env.PI_SUBAGENT_ID = h3AmbientSubagentId;
+		globalThis.setInterval = realSetInterval;
+		globalThis.setTimeout = realSetTimeout;
+		globalThis.clearInterval = realClearInterval;
+		globalThis.clearTimeout = realClearTimeout;
+	}
+}
 
 // --- Factory (#30): child sessions register nothing, main sessions do -------------
 
