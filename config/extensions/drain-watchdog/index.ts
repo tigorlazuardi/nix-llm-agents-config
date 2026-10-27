@@ -664,11 +664,23 @@ function recordNudge(
 	};
 }
 
-function handleTick(state: DrainState, obs: TickObservation, now: number): DrainTransition {
+/**
+ * M2: idleGraceMs/stallLimitMs are configurable (PI_WATCHDOG_IDLE_GRACE_MS /
+ * PI_WATCHDOG_STALL_LIMIT_MS, Nix module options) but the decision used to
+ * always read the frozen IDLE_GRACE_MS/STALL_LIMIT_MS constants — the options
+ * only changed notify/audit text, never the actual threshold. Default to the
+ * constants so every pre-#30-M2 call site (including every self-check row)
+ * keeps its exact behavior; only the factory's live tick() passes the
+ * configured values through.
+ */
+export type TickConfig = { idleGraceMs: number; stallLimitMs: number };
+export const DEFAULT_TICK_CONFIG: TickConfig = { idleGraceMs: IDLE_GRACE_MS, stallLimitMs: STALL_LIMIT_MS };
+
+function handleTick(state: DrainState, obs: TickObservation, now: number, config: TickConfig): DrainTransition {
 	// Cycle-start activity: legitimately busy; the effect layer resets the idle clock.
 	if (obs.running || obs.pendingMessages) return stay(state);
 	// Idle grace shields steer deliveries that just landed.
-	if (obs.allIdleForMs < IDLE_GRACE_MS) return stay(state);
+	if (obs.allIdleForMs < config.idleGraceMs) return stay(state);
 	// Nudge cooldown (design order: cooldown gate sits before the queue observation).
 	if (now < state.nextAllowedAt) return stay(state);
 
@@ -693,7 +705,7 @@ function handleTick(state: DrainState, obs: TickObservation, now: number): Drain
 		// without a cooldown this re-notified (and would re-run any future queue
 		// re-check tied to it) on EVERY tick of an already-reported stall. Only
 		// re-notify once another full stall window has passed since the last one.
-		if (obs.progressAgeMs >= STALL_LIMIT_MS && (state.lastStallNotifyAt === null || now - state.lastStallNotifyAt >= STALL_LIMIT_MS)) {
+		if (obs.progressAgeMs >= config.stallLimitMs && (state.lastStallNotifyAt === null || now - state.lastStallNotifyAt >= config.stallLimitMs)) {
 			return { state: { ...state, lastStallNotifyAt: now }, action: { type: "stallNotify" }, refusal: null };
 		}
 		return stay(state);
@@ -731,7 +743,7 @@ function onProviderError(state: DrainState, kind: ProviderErrorKind, now: number
 }
 
 /** Fixed tick order per the design; the nudge is always the last resort. */
-export function transition(state: DrainState, event: DrainEvent, now: number): DrainTransition {
+export function transition(state: DrainState, event: DrainEvent, now: number, config: TickConfig = DEFAULT_TICK_CONFIG): DrainTransition {
 	if (!EVENT_PHASES[event.type].includes(state.phase)) {
 		// arm from OFF is the only place a refusal is reported; a no-op event never is.
 		return stay(state);
@@ -762,7 +774,7 @@ export function transition(state: DrainState, event: DrainEvent, now: number): D
 		case "abort":
 			return toPaused(state, PAUSE_REASON.abort);
 		case "tick":
-			return handleTick(state, event.obs, now);
+			return handleTick(state, event.obs, now, config);
 		case "providerError":
 			return onProviderError(state, event.kind, now);
 		case "probeOk":
@@ -819,9 +831,10 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 
 	const env = process.env as Record<string, string | undefined>;
 	const tickMs = readIntEnv(env, "PI_WATCHDOG_TICK_MS", 60_000);
-	// The core's handleTick also floors on its own IDLE_GRACE_MS (3m, frozen in
-	// the #29 core): a value configured below that floor still waits the full
-	// 3m before a tick can act, it just no longer widens the window beyond it.
+	// M2: handleTick now takes these two as a TickConfig param (passed at the
+	// tick() call site below), so both can move freely in either direction —
+	// previously only handleTick's own frozen IDLE_GRACE_MS/STALL_LIMIT_MS
+	// constants decided, and these env values only changed notify/audit text.
 	const idleGraceMs = readIntEnv(env, "PI_WATCHDOG_IDLE_GRACE_MS", IDLE_GRACE_MS);
 	const stallLimitMs = readIntEnv(env, "PI_WATCHDOG_STALL_LIMIT_MS", STALL_LIMIT_MS);
 	// ponytail: only the three timing knobs are env-wired; BREAKER_K and HARD_CAP
@@ -1061,7 +1074,11 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 			// L2: assign before `apply` so a nudge/pause/audit in this same apply call
 			// reports THIS tick's pickable count, not the previous tick's (or arm-time's).
 			lastQueue = { pickable: q.pickable, inflight: q.inflight };
-			apply(transition(state, { type: "tick", obs }, observedAt), "tick");
+			// M2: idleGraceMs/stallLimitMs are the configured (env/module) values — the
+			// core's own threshold must match the one already gating the pre-filter
+			// below and the notify/audit text, or shortening either option silently
+			// does nothing.
+			apply(transition(state, { type: "tick", obs }, observedAt, { idleGraceMs, stallLimitMs }), "tick");
 			if (q.ok && queueFingerprint(lastQueue) !== queueFingerprint(previousQueue)) {
 				// Queue fingerprint change counts as progress (design section 2).
 				progressSinceMs = observedAt;

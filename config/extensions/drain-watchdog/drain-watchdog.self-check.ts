@@ -17,7 +17,9 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import {
 	BREAKER_K,
+	DEFAULT_TICK_CONFIG,
 	HARD_CAP,
+	IDLE_GRACE_MS,
 	INITIAL_STATE,
 	QUOTA_OUTAGE_BUDGET_MS,
 	SPEC_REVIEW_BUDGET_MS,
@@ -329,6 +331,31 @@ assert.deepEqual(
 assert.deepEqual(transition(armed(), { type: "tick", obs: { ...baseObs(), allIdleForMs: 1 * MIN } }, T).action, {
 	type: "wait",
 });
+
+// M2: idleGraceMs/stallLimitMs used to be decorative — handleTick always read
+// its own frozen IDLE_GRACE_MS/STALL_LIMIT_MS constants, so a configured
+// (narrower) threshold changed notify/audit text but never the actual gate.
+// A custom TickConfig must move both gates for real, in both directions.
+assert.equal(
+	transition(armed(), { type: "tick", obs: { ...baseObs(), allIdleForMs: 1 * MIN } }, T, { idleGraceMs: 30_000, stallLimitMs: STALL_LIMIT_MS }).action.type,
+	"nudge",
+	"a shortened idleGraceMs lets a 1m-idle tick nudge instead of waiting out the frozen 3m default",
+);
+assert.deepEqual(
+	transition(armed(), { type: "tick", obs: { ...baseObs(), allIdleForMs: 2 * MIN } }, T, { idleGraceMs: 5 * MIN, stallLimitMs: STALL_LIMIT_MS }).action,
+	{ type: "wait" },
+	"a widened idleGraceMs still waits past the frozen 3m default",
+);
+assert.deepEqual(
+	transition(armed(), { type: "tick", obs: { ...baseObs(), childCount: 1, progressAgeMs: 5 * MIN } }, T, { idleGraceMs: IDLE_GRACE_MS, stallLimitMs: 2 * MIN }).action,
+	{ type: "stallNotify" },
+	"a shortened stallLimitMs fires stallNotify well before the frozen 45m default",
+);
+assert.deepEqual(
+	transition(armed(), { type: "tick", obs: { ...baseObs(), childCount: 1, progressAgeMs: 5 * MIN } }, T, DEFAULT_TICK_CONFIG).action,
+	{ type: "wait" },
+	"the default config still behaves exactly like the frozen pre-M2 constants",
+);
 
 // 3. Cooldown active (now < nextAllowedAt) → wait, even with pickable work.
 const cooling = transition(armed({ nextAllowedAt: T + MIN }), { type: "tick", obs: baseObs() }, T);
