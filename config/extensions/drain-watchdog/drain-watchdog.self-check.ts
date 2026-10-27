@@ -9,9 +9,13 @@
  * label mapping, the SPLIT predicate, and the arm refusal condition. Also
  * covers #30's live-loop helpers (env parsing, /watchdog argument grammar,
  * target resolution, queue block extraction, READY/error detection, state
- * restore) and the factory's child-vs-main registration split.
- * Imports index.ts, which imports @earendil-works/pi-ai: run with pi-ai
- * resolvable (checks.nix symlinks it into a node_modules next to the copy).
+ * restore), #31's drain_handoff/drain_stop tool seams (gate rules, label
+ * parsing, gh argv plan, result text) and the tools' harness-driven behavior
+ * (happy path with captured argv, child/phase gating, llmStop pause+resume,
+ * exec-failure consistency), plus the factory's child-vs-main registration
+ * split. Imports index.ts, which imports @earendil-works/pi-ai and typebox:
+ * run with both resolvable (checks.nix symlinks them into a node_modules next
+ * to the copy).
  */
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
@@ -32,11 +36,15 @@ import {
 	TRANSIENT_OUTAGE_BUDGET_MS,
 	armRefusal,
 	classifyProviderError,
+	drainToolGate,
 	handoffExit,
+	handoffResultText,
 	isChildSession,
 	jitteredDelayMs,
 	nextLadderDelayMs,
+	parseLabelList,
 	parseQueueOutput,
+	planHandoffCommands,
 	shouldSplit,
 	transition,
 
@@ -279,6 +287,17 @@ assert.equal(unknownBreak.state.noProgressStreak, BREAKER_K);
 const stopped = transition(armOK.state, { type: "llmStop" }, 40_000);
 assert.equal(stopped.state.phase, "paused");
 assert.equal(stopped.action.type, "pause");
+// #31: drain_stop's own reason travels into pausedReason; empty/missing keeps
+// the generic llmStop reason. The reason is NOT trimmed to emptiness silently.
+assert.equal(stopped.state.pausedReason, "drain_stop");
+const stoppedWithReason = transition(armOK.state, { type: "llmStop", reason: "gh auth expired on the runner" }, 40_001);
+assert.equal(stoppedWithReason.state.pausedReason, "gh auth expired on the runner");
+assert.equal(transition(armOK.state, { type: "llmStop", reason: "   " }, 40_002).state.pausedReason, "drain_stop");
+// From BACKOFF and FINALIZING too (llmStop owners), with the reason kept.
+assert.equal(transition({ ...armed(), phase: "backoff", backoffKind: "transient" }, { type: "llmStop", reason: "disk full" }, 40_003).state.pausedReason, "disk full");
+assert.equal(transition({ ...armed(), phase: "finalizing" }, { type: "llmStop", reason: "repo dirty beyond repair" }, 40_004).state.pausedReason, "repo dirty beyond repair");
+// llmStop from PAUSED/OFF/DONE stays a no-op (EVENT_PHASES matrix covers it; spot-check).
+assert.equal(transition(pausedStateFor(), { type: "llmStop", reason: "x" }, 40_005).state.phase, "paused");
 
 const finisher = transition({ ...armed(), phase: "finalizing" }, { type: "llmDone" }, 41_000);
 assert.equal(finisher.state.phase, "done");
@@ -682,6 +701,47 @@ assert.deepEqual(handoffExit("wontfix"), { label: "wontfix" });
 assert.throws(() => handoffExit("ready-for-humans" as HandoffKind));
 assert.throws(() => handoffExit("toString" as HandoffKind));
 
+// --- #31 tool seams: gate, label parse, gh argv plan, result text --------------------------
+
+// Gate: a child can never invoke either tool, from any phase; a live run passes.
+for (const phase of ["off", "armed", "backoff", "paused", "done", "finalizing"] as const) {
+	assert.deepEqual(drainToolGate("handoff", true, phase), { ok: false, error: "drain_handoff is main-session only; child sessions cannot invoke it" }, `child blocked at ${phase}`);
+	assert.deepEqual(drainToolGate("stop", true, phase), { ok: false, error: "drain_stop is main-session only; child sessions cannot invoke it" }, `child blocked at ${phase}`);
+}
+assert.deepEqual(drainToolGate("handoff", false, "armed"), { ok: true });
+assert.deepEqual(drainToolGate("stop", false, "backoff"), { ok: true });
+assert.deepEqual(drainToolGate("stop", false, "paused"), { ok: true });
+assert.deepEqual(drainToolGate("stop", false, "finalizing"), { ok: true });
+// No active run (off/done): an error result, never a silent success — a silent
+// drain_handoff would look recorded when nothing happened.
+assert.equal(drainToolGate("handoff", false, "off").ok, false);
+assert.equal(drainToolGate("handoff", false, "done").ok, false);
+assert.equal(drainToolGate("stop", false, "off").ok, false);
+assert.equal(drainToolGate("stop", false, "done").ok, false);
+// The off/done error names the situation and the way out.
+assert(String(drainToolGate("stop", false, "done").ok === false && JSON.stringify(drainToolGate("stop", false, "done")).includes("no active watchdog run")));
+
+// gh argv plan: exact label swap (remove first), then the reason comment.
+const plan = planHandoffCommands(42, "human");
+assert.equal(plan.label, "ready-for-human");
+assert.deepEqual(plan.argvs[0], { command: "gh", args: ["issue", "view", "42", "--json", "labels", "--jq", ".labels[].name"] });
+assert.deepEqual(plan.argvs[1], { command: "gh", args: ["issue", "edit", "42", "--remove-label", "ready-for-agent", "--add-label", "ready-for-human"] });
+assert.deepEqual(plan.argvs[2]!.command, "gh");
+assert.deepEqual(plan.argvs[2]!.args.slice(0, 4), ["issue", "comment", "42", "--body"]);
+assert(plan.argvs[2]!.args[4]!.startsWith("drain-watchdog handoff (human): "));
+assert.deepEqual(planHandoffCommands(7, "needs-info").label, "needs-info");
+assert.deepEqual(planHandoffCommands(7, "wontfix").label, "wontfix");
+
+// Label parse: one name per line (--jq '.labels[].name'), duplicates collapse,
+// blank lines ignored, surrounding whitespace trimmed.
+assert.deepEqual(parseLabelList("ready-for-agent\nbug\n"), ["bug", "ready-for-agent"]);
+assert.deepEqual(parseLabelList("ready-for-agent\nready-for-agent\n"), ["ready-for-agent"]);
+assert.deepEqual(parseLabelList("  wontfix  \n\n"), ["wontfix"]);
+assert.deepEqual(parseLabelList(""), []);
+
+// Result text is one line naming issue and label.
+assert.equal(handoffResultText(42, "ready-for-human"), "Handed off #42 (label ready-for-human); recorded as progress for the watchdog.");
+
 // --- SPLIT predicate --------------------------------------------------------------------------
 
 // FAIL after the axis budget splits (10 min standards, 20 min spec).
@@ -932,16 +992,23 @@ type Harness = {
 	sent: { customType: string; content: string }[];
 	execCalls: { command: string; args: string[] }[];
 	setExec: (impl: (command: string, args: string[]) => Promise<{ stdout: string; stderr: string; code: number; killed: boolean }>) => void;
+	/** Registered model tools by name (drain_handoff, drain_stop). */
+	tools: Record<string, { execute: (id: string, params: any, signal: any, update: any, ctx: any) => Promise<any> }>;
 	ctx: any;
+	/** The live state-entry list the default sessionManager serves; pre-seed
+	 *  restore state here (persists from handlers land in this same array). */
+	entries: unknown[];
 };
 
 /** A fresh factory instance wired to capturing mocks, plus a real drain-queue fixture on
  * disk (`pi.exec` is mocked, but `runQueueCommand` reads the markdown file for real). */
 function makeHarness(cwd: string): Harness {
 	const handlers: Record<string, (...args: any[]) => unknown> = {};
+	const tools: Harness["tools"] = {};
 	const audits: { type: string; data: Record<string, unknown> }[] = [];
 	const notifications: { message: string; level: string }[] = [];
 	const sent: { customType: string; content: string }[] = [];
+	const entries: unknown[] = [];
 	let execImpl: (command: string, args: string[]) => Promise<{ stdout: string; stderr: string; code: number; killed: boolean }> = async () => ({
 		stdout: "0\n",
 		stderr: "",
@@ -957,8 +1024,12 @@ function makeHarness(cwd: string): Harness {
 		registerCommand(name: string, spec: { handler: (...args: any[]) => unknown }) {
 			handlers[`command:${name}`] = spec.handler;
 		},
+		registerTool(tool: { name: string; execute: Harness["tools"][string]["execute"] }) {
+			tools[tool.name] = { execute: tool.execute };
+		},
 		appendEntry(type: string, data: Record<string, unknown>) {
 			if (type === "drain-watchdog-audit") audits.push({ type: String(data.event), data });
+			else if (type === "drain-watchdog-state") entries.push({ type: "custom", customType: type, data });
 		},
 		sendMessage(msg: { customType: string; content: string }) {
 			sent.push({ customType: msg.customType, content: msg.content });
@@ -976,9 +1047,9 @@ function makeHarness(cwd: string): Harness {
 		ui: { notify: (message: string, level = "info") => notifications.push({ message, level }) },
 		isIdle: () => true,
 		hasPendingMessages: () => false,
-		sessionManager: { getEntries: () => [] },
+		sessionManager: { getEntries: () => entries },
 	};
-	return { handlers, audits, notifications, sent, execCalls, setExec: (impl) => { execImpl = impl; }, ctx };
+	return { handlers, audits, notifications, sent, execCalls, setExec: (impl) => { execImpl = impl; }, tools, ctx, entries };
 }
 
 // A real drain-queue + drain-inflight fixture on disk at <tmp>/docs/agents/issue-tracker.md.
@@ -1006,11 +1077,9 @@ const armedEntry = (tweaks: Record<string, unknown> = {}) => ({
 await withNoAmbientSubagent(() =>
 	withFakeTimers((timers) => {
 		const h = makeHarness(makeFixtureCwd());
-		h.ctx.sessionManager = {
-			getEntries: () => [
-				{ type: "custom", customType: "drain-watchdog-state", data: { phase: "backoff", backoffKind: "quota", backoffRung: 1, backoffStartMs: 1000 } },
-			],
-		};
+		h.entries.push(
+			{ type: "custom", customType: "drain-watchdog-state", data: { phase: "backoff", backoffKind: "quota", backoffRung: 1, backoffStartMs: 1000 } },
+		);
 		h.handlers.session_start({}, h.ctx);
 		const live = timers.filter((t) => !t.cleared);
 		assert.equal(live.filter((t) => t.kind === "interval").length, 1, "restoring BACKOFF starts the tick interval");
@@ -1026,7 +1095,7 @@ await withNoAmbientSubagent(() =>
 await withNoAmbientSubagent(() =>
 	withFakeTimers(async (timers, flush, clock) => {
 		const h = makeHarness(makeFixtureCwd());
-		h.ctx.sessionManager = { getEntries: () => [armedEntry()] };
+		h.entries.push(armedEntry());
 		h.handlers.session_start({}, h.ctx);
 		const live = timers.filter((t) => !t.cleared);
 		assert.equal(live.filter((t) => t.kind === "interval").length, 1, "restoring ARMED starts the tick interval");
@@ -1049,7 +1118,7 @@ await withNoAmbientSubagent(() =>
 await withNoAmbientSubagent(() =>
 	withFakeTimers(async (timers, flush, clock) => {
 		const h = makeHarness(makeFixtureCwd());
-		h.ctx.sessionManager = { getEntries: () => [armedEntry()] };
+		h.entries.push(armedEntry());
 		h.handlers.session_start({}, h.ctx);
 		h.setExec(async () => {
 			throw new Error("boom: drain-queue command threw");
@@ -1072,7 +1141,7 @@ await withNoAmbientSubagent(() =>
 await withNoAmbientSubagent(() =>
 	withFakeTimers((timers) => {
 		const h = makeHarness(makeFixtureCwd());
-		h.ctx.sessionManager = { getEntries: () => [armedEntry()] };
+		h.entries.push(armedEntry());
 		h.handlers.session_start({}, h.ctx);
 		assert(timers.some((t) => !t.cleared), "sanity: the tick interval is live before shutdown");
 		h.handlers.session_shutdown();
@@ -1086,7 +1155,7 @@ await withNoAmbientSubagent(() =>
 await withNoAmbientSubagent(() =>
 	withFakeTimers(async (timers, _flush, _clock) => {
 		const h = makeHarness(makeFixtureCwd());
-		h.ctx.sessionManager = { getEntries: () => [{ type: "custom", customType: "drain-watchdog-state", data: { phase: "paused", pausedReason: "x" } }] };
+		h.entries.push({ type: "custom", customType: "drain-watchdog-state", data: { phase: "paused", pausedReason: "x" } });
 		h.handlers.session_start({}, h.ctx);
 		await h.handlers["command:watchdog"]("resume", h.ctx);
 		const transitionAudit = h.audits.find((a) => a.type === "transition");
@@ -1096,21 +1165,208 @@ await withNoAmbientSubagent(() =>
 	}),
 );
 
+
+// --- #31: drain_handoff / drain_stop model tools (harness) ------------------------
+
+// A handoff gh session: the issue view returns a pickable issue (ready-for-agent
+// only), both mutations succeed. The comment call echoes back the final body
+// argv so the assertion sees exactly what gh would post.
+const ghHandoffImpl = () => async (_command: string, args: string[]) => {
+	if (args[1] === "view") return { stdout: "ready-for-agent\n", stderr: "", code: 0, killed: false };
+	if (args[1] === "edit") return { stdout: "", stderr: "", code: 0, killed: false };
+	if (args[1] === "comment") return { stdout: `posted: ${args[4]}`, stderr: "", code: 0, killed: false };
+	return { stdout: "", stderr: "unexpected gh call", code: 99, killed: false };
+};
+
+// Latest persisted watchdog state entry from a harness run (typed loosely: the
+// harness stores plain records).
+const persistedLatest = (entries: unknown[]) =>
+	entries.filter((e: any) => e.customType === "drain-watchdog-state").at(-1) as { data: Record<string, unknown> };
+
+// Happy path: AC1 — label swap, reason comment, progress event (breaker stays
+// cold), persisted state, audit entry, model-facing result text.
+await withNoAmbientSubagent(() =>
+	withFakeTimers(async (timers, flush, clock) => {
+		const h = makeHarness(makeFixtureCwd());
+		h.entries.push(armedEntry({ noProgressStreak: 2, nextAllowedAt: 999_999_999_999 }));
+		h.handlers.session_start({}, h.ctx);
+		h.setExec(ghHandoffImpl());
+		clock.advance(IDLE_GRACE_MS + 1000); // a real tick would nudge; nothing fires while the tool runs
+		const before = timers.filter((t) => !t.cleared).length;
+		const res = await h.tools.drain_handoff!.execute("t1", { issue: 42, kind: "human", reason: "needs an operator decision on the migration order" }, undefined, undefined, h.ctx);
+		await flush();
+		// Exact gh argv, in order: view (pre-read), edit (label swap), comment (reason).
+		assert.deepEqual(h.execCalls.map((c) => [c.command, ...c.args]), [
+			["gh", "issue", "view", "42", "--json", "labels", "--jq", ".labels[].name"],
+			["gh", "issue", "edit", "42", "--remove-label", "ready-for-agent", "--add-label", "ready-for-human"],
+			["gh", "issue", "comment", "42", "--body", "drain-watchdog handoff (human): needs an operator decision on the migration order"],
+		]);
+		assert(!res.isError, "the happy-path handoff is a success result");
+		assert.equal(res.content[0].text, "Handed off #42 (label ready-for-human); recorded as progress for the watchdog.");
+		const handoffAudit = h.audits.find((a) => a.type === "handoff");
+		assert(handoffAudit !== undefined, "the handoff is audited");
+		assert.equal(handoffAudit!.data.issue, 42);
+		assert.equal(handoffAudit!.data.kind, "human");
+		assert.equal(handoffAudit!.data.label, "ready-for-human");
+		assert.equal(handoffAudit!.data.reason, "needs an operator decision on the migration order");
+		// Progress reached the core: the warm start had streak 2 and a far-future
+		// cooldown; the handoff reset both (breaker cold, ladder free) and the run
+		// stayed armed. (Progress keeps the phase, so there is deliberately no
+		// transition audit — the persisted state is the observable.)
+		assert.equal(h.audits.find((a) => a.type === "transition"), undefined, "progress keeps the phase: no transition audit");
+		const nowAtHandoff = Date.now(); // the fake clock is frozen during execute
+		const persisted = persistedLatest(h.entries);
+		assert.equal(persisted.data.phase, "armed");
+		assert.equal(persisted.data.noProgressStreak, 0, "handoff is progress: the breaker streak stays cold");
+		assert.equal(persisted.data.nextAllowedAt, nowAtHandoff, "handoff is progress: the nudge cooldown resets");
+		// No timers were created or killed by the tool path.
+		assert.equal(timers.filter((t) => !t.cleared).length, before, "the handoff tool path starts no timer");
+	}),
+);
+
+// AC2: a child session can never invoke either tool — the tools are not even
+// registered there, and the gate errors if a call somehow arrives in a child
+// context (simulated by setting PI_SUBAGENT_ID on a main-registered harness).
+await withNoAmbientSubagent(() =>
+	withFakeTimers(async () => {
+		const h = makeHarness(makeFixtureCwd());
+		h.entries.push(armedEntry());
+		h.handlers.session_start({}, h.ctx);
+		h.setExec(async () => {
+			throw new Error("gh must not be called from a child-gated tool");
+		});
+		process.env.PI_SUBAGENT_ID = "child-caller";
+		try {
+			const stop = await h.tools.drain_stop!.execute("t2", { reason: "environment broke" }, undefined, undefined, h.ctx);
+			assert.equal(stop.isError, true, "a child cannot invoke drain_stop");
+			assert(String(stop.content[0].text).includes("main-session only"));
+			const handoff = await h.tools.drain_handoff!.execute("t3", { issue: 42, kind: "wontfix", reason: "x" }, undefined, undefined, h.ctx);
+			assert.equal(handoff.isError, true, "a child cannot invoke drain_handoff");
+			assert(String(handoff.content[0].text).includes("main-session only"));
+		} finally {
+			delete process.env.PI_SUBAGENT_ID;
+		}
+		// Nothing ran, nothing changed.
+		assert.equal(h.execCalls.length, 0, "a child-gated call never reaches gh");
+		assert.equal(h.audits.find((a) => a.type === "handoff" || a.type === "paused"), undefined, "a child-gated call changes nothing");
+	}),
+);
+
+// AC3: drain_stop pauses with the model's reason in the audit + notify, and
+// /watchdog resume works afterwards.
+await withNoAmbientSubagent(() =>
+	withFakeTimers(async (_timers, _flush, _clock) => {
+		const h = makeHarness(makeFixtureCwd());
+		h.entries.push(armedEntry());
+		h.handlers.session_start({}, h.ctx);
+		const res = await h.tools.drain_stop!.execute("t4", { reason: "gh auth is gone on this runner" }, undefined, undefined, h.ctx);
+		assert(!res.isError, "drain_stop succeeds on a live run");
+		assert(String(res.content[0].text).includes("paused"));
+		const pauseAudit = h.audits.find((a) => a.type === "paused");
+		assert(pauseAudit !== undefined, "the stop is audited as paused");
+		assert.equal(pauseAudit!.data.reason, "gh auth is gone on this runner", "the model's reason reaches the audit");
+		assert(h.notifications.some((n) => n.message.includes("gh auth is gone on this runner")), "the reason reaches the notify too");
+		assert(h.notifications.some((n) => n.message.includes("PAUSED")));
+		// The run really is paused (a tick would not run: phase gate) and persists the reason.
+		const persisted = persistedLatest(h.entries);
+		assert.equal(persisted.data.phase, "paused");
+		assert.equal(persisted.data.pausedReason, "gh auth is gone on this runner");
+		// Resume still works afterwards: paused -> armed, tick interval back, audited.
+		await h.handlers["command:watchdog"]("resume", h.ctx);
+		const resumeAudit = [...h.audits].reverse().find((a) => a.type === "transition");
+		assert(resumeAudit !== undefined && resumeAudit.data.from === "paused" && resumeAudit.data.to === "armed", "resume works after drain_stop");
+		const armedPersisted = persistedLatest(h.entries);
+		assert.equal(armedPersisted.data.phase, "armed");
+	}),
+);
+
+// drain_stop with no active run: an error result that says why, no state change.
+await withNoAmbientSubagent(() =>
+	withFakeTimers(async () => {
+		const h = makeHarness(makeFixtureCwd());
+		h.handlers.session_start({}, h.ctx); // no state entry: the watchdog is OFF
+		const res = await h.tools.drain_stop!.execute("t5", { reason: "nothing is running" }, undefined, undefined, h.ctx);
+		assert.equal(res.isError, true, "drain_stop without a live run errors with the reason");
+		assert(String(res.content[0].text).includes("no active watchdog run"));
+		assert.equal(h.audits.find((a) => a.type === "paused" || a.type === "transition"), undefined, "no state change when there is no run");
+	}),
+);
+
+// Failure path (AC-order honesty): a comment failure after the label swap is a
+// HANDOFF PARTIAL error result — gh got the swap, the watchdog recorded nothing.
+await withNoAmbientSubagent(() =>
+	withFakeTimers(async (_timers, flush) => {
+		const h = makeHarness(makeFixtureCwd());
+		h.entries.push(armedEntry());
+		h.handlers.session_start({}, h.ctx);
+		h.setExec(async (_command, args) => {
+			if (args[1] === "view") return { stdout: "ready-for-agent\n", stderr: "", code: 0, killed: false };
+			if (args[1] === "edit") return { stdout: "", stderr: "", code: 0, killed: false };
+			return { stdout: "", stderr: "gh: permission denied for comments", code: 4, killed: false };
+		});
+		const res = await h.tools.drain_handoff!.execute("t6", { issue: 9, kind: "needs-info", reason: "spec is ambiguous" }, undefined, undefined, h.ctx);
+		await flush();
+		assert.equal(res.isError, true, "a failed comment fails the tool result");
+		assert(String(res.content[0].text).includes("HANDOFF PARTIAL"), "the partial state is reported explicitly");
+		assert(String(res.content[0].text).includes("permission denied"), "the specific error is in the result");
+		// State consistency: no progress/persist/audit from a failed handoff.
+		assert.equal(h.audits.find((a) => a.type === "handoff"), undefined, "a failed handoff writes no handoff audit");
+		const persisted = persistedLatest(h.entries);
+		assert.equal(persisted.data.phase, "armed", "the run state is untouched by a failed handoff");
+	}),
+);
+
+// A label-swap failure (pre-read or edit) fails before any mutation and changes nothing.
+await withNoAmbientSubagent(() =>
+	withFakeTimers(async () => {
+		const h = makeHarness(makeFixtureCwd());
+		h.entries.push(armedEntry());
+		h.handlers.session_start({}, h.ctx);
+		h.setExec(async (_command, args) => {
+			if (args[1] === "view") return { stdout: "", stderr: "gh: issue not found", code: 1, killed: false };
+			return { stdout: "", stderr: "must not run", code: 0, killed: false };
+		});
+		const res = await h.tools.drain_handoff!.execute("t7", { issue: 404, kind: "human", reason: "x" }, undefined, undefined, h.ctx);
+		assert.equal(res.isError, true);
+		assert(String(res.content[0].text).includes("gh issue view 404"), "the failing gh step is named");
+		assert.equal(h.execCalls.length, 1, "nothing runs after the failed pre-read");
+		assert.equal(h.audits.find((a) => a.type === "handoff"), undefined);
+
+		// Idempotent retry: the exit label already applied (and ready-for-agent gone)
+		// refuses before touching the ticket again.
+		h.setExec(async (_command, args) => {
+			if (args[1] === "view") return { stdout: "ready-for-human\n", stderr: "", code: 0, killed: false };
+			return { stdout: "", stderr: "", code: 0, killed: false };
+		});
+		const retry = await h.tools.drain_handoff!.execute("t8", { issue: 404, kind: "human", reason: "x" }, undefined, undefined, h.ctx);
+		assert.equal(retry.isError, true);
+		// The ticket is already out of the queue (no ready-for-agent left), so the
+		// retry refuses in the pre-read before any mutation runs.
+		assert(String(retry.content[0].text).includes("nothing to hand off"), "an already-handed-off issue refuses cleanly");
+		assert.equal(h.execCalls.length, 2, "the retry also stopped at the pre-read (no edit, no comment)");
+	}),
+);
+
 // --- Factory (#30): child sessions register nothing, main sessions do -------------
 
 // Minimal pi-surface replica: the child factory must neither listen nor command.
 const makeMockPi = () => {
 	const events: string[] = [];
 	const commands: string[] = [];
+	const tools: string[] = [];
 	return {
 		events,
 		commands,
+		tools,
 		on(name: string) {
 			events.push(name);
 			return () => {};
 		},
 		registerCommand(name: string) {
 			commands.push(name);
+		},
+		registerTool(tool: { name: string }) {
+			tools.push(tool.name);
 		},
 	};
 };
@@ -1125,11 +1381,13 @@ const childPi = makeMockPi() as any;
 watchdogExtension(childPi as any);
 assert.equal(childPi.events.length, 0, "child factory registers no listeners");
 assert.equal(childPi.commands.length, 0, "child factory registers no commands");
+assert.equal(childPi.tools.length, 0, "child factory registers no model tools (#31 AC2)");
 
 delete process.env.PI_SUBAGENT_ID;
 const mainPi = makeMockPi() as any;
 watchdogExtension(mainPi as any);
 assert(mainPi.commands.includes("watchdog"), "main factory registers /watchdog");
+assert.deepEqual(mainPi.tools.sort(), ["drain_handoff", "drain_stop"], "main factory registers exactly the two drain tools (#31)");
 assert(mainPi.events.includes("session_start"), "main factory restores state");
 assert(mainPi.events.includes("agent_settled"), "main factory handles Esc and the READY confirm");
 assert(mainPi.events.includes("agent_end"), "main factory reports provider errors");

@@ -5,8 +5,9 @@
  * network, no clock, no subprocesses, no pi-API calls at runtime — this module
  * is the single pure seam the self-check asserts against (plans/drain-watchdog
  * flow.html sections 0-6, 10). The default export at the bottom is the pi
- * extension factory: the `/watchdog` command, the ARMED tick loop, nudges via
- * steer, state/audit session entries, and every timer. Timers are created only
+ * extension factory: the `/watchdog` command, the drain_handoff/drain_stop
+ * model tools (main sessions only), the ARMED tick loop, nudges via steer,
+ * state/audit session entries, and every timer. Timers are created only
  * on arm (never in the factory body), and child sessions never reach any of it.
  *
  * Semantics locked by the design:
@@ -19,10 +20,11 @@
  *    (docs/agents/issue-tracker.md refusal rule).
  *  - Tick order is fixed and the nudge is the last resort.
  *
- * `progress` is dispatched by the live loop for child completion steers and
- * queue fingerprint changes (label/status changes sit behind the count-only
- * contract). Only the harness decides completion: `llmDone` is accepted from
- * FINALIZING alone (flow.html sections 3 and 10).
+ * `progress` is dispatched by the live loop for child completion steers, queue
+ * fingerprint changes, and recorded drain_handoffs (a handoff is progress by
+ * design, flow.html section 5 — the breaker stays cold). Only the harness
+ * decides completion: `llmDone` is accepted from FINALIZING alone (flow.html
+ * sections 3 and 10).
  *
  * Imports `isRetryableAssistantError` from @earendil-works/pi-ai, so the module
  * needs pi-ai resolvable (checks.nix symlinks it from the pi runtime into the
@@ -37,10 +39,9 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { isRetryableAssistantError } from "@earendil-works/pi-ai";
-import type { ExecResult, ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@earendil-works/pi-coding-agent";
-
-// The runtime only reads stopReason/errorMessage; the rest of AssistantMessage is irrelevant here.
+import { isRetryableAssistantError, StringEnum } from "@earendil-works/pi-ai";
+import type { AgentToolResult, ExecResult, ExtensionAPI, ExtensionCommandContext, ExtensionContext, ExtensionToolContext } from "@earendil-works/pi-coding-agent";
+import { Type } from "typebox";
 type RuntimeMessage = Parameters<typeof isRetryableAssistantError>[0];
 
 // --- Types -------------------------------------------------------------------
@@ -103,7 +104,7 @@ export type DrainEvent =
 	| { type: "tick"; obs: TickObservation }
 	| { type: "providerError"; kind: ProviderErrorKind }
 	| { type: "probeOk" }
-	| { type: "llmStop" }
+	| { type: "llmStop"; reason?: string }
 	| { type: "llmDone" }
 	| { type: "progress" };
 
@@ -293,6 +294,65 @@ export function handoffExit(kind: HandoffKind): { label: string } {
 	const label = Object.hasOwn(HANDOFF_LABEL, kind) ? HANDOFF_LABEL[kind] : undefined;
 	if (label === undefined) throw new Error(`unknown handoff kind: ${String(kind)}`);
 	return { label };
+}
+
+/**
+ * drain_handoff/drain_stop availability gate. The tools exist only in the
+ * main-session factory, but a registered tool must still refuse when the
+ * factory somehow runs in a child context (children can NEVER invoke them,
+ * flow.html section 5) and when no watchdog run is live (nothing to hand off
+ * against, nothing to pause). Smallest sound no-active-run behavior: an error
+ * result — drain_handoff would otherwise look recorded when it did nothing,
+ * and drain_stop only matters while a run is live.
+ */
+export type ToolGate =
+	| { ok: true }
+	| { ok: false; error: string };
+
+export function drainToolGate(kind: "handoff" | "stop", childSession: boolean, phase: DrainPhase): ToolGate {
+	if (childSession) return { ok: false, error: `drain_${kind} is main-session only; child sessions cannot invoke it` };
+	if (phase === "off" || phase === "done") return { ok: false, error: `drain_${kind} ignored: no active watchdog run (phase ${phase}); arm one with /watchdog first` };
+	return { ok: true };
+}
+
+/**
+ * Distinct label names from `gh issue view --json labels --jq '.labels[].name'`
+ * output: one name per line. GitHub label names cannot contain line breaks, so
+ * a label's content can never forge an extra row; duplicates collapse.
+ */
+export function parseLabelList(stdout: string): string[] {
+	const out = new Set<string>();
+	for (const line of stdout.split(/\r?\n/)) {
+		const name = line.trim();
+		if (name !== "") out.add(name);
+	}
+	return [...out].sort();
+}
+
+/**
+ * Exact gh argv plan for one handoff: label swap first (remove then add so a
+ * partially-swapped state can only be a missing-remove, never a missing-add
+ * that would leave the ticket queued), then the reason comment. The caller
+ * runs them in order and stops at the first failure — an already-present exit
+ * label (remove fails "not found") and an already-absent ready-for-agent
+ * (add path unaffected) are both idempotent, so a failed remove is retried by
+ * simply calling the tool again.
+ */
+export function planHandoffCommands(issue: number, kind: HandoffKind): { label: string; argvs: { command: string; args: string[] }[] } {
+	const label = handoffExit(kind).label;
+	return {
+		label,
+		argvs: [
+			{ command: "gh", args: ["issue", "view", String(issue), "--json", "labels", "--jq", ".labels[].name"] },
+			{ command: "gh", args: ["issue", "edit", String(issue), "--remove-label", "ready-for-agent", "--add-label", label] },
+			{ command: "gh", args: ["issue", "comment", String(issue), "--body", `drain-watchdog handoff (${kind}): `] },
+		],
+	};
+}
+
+/** One-line model-facing result text for a recorded handoff. */
+export function handoffResultText(issue: number, label: string): string {
+	return `Handed off #${issue} (label ${label}); recorded as progress for the watchdog.`;
 }
 
 // --- SPLIT predicate ------------------------------------------------------------
@@ -587,6 +647,10 @@ const PAUSE_REASON = {
 	finalize: "finalization not confirmed after the closing nudge; run paused",
 } as const;
 
+/** drain_stop's own reason text overrides the generic llmStop reason when given. */
+const stopReason = (reason: string | undefined): string =>
+	reason === undefined || reason.trim() === "" ? PAUSE_REASON.llmStop : reason.trim();
+
 const toPaused = (state: DrainState, reason: string): DrainTransition => ({
 	state: { ...state, phase: "paused", pausedReason: reason },
 	action: { type: "pause", reason },
@@ -783,8 +847,9 @@ export function transition(state: DrainState, event: DrainEvent, now: number, co
 			// reach the breaker/hard cap through a provider blip.
 			return stay({ ...state, phase: "armed", backoffKind: null, backoffRung: 0, backoffStartMs: null });
 		case "llmStop":
-			// drain_stop is an explicit pause: the model named environment-level breakage.
-			return toPaused(state, PAUSE_REASON.llmStop);
+			// drain_stop is an explicit pause: the model named environment-level breakage,
+			// and its reason travels into pausedReason/audit/notify verbatim.
+			return toPaused(state, stopReason(event.reason));
 		case "llmDone":
 			return stay({ ...state, phase: "done", pausedReason: null });
 		// L3: `breaker`/`hardCap` DrainEvents (distinct from the tick-internal
@@ -811,6 +876,8 @@ const QUEUE_DOCS_RELPATH = "docs/agents/issue-tracker.md";
 /** Queue block execution budget: the block walks every pickable issue with one
  *  `gh api` call each; a healthy repo finishes well under a minute. */
 const QUEUE_TIMEOUT_MS = 300_000;
+/** Single handoff gh call budget: one gh invocation, well under a minute. */
+const HANDOFF_TIMEOUT_MS = 60_000;
 
 const PREP_INSTRUCTION = (target: number, pickable: number): string =>
 	[
@@ -825,6 +892,9 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 	// Child sessions never run the watchdog: no listeners, no command, no timers,
 	// no state — the factory returns before registering anything (self-checked).
 	if (isChildSession(process.env)) return;
+
+	// Every tool execute() runs in the same (main-session) process that armed the
+	// watchdog, so these locals ARE the live state; the gate reads them per call.
 
 	const env = process.env as Record<string, string | undefined>;
 	const tickMs = readIntEnv(env, "PI_WATCHDOG_TICK_MS", 60_000);
@@ -1241,6 +1311,125 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 				return;
 		}
 	};
+
+	// --- Model tools (main sessions only; flow.html sections 4-5) ----------------
+
+	type HandoffParams = { issue: number; kind: HandoffKind; reason: string };
+
+	/**
+	 * drain_handoff effect: pre-read labels, label swap, reason comment, then feed
+	 * the core a progress event (a handoff is progress by design, flow.html
+	 * section 5 — the breaker stays cold) and persist+audit. Order is label swap
+	 * then comment: the only possible partial state is swapped-but-uncommented,
+	 * which leaves the ticket OUT of the pickable queue (safe direction) and is
+	 * reported as such; a retry is idempotent (see planHandoffCommands).
+	 */
+	const runHandoff = async (params: HandoffParams, toolCtx: ExtensionToolContext): Promise<{ text: string }> => {
+		const { label, argvs } = planHandoffCommands(params.issue, params.kind);
+		const exec = async (command: string, args: string[]) => {
+			try {
+				return await pi.exec(command, args, { cwd: toolCtx.cwd, timeout: HANDOFF_TIMEOUT_MS });
+			} catch (e) {
+				// Spawn-level failure (gh missing, signal): same containment as the queue command.
+				throw new Error(`gh ${args[0]} ${args[1]} failed: ${String(e)}`);
+			}
+		};
+
+		// Pre-read: fail before touching the ticket when the queue contract cannot
+		// hold (ready-for-agent never present, exit label already applied).
+		const pre = await exec(argvs[0]!.command, argvs[0]!.args);
+		if (pre.code !== 0) throw new Error(`gh issue view ${params.issue} --json labels --jq failed (exit ${pre.code}): ${pre.stderr.trim() || pre.stdout.trim()}`);
+		const labels = parseLabelList(pre.stdout);
+		if (!labels.includes("ready-for-agent")) throw new Error(`#${params.issue} does not carry ready-for-agent; nothing to hand off (labels: ${labels.join(", ") || "none"})`);
+		if (labels.includes(label)) throw new Error(`#${params.issue} already carries the ${label} handoff label; nothing to do`);
+
+		const swap = await exec(argvs[1]!.command, argvs[1]!.args);
+		if (swap.code !== 0) throw new Error(`label swap failed on #${params.issue} (exit ${swap.code}): ${swap.stderr.trim() || swap.stdout.trim()}`);
+
+		const comment = await exec(argvs[2]!.command, argvs[2]!.args.slice(0, -1).concat(`drain-watchdog handoff (${params.kind}): ${params.reason.trim()}`));
+		if (comment.code !== 0) {
+			// Partial state, reported honestly: the ticket already left the queue
+			// (label swapped) but carries no reason comment yet.
+			throw new Error(
+				`HANDOFF PARTIAL: label ${label} was applied to #${params.issue} but the reason comment failed (exit ${comment.code}): ${comment.stderr.trim() || comment.stdout.trim()}. The ticket is out of the pickable queue; add the comment manually or retry drain_handoff.`,
+			);
+		}
+
+		// Handoff is progress (flow.html section 5): breaker stays cold, nudge ladder resets.
+		progressSinceMs = Date.now();
+		apply(transition(state, { type: "progress" }, Date.now()), "handoff");
+		audit("handoff", { issue: params.issue, kind: params.kind, label, reason: params.reason.trim() });
+		return { text: handoffResultText(params.issue, label) };
+	};
+
+	/** drain_stop effect: pause with the model's reason; the core owns resume. */
+	const runStop = (reason: string) => {
+		const trimmed = reason.trim();
+		const stop = transition(state, { type: "llmStop", reason: trimmed }, Date.now());
+		if (stop.state.phase === state.phase && stop.action.type === "wait") {
+			// Gate already covered off/done; this is the residual no-op guard (e.g. a
+			// concurrent pause landed between the gate and here).
+			return { text: `drain_stop ignored: no active watchdog run (phase ${state.phase})` };
+		}
+		apply(stop, "drain_stop");
+		return { text: `Watchdog paused: ${stop.state.pausedReason ?? PAUSE_REASON.llmStop}. /watchdog resume when ready.` };
+	};
+
+	pi.registerTool({
+		name: "drain_handoff",
+		label: "Drain Handoff",
+		description:
+			"Remove a drain-queue ticket by the tracker's exit path: swaps ready-for-agent for the kind's exit label, posts the reason as a comment, and records watchdog progress. Main session only. Kinds: needs-info (ambiguous/missing spec), human (needs a human decision/action, ESCALATE, or low-tolerance work: auth, secrets, migrations, public API, money, data deletion), wontfix (will not be done).",
+		promptSnippet: "Exit a drain-queue ticket to its tracker exit label with an audited reason comment (handoff counts as watchdog progress)",
+		promptGuidelines: [
+			"Use drain_handoff instead of raw gh edits so label and reason comment stay consistent; hand low-tolerance work (auth/authz, secrets/credentials, DB migrations, public API contracts, money/billing, data deletion, irreversible operations) through kind human BEFORE claiming the ticket.",
+		],
+		parameters: Type.Object({
+			issue: Type.Integer({ description: "Issue number to hand off" }),
+			kind: StringEnum(["needs-info", "human", "wontfix"] as const, { description: "Handoff kind; decides the exit label" }),
+			reason: Type.String({ description: "One-paragraph reason posted as the issue comment" }),
+		}),
+		async execute(_id, params, _signal, _update, toolCtx) {
+			const gate = drainToolGate("handoff", isChildSession(process.env), state.phase);
+			if (!gate.ok) return { content: [{ type: "text", text: gate.error }], isError: true } as AgentToolResult;
+			if (closed) return { content: [{ type: "text", text: "drain_handoff ignored: session is shutting down" }], isError: true } as AgentToolResult;
+			// Validate the kind at the boundary (TypeBox statics are loose on older
+			// typebox snapshots): fail closed instead of trusting the schema cast.
+			if (params.kind !== "needs-info" && params.kind !== "human" && params.kind !== "wontfix") {
+				return { content: [{ type: "text", text: `drain_handoff: unknown kind ${JSON.stringify(params.kind)} (use "needs-info", "human", or "wontfix")` }], isError: true } as AgentToolResult;
+			}
+			const { issue, kind, reason } = params; // narrowed consts for the runner
+			try {
+				const { text } = await runHandoff({ issue, kind, reason }, toolCtx);
+				if (closed) return { content: [{ type: "text", text: `HANDOFF PARTIAL: GitHub was updated for #${issue} but the watchdog state was not recorded — the session shut down mid-handoff.` }], isError: true } as AgentToolResult;
+				return { content: [{ type: "text", text }], details: { issue, kind } };
+			} catch (e) {
+				return { content: [{ type: "text", text: `drain_handoff failed: ${String(e)}` }], isError: true } as AgentToolResult;
+			}
+		},
+	});
+
+	pi.registerTool({
+		name: "drain_stop",
+		label: "Drain Stop",
+		description:
+			"Pause the unattended drain run for environment-level breakage (missing gh auth, dirty repo, disk full) — not for single-ticket problems. Records the reason in the audit trail; /watchdog resume continues afterwards. Main session only.",
+		promptSnippet: "Pause the drain watchdog run for environment-level breakage, reason audited",
+		promptGuidelines: [
+			"Use drain_stop only for environment-level breakage (gh auth gone, repo broken, disk full); hand single-ticket problems through drain_handoff instead.",
+		],
+		parameters: Type.Object({
+			reason: Type.String({ description: "What broke in the environment, for the audit trail and the operator" }),
+		}),
+		async execute(_id, params, _signal, _update, _toolCtx) {
+			const gate = drainToolGate("stop", isChildSession(process.env), state.phase);
+			if (!gate.ok) return { content: [{ type: "text", text: gate.error }], isError: true } as AgentToolResult;
+			if (closed) return { content: [{ type: "text", text: "drain_stop ignored: session is shutting down" }], isError: true } as AgentToolResult;
+			const { text } = runStop(params.reason);
+			if (closed) return { content: [{ type: "text", text: "drain_stop raced session shutdown; re-run it after restart (state is persisted)." }], isError: true } as AgentToolResult;
+			return { content: [{ type: "text", text }], details: { pausedReason: state.pausedReason } };
+		},
+	});
 
 	// --- Event wiring ------------------------------------------------------------
 

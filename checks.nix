@@ -1319,6 +1319,8 @@ in
         piRuntime=${expectedPackage}/lib/node_modules/pi-monorepo
         ln -s "$piRuntime/node_modules/@earendil-works/pi-ai" drain-watchdog/node_modules/@earendil-works/pi-ai
         ln -s "$piRuntime" drain-watchdog/node_modules/@earendil-works/pi-coding-agent
+        # drain_handoff/drain_stop schemas (#31) use typebox directly, like dev-journal.
+        ln -s "$piRuntime/node_modules/typebox" drain-watchdog/node_modules/typebox
 
         # M5(c): `node --experimental-strip-types` below only erases type annotations; it
         # never checks them, so a type error (wrong import, undeclared name, a
