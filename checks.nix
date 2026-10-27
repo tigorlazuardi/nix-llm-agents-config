@@ -1263,6 +1263,32 @@ in
         touch $out
       '';
 
+  # drain-watchdog is a pure decision core (issue #29): no factory exists yet,
+  # so the pi load step only proves the module parses and imports cleanly.
+  drain-watchdog =
+    pkgs.runCommandLocal "pi-drain-watchdog"
+      {
+        nativeBuildInputs = [
+          expectedPackage
+          pkgs.nodejs_22
+        ];
+      }
+      ''
+        cp -R ${./config/extensions/drain-watchdog} drain-watchdog
+        chmod -R u+w drain-watchdog
+        node --experimental-strip-types drain-watchdog/drain-watchdog.self-check.ts
+
+        export HOME="$TMPDIR/home"
+        export PI_CODING_AGENT_DIR="$HOME/.pi/agent"
+        export PI_TELEMETRY=0
+        mkdir -p "$PI_CODING_AGENT_DIR"
+        pi --offline --no-extensions --no-skills --no-prompt-templates --no-context-files \
+          -e ${./config/extensions/drain-watchdog}/index.ts \
+          --list-models > pi.log 2>&1
+        ! grep -E 'Extension issues|Failed to load extension|Cannot find module|Error:' pi.log
+        touch $out
+      '';
+
   bash-loop-guard =
     pkgs.runCommandLocal "pi-bash-loop-guard"
       {
