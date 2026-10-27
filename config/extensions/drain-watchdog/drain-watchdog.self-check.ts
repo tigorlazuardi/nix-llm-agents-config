@@ -419,6 +419,17 @@ const tickBackoff = transition(armed(), { type: "tick", obs: { ...baseObs(), las
 assert.equal(tickBackoff.state.phase, "backoff");
 assert.deepEqual(tickBackoff.action, { type: "probe", delayMs: 1 * MIN });
 
+// 9b. Tick-path auth error pauses immediately (not a probe, not a nudge).
+const tickAuth = transition(armed(), { type: "tick", obs: { ...baseObs(), lastError: "401 Unauthorized" } }, T);
+assert.equal(tickAuth.state.phase, "paused");
+assert.equal(tickAuth.state.pausedReason, "provider auth error; needs human");
+
+// 9c. Tick-path quota error enters the quota ladder, not the transient one.
+const tickQuota = transition(armed(), { type: "tick", obs: { ...baseObs(), lastError: "insufficient_quota" } }, T);
+assert.equal(tickQuota.state.phase, "backoff");
+assert.equal(tickQuota.state.backoffKind, "quota");
+assert.deepEqual(tickQuota.action, { type: "probe", delayMs: 30 * MIN });
+
 // 10. Breaker: BREAKER_K consecutive no-progress nudges, then pause — not nudges forever.
 let s: DrainState = armed();
 for (let i = 1; i <= BREAKER_K + 1; i++) {
