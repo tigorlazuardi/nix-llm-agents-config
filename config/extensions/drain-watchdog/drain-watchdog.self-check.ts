@@ -387,7 +387,7 @@ assert.equal(JSON.stringify(snapshot), before);
 	// Phases allowed to act per event; everything else must be a pure no-op.
 	const owners: Record<string, readonly string[]> = {
 		arm: ["off"],
-		off: ["armed", "backoff", "finalizing"],
+		off: ["armed", "backoff", "paused", "finalizing"],
 		resume: ["paused"],
 		abort: ["armed", "backoff", "finalizing"],
 		tick: ["armed", "finalizing"],

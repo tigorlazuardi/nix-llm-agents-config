@@ -294,7 +294,7 @@ const toPaused = (state: DrainState, reason: string): DrainTransition => ({
  */
 const EVENT_PHASES: Record<DrainEvent["type"], readonly DrainPhase[]> = {
 	arm: ["off"],
-	off: ["armed", "backoff", "finalizing"],
+	off: ["armed", "backoff", "paused", "finalizing"],
 	resume: ["paused"],
 	abort: ["armed", "backoff", "finalizing"],
 	tick: ["armed", "finalizing"],
