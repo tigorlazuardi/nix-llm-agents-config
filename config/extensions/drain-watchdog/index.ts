@@ -38,7 +38,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { isRetryableAssistantError } from "@earendil-works/pi-ai";
-import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ExecResult, ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@earendil-works/pi-coding-agent";
 
 // The runtime only reads stopReason/errorMessage; the rest of AssistantMessage is irrelevant here.
 type RuntimeMessage = Parameters<typeof isRetryableAssistantError>[0];
@@ -798,15 +798,26 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 	let prepInflight = 0;
 	let readyDeclared = false;
 
-	const clearTimers = () => {
+	// M1: set true in session_shutdown, reset false in session_start. Checked after every
+	// await that precedes a state mutation or timer creation (tick, agent_settled's
+	// ui.confirm, runPrep's awaits, scheduleProbe's delayed delivery) so no in-flight
+	// async work can arm/nudge/persist/start a timer after teardown.
+	let closed = false;
+	const clearTickTimer = () => {
 		if (timer !== null) {
 			clearInterval(timer);
 			timer = null;
 		}
+	};
+	const clearProbeTimer = () => {
 		if (probeTimer !== null) {
 			clearTimeout(probeTimer);
 			probeTimer = null;
 		}
+	};
+	const clearTimers = () => {
+		clearTickTimer();
+		clearProbeTimer();
 	};
 
 	const notify = (message: string, level: "info" | "warning" | "error" = "info") => {
@@ -826,14 +837,20 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 	};
 
 	const startLoop = () => {
-		clearTimers();
+		if (closed) return; // M1: never start a timer after session_shutdown.
+		// H3: only the tick interval is (re)created here. Clearing the probe timer too
+		// used to wedge a restored BACKOFF run: session_start calls scheduleProbe(...)
+		// then startLoop() to keep ticks alive for probeOk, and this killed the probe
+		// it had just scheduled a line above, so BACKOFF never woke up again.
+		clearTickTimer();
 		timer = setInterval(() => {
 			void tick();
 		}, tickMs);
 	};
 
 	const scheduleProbe = (baseDelayMs: number) => {
-		if (probeTimer !== null) clearTimeout(probeTimer);
+		if (closed) return; // M1: never arm a timer after session_shutdown.
+		clearProbeTimer();
 		// Jitter at the effect boundary: the core's ladder value is the base; the
 		// delivery widens it +-20% (jitteredDelayMs) so parallel wakes do not hit the
 		// provider together. On a failed probe delivery BACKOFF can wedge; the next
@@ -841,7 +858,7 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 		const delay = jitteredDelayMs(baseDelayMs, Math.random());
 		probeTimer = setTimeout(() => {
 			probeTimer = null;
-			if (state.phase !== "backoff") return;
+			if (closed || state.phase !== "backoff") return; // M1: shutdown may land mid-delay.
 			probeInFlight = true;
 			audit("probe-delivered", {});
 			deliver(PROBE_MESSAGE_TYPE, PROBE_TEXT);
@@ -860,7 +877,14 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 		}
 		const queueBlock = extractFencedBlock(markdown, "drain-queue");
 		if (queueBlock === null || queueBlock.trim() === "") return fail(`no drain-queue block in ${QUEUE_DOCS_RELPATH}`);
-		const res = await ctx.exec("bash", ["-c", queueBlock], { timeout: QUEUE_TIMEOUT_MS });
+		let res: ExecResult;
+		try {
+			res = await pi.exec("bash", ["-c", queueBlock], { cwd: ctx.cwd, timeout: QUEUE_TIMEOUT_MS });
+		} catch (e) {
+			// H1/H2: pi.exec is the real API (ctx.exec does not exist); a spawn-level throw
+			// (not just a non-zero exit, which parseQueueOutput already handles) must also refuse.
+			return fail(`drain-queue command threw: ${String(e)}`);
+		}
 		const parsed = parseQueueOutput(res.stdout, res.code);
 		if (!parsed.ok) return fail(`drain-queue command failed (exit ${res.code}); refusing`);
 		// drain-inflight is optional by contract; a missing/failing block is counted
@@ -869,7 +893,13 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 		let inflight = 0;
 		const inflightBlock = extractFencedBlock(markdown, "drain-inflight");
 		if (inflightBlock !== null) {
-			const res2 = await ctx.exec("bash", ["-c", inflightBlock], { timeout: QUEUE_TIMEOUT_MS });
+			try {
+				const res2 = await pi.exec("bash", ["-c", inflightBlock], { cwd: ctx.cwd, timeout: QUEUE_TIMEOUT_MS });
+				const parsed2 = parseQueueOutput(res2.stdout, res2.code);
+				if (parsed2.ok) inflight = parsed2.count;
+			} catch {
+				// Optional block: a throwing command counts as 0, same as a failing one.
+			}
 			const parsed2 = parseQueueOutput(res2.stdout, res2.code);
 			if (parsed2.ok) inflight = parsed2.count;
 		}
@@ -936,7 +966,7 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 	};
 
 	const tick = async () => {
-		if (tickInFlight) return;
+		if (closed || tickInFlight) return; // M1: shutdown may land between setInterval ticks.
 		const ctx = latestCtx;
 		if (ctx === null) return;
 		const now = Date.now();
@@ -956,6 +986,7 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 		try {
 			const previousQueue = { ...lastQueue };
 			const q = await runQueueCommand(ctx);
+			if (closed) return; // M1: shutdown landed while the queue command was running.
 			const observedAt = Date.now();
 			const obs: TickObservation = {
 				running: false,
@@ -976,12 +1007,26 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 				// Closing-step detection is the #34 flow; plain DONE on an empty frontier.
 				hasClosingSteps: false,
 			};
-			apply(transition(state, { type: "tick", obs }, observedAt), "tick");
+			// L2: assign before `apply` so a nudge/pause/audit in this same apply call
+			// reports THIS tick's pickable count, not the previous tick's (or arm-time's).
 			lastQueue = { pickable: q.pickable, inflight: q.inflight };
+			apply(transition(state, { type: "tick", obs }, observedAt), "tick");
 			if (q.ok && queueFingerprint(lastQueue) !== queueFingerprint(previousQueue)) {
 				// Queue fingerprint change counts as progress (design section 2).
 				progressSinceMs = observedAt;
 				apply(transition(state, { type: "progress" }, observedAt), "queue-change");
+			}
+		} catch (e) {
+			// H2: `startLoop` fires `void tick()` with no caller-side catch, so any throw
+			// here (runQueueCommand's own containment only covers its exec calls;
+			// apply/appendEntry/sendMessage can still throw) becomes an unhandled
+			// rejection unless it is caught and paused right here. Fail-closed: pause,
+			// never silently continue, never DONE.
+			try {
+				apply(toPaused(state, `tick failed: ${String(e)}`), "tick-error");
+			} catch {
+				// State mutation itself is failing (e.g. appendEntry down); nothing more
+				// can be done safely from inside the tick's own error path.
 			}
 		} finally {
 			tickInFlight = false;
@@ -1011,7 +1056,7 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 		}
 		// Git branch containing an issue number.
 		try {
-			const branch = await ctx.exec("git", ["rev-parse", "--abbrev-ref", "HEAD"], { timeout: 10_000 });
+			const branch = await pi.exec("git", ["rev-parse", "--abbrev-ref", "HEAD"], { cwd: ctx.cwd, timeout: 10_000 });
 			const n = issueNumberFromBranch(branch.stdout.trim());
 			if (n !== null) found.add(n);
 		} catch {
@@ -1044,10 +1089,12 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 		runTarget = null;
 
 		const resolution = pickTarget(ref, await collectTargetCandidates(ctx));
+		if (closed) return; // M1: session_shutdown fired while scanning for a target.
 		if (resolution.status === "ask") {
 			const answer = resolution.candidates
 				? await ctx.ui.select("drain-watchdog: multiple issue candidates — pick the run target", resolution.candidates.map((n) => `#${n}`))
 				: await ctx.ui.input("drain-watchdog: no issue found in conversation or branch — enter the issue number");
+			if (closed) return; // M1: session_shutdown fired while the picker was open.
 			const nums = answer === undefined ? [] : extractIssueNumbers(answer);
 			if (nums.length !== 1) {
 				notify("drain-watchdog: PREP cancelled (no single target chosen)");
@@ -1059,6 +1106,7 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 		}
 
 		const q = await runQueueCommand(ctx);
+		if (closed) return; // M1: session_shutdown fired while the queue command was running.
 		const refusal = armRefusal(q.pickable, q.ok);
 		if (refusal !== null) {
 			audit("prep-refused", { reason: refusal, error: q.error });
@@ -1122,6 +1170,7 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 
 	pi.on("session_start", (_event, ctx) => {
 		latestCtx = ctx;
+		closed = false; // M1: a fresh session may create timers again.
 		clearTimers();
 		childCount = 0;
 		probeInFlight = false;
@@ -1146,11 +1195,15 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 			startLoop();
 		} else {
 			// PAUSED stays paused (resume is the only exit from a paused run).
+			audit("restored", { phase: "paused", reason: state.pausedReason }); // L1
 			notify(`drain-watchdog: restored PAUSED — ${state.pausedReason ?? "unknown reason"}. /watchdog resume`, "warning");
 		}
 	});
 
 	pi.on("session_shutdown", () => {
+		// M1: no pending await (tick, agent_settled's ui.confirm, runPrep) may arm/nudge/
+		// persist/start a timer after this point.
+		closed = true;
 		// Timers never leak past teardown; persisted state decides the next start.
 		clearTimers();
 	});
@@ -1230,6 +1283,7 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 				`The model declared READY for #${target} (${prepPickable} pickable). Arm the watchdog for an unattended run?`,
 			);
 			prepTarget = null;
+			if (closed) return; // M1: session_shutdown fired while ui.confirm was pending.
 			if (!go) {
 				audit("arm-declined", { target });
 				notify("drain-watchdog: operator declined; nothing armed");
