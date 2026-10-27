@@ -26,6 +26,7 @@ import {
 	parseQueueOutput,
 	shouldSplit,
 	transition,
+	type DrainEvent,
 	type DrainState,
 	type TickObservation,
 } from "./index.ts";
@@ -199,11 +200,10 @@ assert.equal(transition(armOK.state, { type: "llmDone" }, 42_000).state.phase, "
 
 // --- Transition: progress sources reset the streak ---------------------------------------
 
-const steered = transition(armed({ noProgressStreak: 3, nextAllowedAt: 999_999 }), { type: "completionSteer" }, 50_000);
+// Handoff, child steer and queue change all report as the one `progress` event.
+const steered = transition(armed({ noProgressStreak: 3, nextAllowedAt: 999_999 }), { type: "progress" }, 50_000);
 assert.equal(steered.state.noProgressStreak, 0);
 assert.equal(steered.state.nextAllowedAt, 50_000);
-assert.equal(transition(armed({ noProgressStreak: 3 }), { type: "handoffRecorded" }, 51_000).state.noProgressStreak, 0);
-assert.equal(transition(armed({ noProgressStreak: 3 }), { type: "progress" }, 52_000).state.noProgressStreak, 0);
 
 // Breaker and hardCap events pause with a named reason.
 assert.equal(transition(armOK.state, { type: "breaker" }, 53_000).state.phase, "paused");
@@ -251,7 +251,46 @@ assert.deepEqual(doneLeftover.action, { type: "done", leftovers: true });
 const fin = transition(armed(), { type: "tick", obs: { ...baseObs(), pickable: 0, hasClosingSteps: true } }, T);
 assert.equal(fin.state.phase, "finalizing");
 assert.deepEqual(fin.action, { type: "finalizeNudge" });
-assert.ok(fin.state.nextAllowedAt > T);
+assert.equal(fin.state.nudgeCount, 1);
+assert.equal(fin.state.noProgressStreak, 1);
+assert.equal(fin.state.nextAllowedAt, T + 3 * MIN);
+
+// 6b. FINALIZING is bounded: ignored finalize nudges escalate the cooldown 3/6/12/24
+// and the Kth-after pauses (breaker) instead of nudging every 3 minutes forever.
+{
+	const finObs = { ...baseObs(), pickable: 0, hasClosingSteps: true };
+	let fs: DrainState = armed();
+	let at = T;
+	const finCooldowns: number[] = [];
+	for (let i = 1; i <= BREAKER_K; i++) {
+		const r = transition(fs, { type: "tick", obs: finObs }, at);
+		assert.deepEqual(r.action, { type: "finalizeNudge" }, `finalize nudge ${i}`);
+		assert.equal(r.state.nudgeCount, i);
+		assert.equal(r.state.noProgressStreak, i);
+		finCooldowns.push(r.state.nextAllowedAt - at);
+		fs = r.state;
+		at = r.state.nextAllowedAt;
+	}
+	assert.deepEqual(finCooldowns, [3, 6, 12, 24].map((m) => m * MIN));
+	const stopped8 = transition(fs, { type: "tick", obs: finObs }, at);
+	assert.equal(stopped8.state.phase, "paused");
+	assert.equal(stopped8.action.type, "pause");
+	// 8 consecutive ignored finalize ticks never produce 8 nudges.
+	let nudges = 0;
+	let ph: DrainState = armed();
+	let t8 = T;
+	for (let i = 0; i < 8; i++) {
+		const r = transition(ph, { type: "tick", obs: finObs }, t8);
+		if (r.action.type === "finalizeNudge") nudges++;
+		ph = r.state;
+		t8 = Math.max(t8, ph.nextAllowedAt);
+	}
+	assert.equal(nudges, BREAKER_K);
+	assert.equal(ph.phase, "paused");
+	// The hard cap also binds finalize nudges.
+	const capFin = transition(armed({ nudgeCount: HARD_CAP }), { type: "tick", obs: finObs }, T);
+	assert.equal(capFin.state.phase, "paused");
+}
 
 // 7. Children running: progress within stall limit → wait; stalled → notify only, never a nudge.
 assert.deepEqual(transition(armed(), { type: "tick", obs: { ...baseObs(), childCount: 1 } }, T).action, {
@@ -283,6 +322,9 @@ for (let i = 1; i <= BREAKER_K + 1; i++) {
 	const r = transition(s, { type: "tick", obs: baseObs() }, T + i * HOUR);
 	if (i <= BREAKER_K) {
 		assert.deepEqual(r.action, { type: "nudge" }, `nudge ${i} fires before the breaker`);
+		// Tick is the only recorder: exactly one count/streak per nudge.
+		assert.equal(r.state.nudgeCount, i);
+		assert.equal(r.state.noProgressStreak, i);
 		s = r.state;
 	} else {
 		// The tick AFTER the Kth unanswered nudge pauses instead of nudging again.
@@ -295,16 +337,20 @@ const unstuck = transition(s, { type: "progress" }, T + 10 * HOUR);
 assert.equal(unstuck.state.phase, "armed");
 assert.equal(unstuck.state.noProgressStreak, 0);
 
-// 11. Nudge event raises the cooldown ladder 3 → 6 → 12 → 24 → 30 (capped).
+// 11. Tick-path cooldown ladder 3 → 6 → 12 → 24 → 30 → 30 (capped), exactly one count per tick.
 let nudgeState: DrainState = armed();
 const cooldowns: number[] = [];
 for (let i = 1; i <= 6; i++) {
-	const at = 200_000 + i * MIN;
-	const r = transition(nudgeState, { type: "nudge" }, at);
+	const at = 200_000 + i * HOUR;
+	const r = transition({ ...nudgeState, noProgressStreak: 0 }, { type: "tick", obs: baseObs() }, at);
+	assert.deepEqual(r.action, { type: "nudge" });
+	assert.equal(r.state.nudgeCount, i);
 	cooldowns.push(r.state.nextAllowedAt - at);
 	nudgeState = r.state;
 }
 assert.deepEqual(cooldowns, [3, 6, 12, 24, 30, 30].map((m) => m * MIN));
+// Hard cap pauses instead of nudging.
+assert.equal(transition(armed({ nudgeCount: HARD_CAP }), { type: "tick", obs: baseObs() }, T).state.phase, "paused");
 
 // 12. Done is terminal: no resurrect from stray events.
 const doneState = done.state;
@@ -316,6 +362,67 @@ const snapshot = armed({ noProgressStreak: 2 });
 const before = JSON.stringify(snapshot);
 transition(snapshot, { type: "tick", obs: baseObs() }, T);
 assert.equal(JSON.stringify(snapshot), before);
+
+// 14. Full event × phase matrix: a phase that does not own an event stays put.
+{
+	const phases = ["off", "armed", "backoff", "paused", "done", "finalizing"] as const;
+	const events: DrainEvent[] = [
+		{ type: "arm", queueOk: true, pickable: 3 },
+		{ type: "off" },
+		{ type: "resume" },
+		{ type: "abort" },
+		{ type: "tick", obs: { ...baseObs(), lastError: "500 Internal Server Error" } },
+		{ type: "tick", obs: baseObs() },
+		{ type: "providerError", kind: "transient" },
+		{ type: "providerError", kind: "quota" },
+		{ type: "providerError", kind: "auth" },
+		{ type: "providerError", kind: "unknown" },
+		{ type: "probeOk" },
+		{ type: "llmStop" },
+		{ type: "llmDone" },
+		{ type: "progress" },
+		{ type: "breaker" },
+		{ type: "hardCap" },
+	];
+	// Phases allowed to act per event; everything else must be a pure no-op.
+	const owners: Record<string, readonly string[]> = {
+		arm: ["off"],
+		off: ["armed", "backoff", "finalizing"],
+		resume: ["paused"],
+		abort: ["armed", "backoff", "finalizing"],
+		tick: ["armed", "finalizing"],
+		providerError: ["armed", "backoff", "finalizing"],
+		probeOk: ["backoff"],
+		llmStop: ["armed", "backoff", "finalizing"],
+		llmDone: ["armed", "backoff", "finalizing"],
+		progress: ["armed", "backoff", "finalizing"],
+		breaker: ["armed", "backoff", "finalizing"],
+		hardCap: ["armed", "backoff", "finalizing"],
+	};
+	let checked = 0;
+	for (const phase of phases) {
+		for (const ev of events) {
+			if (owners[ev.type].includes(phase)) continue;
+			const start: DrainState = { ...INITIAL_STATE, phase, pausedReason: phase === "paused" ? "x" : null };
+			const before = JSON.stringify(start);
+			const r = transition(start, ev, T);
+			assert.equal(r.state.phase, phase, `${ev.type} must not move ${phase}`);
+			assert.equal(JSON.stringify(r.state), before, `${ev.type} must not change ${phase} state`);
+			assert.equal(r.action.type, "wait", `${ev.type} from ${phase} is a no-op`);
+			checked++;
+		}
+	}
+	assert.ok(checked > 40);
+	// Resume from OFF never arms (arming needs the arm event and its refusal check).
+	assert.equal(transition(INITIAL_STATE, { type: "resume" }, T).state.phase, "off");
+	// Only resume leaves PAUSED; a late provider error + probe cannot self-resume it.
+	const pausedS: DrainState = { ...INITIAL_STATE, phase: "paused", pausedReason: "x" };
+	const lateErr = transition(pausedS, { type: "providerError", kind: "transient" }, T).state;
+	assert.equal(transition(lateErr, { type: "probeOk" }, T).state.phase, "paused");
+	assert.equal(transition(pausedS, { type: "resume" }, T).state.phase, "armed");
+	// DONE is terminal for every event, including arm.
+	for (const ev of events) assert.equal(transition(done.state, ev, T).state.phase, "done", `done survives ${ev.type}`);
+}
 
 // --- parseQueueOutput ---------------------------------------------------------------------
 
@@ -340,31 +447,49 @@ assert.equal(parseQueueOutput("3\n", 2).count, null);
 assert.equal(classifyProviderError("429 Too Many Requests: rate limit exceeded"), "transient");
 assert.equal(classifyProviderError("Provider overloaded, high demand right now"), "transient");
 assert.equal(classifyProviderError("fetch failed: ENOTFOUND api.example.com (EAI_AGAIN)"), "transient");
-assert.equal(classifyProviderError("socket hang up after 500 response"), "transient");
-assert.equal(classifyProviderError("request timed out after 524 (service unavailable)"), "transient");
-// "usage limit" without transient markers is quota (transient checked first — design order).
+assert.equal(classifyProviderError("socket hang up after status 500 response"), "transient");
+assert.equal(classifyProviderError("request timed out after status 524 (service unavailable)"), "transient");
+// Quota is checked first, then auth, then transient.
 assert.equal(classifyProviderError("You have hit your usage limit for this model"), "quota");
 assert.equal(classifyProviderError("insufficient_quota: you exceeded your current quota"), "quota");
 assert.equal(classifyProviderError("Your available balance is too low"), "quota");
 assert.equal(classifyProviderError("Billing problem: out of budget; quota exceeded"), "quota");
 assert.equal(classifyProviderError("401 Unauthorized: invalid api key"), "auth");
 assert.equal(classifyProviderError("403 Forbidden"), "auth");
+// Cross-markers: quota/auth win over transient-looking words or numbers.
+assert.equal(classifyProviderError("429 insufficient_quota"), "quota");
+assert.equal(classifyProviderError("403 Forbidden: network policy blocks"), "auth");
+assert.equal(classifyProviderError("Request failed with status 401: network error"), "auth");
+// Bare numbers are not HTTP status context.
+assert.equal(classifyProviderError("Request failed with status 413: 512 tokens exceeded"), "unknown");
+assert.equal(classifyProviderError("512"), "unknown");
+assert.equal(classifyProviderError("request id 503 rejected"), "unknown");
+// Retryable strings still match.
+assert.equal(classifyProviderError("429 Too Many Requests"), "transient");
+assert.equal(classifyProviderError("rate limit reached"), "transient");
+assert.equal(classifyProviderError("HTTP 503"), "transient");
+assert.equal(classifyProviderError("status: 502 Bad Gateway"), "transient");
+assert.equal(classifyProviderError("Provider returned error, response code 500"), "transient");
+assert.equal(classifyProviderError("Service Unavailable"), "transient");
+assert.equal(classifyProviderError("network error"), "transient");
+assert.equal(classifyProviderError("The operation timed out"), "transient");
+assert.equal(classifyProviderError("Error: timeout of 30000ms exceeded"), "transient");
 assert.equal(classifyProviderError("Request failed: unauthorized (no api key)"), "auth");
 assert.equal(classifyProviderError("Something went profoundly sideways"), "unknown");
 assert.equal(classifyProviderError("model emitted garbage tokens"), "unknown");
 
 // --- Ladders ---------------------------------------------------------------------------------
 
-const transientSeq: number[] = [];
-for (let i = 0; i < 8; i++) transientSeq.push(nextLadderDelayMs("transient", i));
+// Full expected sequence per rung (rungs beyond the top clamp).
 assert.deepEqual(
-	transientSeq,
-	[1, 2, 5, 10, 20, 30, 30, 30].map((m) => m * MIN),
+	[0, 1, 2, 3, 4, 5, 6, 7, -1].map((r) => nextLadderDelayMs("transient", r)),
+	[1, 2, 5, 10, 20, 30, 30, 30, 1].map((m) => m * MIN),
 );
-const quotaSeq: number[] = [];
-for (let i = 0; i < 6; i++) quotaSeq.push(nextLadderDelayMs("quota", i));
-assert.deepEqual(quotaSeq, [30, 60, 120, 180, 180, 180].map((m) => m * MIN));
-// Core stays deterministic; the ±20% jitter belongs to the effect layer.
+assert.deepEqual(
+	[0, 1, 2, 3, 4, 5, -1].map((r) => nextLadderDelayMs("quota", r)),
+	[30, 60, 120, 180, 180, 180, 30].map((m) => m * MIN),
+);
+// Core stays deterministic; the ±20% jitter belongs to the #30 effect layer.
 assert.equal(nextLadderDelayMs("transient", 0), nextLadderDelayMs("transient", 0));
 
 // --- SPLIT predicate --------------------------------------------------------------------------

@@ -1263,8 +1263,10 @@ in
         touch $out
       '';
 
-  # drain-watchdog is a pure decision core (issue #29): no factory exists yet,
-  # so the pi load step only proves the module parses and imports cleanly.
+  # drain-watchdog is a pure decision core (issue #29): no factory exists yet.
+  # The node import assert below is the meaningful offline load check. The
+  # `pi --list-models` step does not load -e extensions, so it is a placeholder
+  # superseded in #30 by a real factory-load check.
   drain-watchdog =
     pkgs.runCommandLocal "pi-drain-watchdog"
       {
@@ -1277,6 +1279,7 @@ in
         cp -R ${./config/extensions/drain-watchdog} drain-watchdog
         chmod -R u+w drain-watchdog
         node --experimental-strip-types drain-watchdog/drain-watchdog.self-check.ts
+        (cd drain-watchdog && node --experimental-strip-types -e "import('./index.ts').then((m) => { if (typeof m.transition !== 'function') throw new Error('missing transition'); })")
 
         export HOME="$TMPDIR/home"
         export PI_CODING_AGENT_DIR="$HOME/.pi/agent"
