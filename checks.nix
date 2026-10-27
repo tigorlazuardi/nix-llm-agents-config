@@ -40,6 +40,14 @@ let
   darwinEvaluation = builtins.tryEval darwin.config.home.activationPackage.drvPath;
   disabled = evaluate { programs.pi-coding-agent.enable = false; };
   localUpdaterEnabled = evaluate { programs.pi-coding-agent.localUpdater.enable = true; };
+  watchdogEnabled = evaluate {
+    programs.pi-coding-agent.watchdog = {
+      enable = true;
+      tickMs = 30000;
+      idleGraceMs = 120000;
+      stallLimitMs = 900000;
+    };
+  };
   messagingRelayEnabled = evaluate {
     programs.pi-coding-agent.plugins.pi-messaging-relay.enable = true;
   };
@@ -787,6 +795,28 @@ in
       );
     assert !(default.config.home.sessionVariables ? PI_IDLE_COMPACT_THRESHOLD_TOKENS);
     assert !(default.config.home.sessionVariables ? PI_IDLE_COMPACT_DELAY_MS);
+    # watchdog is new and unproven in unattended runs: off by default (#30).
+    assert !default.config.programs.pi-coding-agent.watchdog.enable;
+    assert !(default.config.programs.pi-coding-agent.extensions or { } ? drain-watchdog);
+    assert
+      !(
+        default.config.home.file
+          ? "${default.config.programs.pi-coding-agent.configDir}/extensions/drain-watchdog"
+      );
+    assert !(default.config.home.sessionVariables ? PI_WATCHDOG_TICK_MS);
+    assert !(default.config.home.sessionVariables ? PI_WATCHDOG_IDLE_GRACE_MS);
+    assert !(default.config.home.sessionVariables ? PI_WATCHDOG_STALL_LIMIT_MS);
+    assert
+      watchdogEnabled.config.programs.pi-coding-agent.extensions.drain-watchdog
+      == ./config/extensions/drain-watchdog;
+    assert
+      watchdogEnabled.config.home.file."${watchdogEnabled.config.programs.pi-coding-agent.configDir}/extensions/drain-watchdog".source
+      == ./config/extensions/drain-watchdog;
+    assert
+      watchdogEnabled.config.home.file."${watchdogEnabled.config.programs.pi-coding-agent.configDir}/extensions/drain-watchdog".force;
+    assert watchdogEnabled.config.home.sessionVariables.PI_WATCHDOG_TICK_MS == "30000";
+    assert watchdogEnabled.config.home.sessionVariables.PI_WATCHDOG_IDLE_GRACE_MS == "120000";
+    assert watchdogEnabled.config.home.sessionVariables.PI_WATCHDOG_STALL_LIMIT_MS == "900000";
     assert !default.config.programs.pi-coding-agent.plugins.pi-messaging-relay.enable;
     assert !(default.config.home.sessionVariables ? PI_MESSAGING_RELAY_URL);
     assert !default.config.home.activation ? messagingRelayConfig;
@@ -1263,11 +1293,15 @@ in
         touch $out
       '';
 
-  # drain-watchdog is a pure decision core (issue #29): no factory exists yet.
-  # The self-check imports ./index.ts, which is the offline load assertion; it
-  # needs pi-ai (isRetryableAssistantError), symlinked like dev-journal. The
-  # `pi --list-models` step does not load -e extensions, so it is a placeholder
-  # superseded in #30 by a real factory-load check.
+  # Real factory-load check: `pi --list-models` exits 0 without ever calling
+  # -e factories or resolving their imports (verified empirically: a factory
+  # that throws, or an import that does not exist, is silently swallowed), so
+  # it cannot reject loader errors as CODING_STANDARDS.md requires. `pi ...
+  # list` does invoke the factory and reports a synchronous throw before it
+  # gets to "no credentials" -- the negative control below proves that this
+  # grep still catches a broken factory before trusting a clean run of the
+  # real one. Import-resolution errors ("Cannot find module") are instead
+  # caught by the self-check's own plain `node` import of ./index.ts above.
   drain-watchdog =
     pkgs.runCommandLocal "pi-drain-watchdog"
       {
@@ -1277,21 +1311,44 @@ in
         ];
       }
       ''
+        test ! -e ${./config/extensions/drain-watchdog}/node_modules
         cp -R ${./config/extensions/drain-watchdog} drain-watchdog
         chmod -R u+w drain-watchdog
         mkdir -p drain-watchdog/node_modules/@earendil-works
         piRuntime=${expectedPackage}/lib/node_modules/pi-monorepo
         ln -s "$piRuntime/node_modules/@earendil-works/pi-ai" drain-watchdog/node_modules/@earendil-works/pi-ai
-        node --experimental-strip-types drain-watchdog/drain-watchdog.self-check.ts
+        DRAIN_QUEUE_FIXTURE=${./docs/agents/issue-tracker.md} \
+          node --experimental-strip-types drain-watchdog/drain-watchdog.self-check.ts
 
         export HOME="$TMPDIR/home"
         export PI_CODING_AGENT_DIR="$HOME/.pi/agent"
         export PI_TELEMETRY=0
         mkdir -p "$PI_CODING_AGENT_DIR"
+
+        cat > broken-extension.ts <<'JS'
+        export default function broken() {
+          throw new Error("checks.nix negative control: factory must fail loudly");
+        }
+        JS
+        if pi --offline --no-extensions --no-skills --no-prompt-templates --no-context-files \
+          -e ./broken-extension.ts list > broken.log 2>&1; then
+          echo "negative control: a throwing factory did not make pi exit non-zero" >&2
+          cat broken.log >&2
+          exit 1
+        fi
+        grep -q 'Failed to load extension' broken.log || {
+          echo "negative control: pi did not report the load failure; this check can no longer trust a clean run" >&2
+          cat broken.log >&2
+          exit 1
+        }
+
         pi --offline --no-extensions --no-skills --no-prompt-templates --no-context-files \
-          -e ${./config/extensions/drain-watchdog}/index.ts \
-          --list-models > pi.log 2>&1
-        ! grep -E 'Extension issues|Failed to load extension|Cannot find module|Error:' pi.log
+          -e drain-watchdog/index.ts list > pi.log 2>&1 || true
+        if grep -q 'Failed to load extension' pi.log; then
+          echo "drain-watchdog extension failed to load:" >&2
+          cat pi.log >&2
+          exit 1
+        fi
         touch $out
       '';
 

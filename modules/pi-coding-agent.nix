@@ -13,6 +13,7 @@ let
   cfg = config.programs.pi-coding-agent;
   localUpdater = cfg.localUpdater;
   idleCompact = cfg.idleCompact;
+  watchdog = cfg.watchdog;
   repoSkills = lib.mapAttrs (name: _: ../config/skills + "/${name}") (
     # ponytail: temporarily exclude tuxedo-todo; remove name check to restore it.
     lib.filterAttrs (name: type: type == "directory" && name != "tuxedo-todo") (
@@ -548,6 +549,37 @@ in
     };
   };
 
+  options.programs.pi-coding-agent.watchdog = {
+    enable = lib.mkEnableOption "the unattended drain-queue live loop via the drain-watchdog extension (/watchdog)";
+
+    tickMs = lib.mkOption {
+      type = lib.types.int;
+      default = 60000;
+      description = ''
+        Interval between armed ticks that check idle/children/queue state.
+        Exported to the extension as PI_WATCHDOG_TICK_MS.
+      '';
+    };
+
+    idleGraceMs = lib.mkOption {
+      type = lib.types.int;
+      default = 3 * 60000;
+      description = ''
+        Idle time required after the last activity before a tick may nudge.
+        Exported as PI_WATCHDOG_IDLE_GRACE_MS.
+      '';
+    };
+
+    stallLimitMs = lib.mkOption {
+      type = lib.types.int;
+      default = 45 * 60000;
+      description = ''
+        How long children may run with no queue progress before a stall
+        notify (never a nudge) fires. Exported as PI_WATCHDOG_STALL_LIMIT_MS.
+      '';
+    };
+  };
+
   options.programs.pi-coding-agent.plugins =
     lib.recursiveUpdate
       (lib.mapAttrs (_: default: { enable = mkPluginOptions default; }) pluginDefaults)
@@ -927,6 +959,11 @@ in
           PI_IDLE_COMPACT_THRESHOLD_TOKENS = lib.mkDefault (toString idleCompact.thresholdTokens);
           PI_IDLE_COMPACT_DELAY_MS = lib.mkDefault (toString idleCompact.delayMs);
         }
+        // lib.optionalAttrs watchdog.enable {
+          PI_WATCHDOG_TICK_MS = lib.mkDefault (toString watchdog.tickMs);
+          PI_WATCHDOG_IDLE_GRACE_MS = lib.mkDefault (toString watchdog.idleGraceMs);
+          PI_WATCHDOG_STALL_LIMIT_MS = lib.mkDefault (toString watchdog.stallLimitMs);
+        }
         // lib.optionalAttrs cfg.plugins.browser-goblin.enable {
           # ponytail: reuse browser-goblin's Nix Chromium for project Playwright; override per project when needed.
           PLAYWRIGHT_EXECUTABLE_PATH = lib.mkDefault cfg.plugins.browser-goblin.executablePath;
@@ -939,6 +976,8 @@ in
       # Disabled 2026-10-07: pi-blackhole owns compaction (turn_end/agent_end
       # auto-compact + /pi-vcc). Re-enable only if blackhole is removed.
       idleCompact.enable = lib.mkDefault false;
+      # New and unproven in real unattended runs; opt in per-host once validated.
+      watchdog.enable = lib.mkDefault false;
       package = lib.mkIf cfg.enable (lib.mkDefault pinnedPkgs.pi-coding-agent);
       settings = lib.mkMerge [
         (lib.mapAttrsRecursive (_: lib.mkDefault) defaultSettings)
@@ -960,6 +999,9 @@ in
         }
         (lib.mkIf idleCompact.enable {
           pi-idle-compact = lib.mkDefault ../config/extensions/pi-idle-compact;
+        })
+        (lib.mkIf watchdog.enable {
+          drain-watchdog = lib.mkDefault ../config/extensions/drain-watchdog;
         })
         (lib.mkIf cfg.plugins.bash-judge.enable {
           bash-judge = lib.mkDefault ../config/extensions/bash-judge;
@@ -992,6 +1034,10 @@ in
       };
       "${cfg.configDir}/extensions/pi-idle-compact" = lib.mkIf idleCompact.enable {
         source = cfg.extensions.pi-idle-compact;
+        force = true;
+      };
+      "${cfg.configDir}/extensions/drain-watchdog" = lib.mkIf watchdog.enable {
+        source = cfg.extensions.drain-watchdog;
         force = true;
       };
       "${cfg.configDir}/extensions/project-mcp-json" = lib.mkIf (!mcpPlugin.enable) {

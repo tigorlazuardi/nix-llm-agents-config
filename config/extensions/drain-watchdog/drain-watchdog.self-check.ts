@@ -6,7 +6,10 @@
  * state transitions (incl. Esc-always-wins and child no-op), queue output
  * parsing (valid/0/garbage/non-zero — never "done"), provider error
  * classification, backoff ladder sequences and jitter bounds, the handoff
- * label mapping, the SPLIT predicate, and the arm refusal condition.
+ * label mapping, the SPLIT predicate, and the arm refusal condition. Also
+ * covers #30's live-loop helpers (env parsing, /watchdog argument grammar,
+ * target resolution, queue block extraction, READY/error detection, state
+ * restore) and the factory's child-vs-main registration split.
  * Imports index.ts, which imports @earendil-works/pi-ai: run with pi-ai
  * resolvable (checks.nix symlinks it into a node_modules next to the copy).
  */
