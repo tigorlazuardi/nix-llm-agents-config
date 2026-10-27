@@ -2284,7 +2284,10 @@ in
       }
       ''
         set -- ${./config/prompts}/*.md
-        test "$#" -eq 10
+        test "$#" -eq 11
+        grep -F 'standards: 10 minutes, spec: 20 minutes' ${./config/prompts}/executor.md
+        grep -F 'repos/{owner}/{repo}/issues/<origin>/dependencies/blocked_by -F issue_id="$child_db"' \
+          ${./config/prompts}/executor.md
         ! grep -RE '^(model|thinking|chain|loop|subagent|deterministic):' ${./config/prompts}
         test "$(grep -RE '^skill: writing-for-agents$' ${./config/prompts} | wc -l)" -eq 1
         test ! -e ${./config/prompts}/setup-drain-agents.md
