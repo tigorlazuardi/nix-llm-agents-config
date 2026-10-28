@@ -2341,7 +2341,7 @@ in
           ${./config/prompts}/executor.md
         grep -F 'Finishing means setting `closingStepsDone: true` in `state.json`: the watchdog reads it on its next tick and completes the run as DONE with its final report' \
           ${./config/prompts}/executor.md
-        grep -F 'the watchdog pauses the run visibly (\"finalization not confirmed\") instead of nudging again' \
+        grep -F 'the watchdog pauses the run visibly ("finalization not confirmed") instead of nudging again' \
           ${./config/prompts}/executor.md
         grep -F 'your own empty-frontier observation, evaluated in your active turn, is the closing trigger' \
           ${./config/prompts}/executor.md
