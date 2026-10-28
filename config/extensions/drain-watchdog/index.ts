@@ -5,7 +5,7 @@
  * network, no clock, no subprocesses, no pi-API calls at runtime — this module
  * is the single pure seam the self-check asserts against (plans/drain-watchdog
  * flow.html sections 0-6, 10). The default export at the bottom is the pi
- * extension factory: the `/watchdog` command, the drain_handoff/drain_stop
+ * extension factory: the `/watchdog` command, the drain_handoff/drain_stop/watchdog_target
  * model tools (main sessions only), the ARMED tick loop, nudges via steer,
  * state/audit session entries, and every timer. Timers are created only
  * on arm (never in the factory body), and child sessions never reach any of it.
@@ -545,30 +545,32 @@ export function extractIssueNumbers(text: string): number[] {
 	return [...found].sort((a, b) => a - b);
 }
 
-/** First bare number in a git branch name ("issue-30" -> 30); null when none. */
-export function issueNumberFromBranch(branch: string): number | null {
-	const m = /\d+/.exec(branch);
-	if (!m) return null;
-	const n = Number.parseInt(m[0], 10);
-	return Number.isFinite(n) && n > 0 ? n : null;
-}
-
 /**
- * PREP target resolution. A ref that names exactly one issue or exactly one
- * session-context candidate resolves; anything else asks the operator — the
- * command never silently picks a target (flow.html section 0).
+ * PREP target resolution. A ref naming exactly one issue is the operator's
+ * explicit choice and resolves. Anything else (no ref, several numbers, free
+ * text) is DISCOVERY: the extension does not scan or guess — it asks the model
+ * to find candidate maps/specs/tickets, let the operator pick, and hand the
+ * pick back through the watchdog_target tool (the command never silently picks
+ * a target, flow.html section 0).
  */
 export type TargetResolution =
 	| { status: "resolved"; number: number }
-	| { status: "ask"; candidates?: number[] };
+	| { status: "discover" };
 
-export function pickTarget(ref: string | null, candidates: number[]): TargetResolution {
+export function pickTarget(ref: string | null): TargetResolution {
 	const refNumbers = ref === null ? [] : extractIssueNumbers(ref);
-	if (refNumbers.length === 1) return { status: "resolved", number: refNumbers[0] };
-	if (refNumbers.length > 1) return { status: "ask", candidates: refNumbers };
-	if (candidates.length === 1) return { status: "resolved", number: candidates[0] };
-	if (candidates.length > 1) return { status: "ask", candidates };
-	return { status: "ask" };
+	return refNumbers.length === 1 ? { status: "resolved", number: refNumbers[0] } : { status: "discover" };
+}
+
+/**
+ * watchdog_target availability gate: main session only, and only while a
+ * discovery request from /watchdog is pending (the model must not choose a run
+ * target on its own initiative).
+ */
+export function targetToolGate(childSession: boolean, discovering: boolean): ToolGate {
+	if (childSession) return { ok: false, error: "watchdog_target is main-session only; child sessions cannot invoke it" };
+	if (!discovering) return { ok: false, error: "watchdog_target ignored: no target selection is pending; the operator starts one with /watchdog" };
+	return { ok: true };
 }
 
 /**
@@ -1139,6 +1141,14 @@ const PREP_INSTRUCTION = (target: number, pickable: number): string =>
 		"If it failed, report what failed. Do not write READY.",
 	].join("\n");
 
+const DISCOVER_INSTRUCTION = (ref: string | null): string =>
+	[
+		"drain-watchdog PREP: the operator did not name a single run target" + (ref !== null && ref.trim() !== "" ? ` (they wrote: ${JSON.stringify(ref.trim())})` : "") + ".",
+		"Find the candidate run targets yourself: the wayfinder map, spec, or ticket(s) this work is about. Use this conversation first, then the tracker (gh issue list/view; map and spec issues, sub-issue parents, tickets labelled ready-for-agent). Never ask the operator to look anything up.",
+		"Then ask the operator to choose with ask_user_question: 2-4 candidates, each labelled with its #number and title, the most likely one first marked (Recommended). If exactly one candidate is clearly right, still confirm it.",
+		"Call the watchdog_target tool with the chosen issue number. It continues PREP for you. If no candidate exists, tell the operator and stop; do not guess.",
+	].join("\n");
+
 export default function watchdogExtension(pi: ExtensionAPI) {
 	// Child sessions never run the watchdog: no listeners, no command, no timers,
 	// no state — the factory returns before registering anything (self-checked).
@@ -1176,6 +1186,9 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 	// PREP bookkeeping is deliberately not persisted: PREP is interactive, and an
 	// unconfirmed readiness dies with the session or the next command.
 	let prepTarget: number | null = null;
+	// True from a discovery request (/watchdog without a single #N) until the model
+	// hands the operator's pick back through watchdog_target (or PREP is reset).
+	let discovering = false;
 	let prepPickable = 0;
 	let prepInflight = 0;
 	let readyDeclared = false;
@@ -1495,26 +1508,24 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 		notify(`drain-watchdog: ${bits.join(" ")}`);
 	};
 
-	const collectTargetCandidates = async (ctx: ExtensionCommandContext): Promise<number[]> => {
-		const found = new Set<number>();
-		// Session context: issue numbers mentioned in the conversation (best-effort
-		// scan; a failed scan leaves the branch fallback below).
-		try {
-			for (const entry of ctx.sessionManager.getEntries()) {
-				for (const n of extractIssueNumbers(JSON.stringify(entry) ?? "")) found.add(n);
-			}
-		} catch {
-			// keep whatever was collected so far
+	/** Queue proof for a chosen target, then the READY instruction (shared by the
+	 *  explicit-ref path and the watchdog_target hand-back). */
+	const prepProof = async (target: number, ctx: ExtensionContext): Promise<string | null> => {
+		const q = await runQueueCommand(ctx);
+		if (closed) return "session is shutting down"; // M1: session_shutdown fired while the queue command was running.
+		const refusal = armRefusal(q.pickable, q.ok);
+		if (refusal !== null) {
+			audit("prep-refused", { reason: refusal, error: q.error });
+			notify(`drain-watchdog: ${q.error || refusal} — not armed`, "error");
+			return `${q.error || refusal} — not armed`;
 		}
-		// Git branch containing an issue number.
-		try {
-			const branch = await pi.exec("git", ["rev-parse", "--abbrev-ref", "HEAD"], { cwd: ctx.cwd, timeout: 10_000 });
-			const n = issueNumberFromBranch(branch.stdout.trim());
-			if (n !== null) found.add(n);
-		} catch {
-			// off-repo or no git; context scan above may already have resolved
-		}
-		return [...found].sort((a, b) => a - b);
+		prepTarget = target;
+		prepPickable = q.pickable;
+		prepInflight = q.inflight;
+		audit("prep-proof", { target, pickable: q.pickable, inflight: q.inflight });
+		notify(`drain-watchdog PREP: target #${target}, ${q.pickable} pickable, ${q.inflight} inflight. Waiting for the model's readiness proof (READY) then your confirmation.`, "info");
+		pi.sendUserMessage(PREP_INSTRUCTION(target, q.pickable));
+		return null;
 	};
 
 	const runPrep = async (ref: string | null, ctx: ExtensionCommandContext) => {
@@ -1538,38 +1549,20 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 		probeInFlight = false;
 		readyDeclared = false;
 		prepTarget = null;
+		discovering = false;
 		runTarget = null;
 
-		const resolution = pickTarget(ref, await collectTargetCandidates(ctx));
-		if (closed) return; // M1: session_shutdown fired while scanning for a target.
-		if (resolution.status === "ask") {
-			const answer = resolution.candidates
-				? await ctx.ui.select("drain-watchdog: multiple issue candidates — pick the run target", resolution.candidates.map((n) => `#${n}`))
-				: await ctx.ui.input("drain-watchdog: no issue found in conversation or branch — enter the issue number");
-			if (closed) return; // M1: session_shutdown fired while the picker was open.
-			const nums = answer === undefined ? [] : extractIssueNumbers(answer);
-			if (nums.length !== 1) {
-				notify("drain-watchdog: PREP cancelled (no single target chosen)");
-				return;
-			}
-			prepTarget = nums[0];
-		} else {
-			prepTarget = resolution.number;
-		}
-
-		const q = await runQueueCommand(ctx);
-		if (closed) return; // M1: session_shutdown fired while the queue command was running.
-		const refusal = armRefusal(q.pickable, q.ok);
-		if (refusal !== null) {
-			audit("prep-refused", { reason: refusal, error: q.error });
-			notify(`drain-watchdog: ${q.error || refusal} — not armed`, "error");
+		const resolution = pickTarget(ref);
+		if (resolution.status === "discover") {
+			// The model, not the operator, finds the candidates and asks; its pick
+			// comes back through watchdog_target, which resumes PREP below.
+			discovering = true;
+			audit("prep-discover", { ref });
+			notify("drain-watchdog PREP: no single target given — asking the model to find candidates for you to choose from.", "info");
+			pi.sendUserMessage(DISCOVER_INSTRUCTION(ref));
 			return;
 		}
-		prepPickable = q.pickable;
-		prepInflight = q.inflight;
-		audit("prep-proof", { target: prepTarget, pickable: q.pickable, inflight: q.inflight });
-		notify(`drain-watchdog PREP: target #${prepTarget}, ${q.pickable} pickable, ${q.inflight} inflight. Waiting for the model's readiness proof (READY) then your confirmation.`, "info");
-		pi.sendUserMessage(PREP_INSTRUCTION(prepTarget, q.pickable));
+		await prepProof(resolution.number, ctx);
 	};
 
 	const runWatchdogCommand = async (rawArgs: string, ctx: ExtensionCommandContext) => {
@@ -1585,6 +1578,8 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 					apply(transition(state, { type: "off" }, Date.now()), "off");
 				}
 				runTarget = null;
+				discovering = false;
+				prepTarget = null;
 				clearTimers();
 				childCount = 0;
 				probeInFlight = false;
@@ -1736,6 +1731,34 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 		},
 	});
 
+	pi.registerTool({
+		name: "watchdog_target",
+		label: "Watchdog Target",
+		description:
+			"Hand the operator's chosen run target (a wayfinder map, spec, or ticket issue number) back to a pending /watchdog PREP. Only valid after /watchdog asked you to find candidates and the operator chose one. Main session only.",
+		promptSnippet: "Hand the operator-chosen run target back to a pending /watchdog PREP",
+		promptGuidelines: [
+			"Use watchdog_target only when /watchdog asked you to find candidate run targets and the operator chose one; never choose a target on your own.",
+		],
+		parameters: Type.Object({
+			issue: Type.Integer({ minimum: 1, description: "Issue number the operator chose as the run target" }),
+		}),
+		async execute(_id, params, _signal, _update, toolCtx) {
+			const gate = targetToolGate(isChildSession(process.env), discovering);
+			if (!gate.ok) return { content: [{ type: "text", text: gate.error }], isError: true } as AgentToolResult;
+			if (closed) return { content: [{ type: "text", text: "watchdog_target ignored: session is shutting down" }], isError: true } as AgentToolResult;
+			const issue = params.issue;
+			if (!Number.isInteger(issue) || issue <= 0) {
+				return { content: [{ type: "text", text: `watchdog_target: ${JSON.stringify(issue)} is not an issue number` }], isError: true } as AgentToolResult;
+			}
+			discovering = false; // one pick per request; a refused proof needs a fresh /watchdog.
+			audit("prep-target", { target: issue });
+			const error = await prepProof(issue, toolCtx);
+			if (error !== null) return { content: [{ type: "text", text: `watchdog_target: ${error}` }], isError: true } as AgentToolResult;
+			return { content: [{ type: "text", text: `Target #${issue} accepted. PREP continues: prove readiness and end a turn with READY.` }], details: { issue } };
+		},
+	});
+
 	// --- Event wiring ------------------------------------------------------------
 
 	pi.registerCommand("watchdog", {
@@ -1754,6 +1777,7 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 		probeInFlight = false;
 		uiPromptDepth = 0;
 		prepTarget = null;
+		discovering = false;
 		readyDeclared = false;
 		idleSinceMs = progressSinceMs = Date.now();
 		const restored = restoreDrainState(ctx.sessionManager.getEntries());
@@ -1852,6 +1876,7 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 			// Esc always wins: a live run PAUSEs and stays paused; PREP proof dies.
 			readyDeclared = false;
 			prepTarget = null;
+			discovering = false;
 			apply(transition(state, { type: "abort" }, Date.now()), "abort");
 			return;
 		}

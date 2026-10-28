@@ -65,10 +65,10 @@ import {
 	isReadyDeclaration,
 	isSubagentCompletionNotice,
 	isSubagentSpawnTool,
-	issueNumberFromBranch,
 	messageText,
 	parseWatchdogSubcommand,
 	pickTarget,
+	targetToolGate,
 	queueFingerprint,
 	readIntEnv,
 	restoreDrainState,
@@ -897,19 +897,19 @@ assert.deepEqual(parseWatchdogSubcommand("status"), { sub: "status", ref: null }
 assert.deepEqual(extractIssueNumbers("fix #29 and then close #30, ref #29"), [29, 30]);
 assert.deepEqual(extractIssueNumbers("no refs here, q30 x#12abc34"), []);
 
-// Branch fallback: first bare number in the branch name.
-assert.equal(issueNumberFromBranch("30-watchdog-live-loop"), 30);
-assert.equal(issueNumberFromBranch("issue-30-fix"), 30);
-assert.equal(issueNumberFromBranch("main"), null);
-assert.equal(issueNumberFromBranch("feature/no-digits"), null);
+// Target resolution: only an explicit single #N resolves; everything else is
+// model-driven discovery (the extension never scans or guesses a target).
+assert.deepEqual(pickTarget("#30"), { status: "resolved", number: 30 });
+assert.deepEqual(pickTarget("run #30 please"), { status: "resolved", number: 30 });
+assert.deepEqual(pickTarget(null), { status: "discover" });
+assert.deepEqual(pickTarget("#9 #30"), { status: "discover" }, "two numbers is ambiguous, not a pick");
+assert.deepEqual(pickTarget("the watchdog map"), { status: "discover" });
+assert.deepEqual(pickTarget(""), { status: "discover" });
 
-// Target resolution: never silently choose when ambiguous (flow section 0).
-assert.deepEqual(pickTarget("#30", [27, 29]), { status: "resolved", number: 30 });
-assert.deepEqual(pickTarget(null, [29]), { status: "resolved", number: 29 });
-assert.deepEqual(pickTarget(null, [27, 29, 30]), { status: "ask", candidates: [27, 29, 30] });
-assert.deepEqual(pickTarget("#9 #30", [29]), { status: "ask", candidates: [9, 30] });
-assert.deepEqual(pickTarget(null, []), { status: "ask" });
-assert.deepEqual(pickTarget("no numbers at all", []), { status: "ask" });
+// watchdog_target gate: main session only, and only while discovery is pending.
+assert.deepEqual(targetToolGate(false, true), { ok: true });
+assert.equal(targetToolGate(true, true).ok, false, "child sessions never choose a target");
+assert.equal(targetToolGate(false, false).ok, false, "no pending discovery: the model cannot pick a target on its own");
 
 // drain-queue/drain-inflight blocks extract from the tracker doc format.
 const trackerDoc = [
@@ -1093,6 +1093,8 @@ type Harness = {
 	audits: { type: string; data: Record<string, unknown> }[];
 	notifications: { message: string; level: string }[];
 	sent: { customType: string; content: string }[];
+	/** pi.sendUserMessage payloads (PREP/discovery instructions). */
+	userMessages: string[];
 	execCalls: { command: string; args: string[] }[];
 	setExec: (impl: (command: string, args: string[]) => Promise<{ stdout: string; stderr: string; code: number; killed: boolean }>) => void;
 	/** Queue proof the mocked exec returns for the next bash calls (PREP needs >0
@@ -1114,6 +1116,7 @@ function makeHarness(cwd: string): Harness {
 	const audits: { type: string; data: Record<string, unknown> }[] = [];
 	const notifications: { message: string; level: string }[] = [];
 	const sent: { customType: string; content: string }[] = [];
+	const userMessages: string[] = [];
 	const entries: unknown[] = [];
 	let queueValue = 0;
 	let execImpl: (command: string, args: string[]) => Promise<{ stdout: string; stderr: string; code: number; killed: boolean }> = async () => ({
@@ -1141,7 +1144,9 @@ function makeHarness(cwd: string): Harness {
 		sendMessage(msg: { customType: string; content: string }) {
 			sent.push({ customType: msg.customType, content: msg.content });
 		},
-		sendUserMessage() {},
+		sendUserMessage(content: string) {
+			userMessages.push(content);
+		},
 		exec: async (command: string, args: string[]) => {
 			execCalls.push({ command, args });
 			return execImpl(command, args);
@@ -1160,7 +1165,7 @@ function makeHarness(cwd: string): Harness {
 		hasPendingMessages: () => false,
 		sessionManager: { getEntries: () => entries },
 	};
-	return { handlers, audits, notifications, sent, execCalls, setExec: (impl) => { execImpl = impl; }, setQueue: (pickable) => { queueValue = pickable; }, tools, ctx, entries };
+	return { handlers, audits, notifications, sent, userMessages, execCalls, setExec: (impl) => { execImpl = impl; }, setQueue: (pickable) => { queueValue = pickable; }, tools, ctx, entries };
 }
 
 // A real drain-queue + drain-inflight fixture on disk at <tmp>/docs/agents/issue-tracker.md.
@@ -2160,7 +2165,7 @@ delete process.env.PI_SUBAGENT_ID;
 const mainPi = makeMockPi() as any;
 watchdogExtension(mainPi as any);
 assert(mainPi.commands.includes("watchdog"), "main factory registers /watchdog");
-assert.deepEqual(mainPi.tools.sort(), ["drain_handoff", "drain_stop"], "main factory registers exactly the two drain tools (#31)");
+assert.deepEqual(mainPi.tools.sort(), ["drain_handoff", "drain_stop", "watchdog_target"], "main factory registers exactly the drain tools (#31) and watchdog_target");
 assert(mainPi.events.includes("session_start"), "main factory restores state");
 assert(mainPi.events.includes("agent_settled"), "main factory handles Esc and the READY confirm");
 assert(mainPi.events.includes("agent_end"), "main factory reports provider errors");
@@ -2168,5 +2173,82 @@ assert(!mainPi.events.includes("tick"), "no timer surfaces: ticks are setInterva
 
 if (ambientSubagentId === undefined) delete process.env.PI_SUBAGENT_ID;
 else process.env.PI_SUBAGENT_ID = ambientSubagentId;
+
+// Discovery (live): /watchdog without a single #N asks the MODEL to find
+// candidates (no scan, no ui.select/ui.input to the operator); the operator's
+// pick returns through watchdog_target, which runs the queue proof and starts
+// the READY step. The tool is refused outside a pending discovery.
+await withNoAmbientSubagent(() =>
+	withFakeTimers(async () => {
+		const cwd = makeFixtureCwd();
+		try {
+			const h = makeHarness(cwd);
+			h.handlers.session_start({}, h.ctx);
+			h.setQueue(2);
+
+			const early = await h.tools.watchdog_target!.execute("d0", { issue: 38 }, undefined, undefined, h.ctx);
+			assert(early.isError, "watchdog_target is refused when no discovery is pending");
+			assert.equal(h.execCalls.length, 0, "a refused pick runs no queue proof");
+
+			await h.handlers["command:watchdog"]("", h.ctx);
+			assert.equal(h.userMessages.length, 1, "discovery sends exactly one instruction to the model");
+			assert(h.userMessages[0].includes("watchdog_target"), "the model is told how to hand the pick back");
+			assert(h.userMessages[0].includes("ask_user_question"), "the model, not the extension, asks the operator");
+			assert(!h.userMessages[0].includes("READY"), "no READY step before a target exists");
+			assert(h.audits.some((a) => a.type === "prep-discover"));
+			assert.equal(h.execCalls.length, 0, "discovery does not run the queue before a target is chosen");
+
+			const ok = await h.tools.watchdog_target!.execute("d1", { issue: 38 }, undefined, undefined, h.ctx);
+			assert(!ok.isError, "the pick is accepted while discovery is pending");
+			assert(h.audits.some((a) => a.type === "prep-proof" && a.data.target === 38), "the chosen target gets the queue proof");
+			assert.equal(h.userMessages.length, 2, "PREP continues with the READY instruction");
+			assert(h.userMessages[1].includes("#38") && h.userMessages[1].includes("READY"));
+
+			const again = await h.tools.watchdog_target!.execute("d2", { issue: 40 }, undefined, undefined, h.ctx);
+			assert(again.isError, "one pick per discovery request");
+
+			h.handlers.message_end({ message: { role: "assistant", content: [{ type: "text", text: "proof done\nREADY" }] } }, h.ctx);
+			await h.handlers.agent_settled({ aborted: false, messages: [] }, h.ctx);
+			h.handlers["command:watchdog"]("status", h.ctx);
+			assert(h.notifications.some((n) => n.message.includes("phase armed") && n.message.includes("run target #38")), "the discovered target arms through the normal PREP path");
+		} finally {
+			rmSync(cwd, { recursive: true, force: true });
+		}
+	}),
+);
+
+// Discovery (live): a refused queue proof (nothing pickable) fails the pick
+// visibly and the tool does not stay armed for a retry; and /watchdog off
+// cancels a pending discovery.
+await withNoAmbientSubagent(() =>
+	withFakeTimers(async () => {
+		const cwd = makeFixtureCwd();
+		try {
+			const h = makeHarness(cwd);
+			h.handlers.session_start({}, h.ctx);
+			h.setQueue(0);
+			await h.handlers["command:watchdog"]("", h.ctx);
+			const refused = await h.tools.watchdog_target!.execute("r1", { issue: 38 }, undefined, undefined, h.ctx);
+			assert(refused.isError, "an empty queue refuses the pick");
+			assert(h.audits.some((a) => a.type === "prep-refused"));
+			const retry = await h.tools.watchdog_target!.execute("r2", { issue: 38 }, undefined, undefined, h.ctx);
+			assert(retry.isError, "a refused pick needs a fresh /watchdog");
+
+			h.setQueue(2);
+			await h.handlers["command:watchdog"]("", h.ctx);
+			await h.handlers["command:watchdog"]("off", h.ctx);
+			const afterOff = await h.tools.watchdog_target!.execute("r3", { issue: 38 }, undefined, undefined, h.ctx);
+			assert(afterOff.isError, "/watchdog off cancels a pending discovery");
+
+			// An explicit single #N never involves the model's discovery.
+			const before = h.userMessages.length;
+			await h.handlers["command:watchdog"]("#38", h.ctx);
+			assert.equal(h.userMessages.length, before + 1);
+			assert(h.userMessages[before].includes("#38") && h.userMessages[before].includes("READY"), "an explicit ref goes straight to the READY step");
+		} finally {
+			rmSync(cwd, { recursive: true, force: true });
+		}
+	}),
+);
 
 console.log("drain-watchdog self-check OK");

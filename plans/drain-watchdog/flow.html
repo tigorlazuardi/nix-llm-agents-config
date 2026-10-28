@@ -59,11 +59,10 @@
 flowchart TD
   U(["/watchdog [ref]"]) --> A{"ref diberikan?"}
   A -- ya --> R["resolve ref: map, spec, atau tiket"]
-  A -- tidak --> C["cari dari konteks sesi:<br/>issue yang disebut di percakapan,<br/>lalu branch git yang memuat nomor issue"]
-  C --> K{"ketemu tepat 1?"}
-  K -- tidak --> Q["tanya user dengan daftar kandidat<br/>(tidak pernah memilih diam-diam)"]
-  Q --> R
-  K -- ya --> R
+  A -- tidak --> C["LLM mencari kandidat sendiri:<br/>map, spec, atau tiket dari percakapan lalu tracker<br/>(bukan scan mekanis extension)"]
+  C --> Q["LLM tanya user via ask_user_question:<br/>kandidat dengan #nomor dan judul<br/>(tidak pernah memilih diam-diam)"]
+  Q --> T["LLM panggil tool watchdog_target(issue)<br/>main-only, hanya saat pencarian tertunda"]
+  T --> R
   R --> V["jalankan drain-queue<br/>hitung pickable, terblokir, in-flight"]
   V --> Z{"pickable = 0?"}
   Z -- ya --> X["TOLAK: tampilkan alasan<br/>(typo label, semua terblokir, belum di-triage)"]
