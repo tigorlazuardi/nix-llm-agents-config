@@ -695,7 +695,7 @@ export function queueFingerprint(o: { pickable: number; inflight: number }): str
 export function buildNudgeText(p: { target: number | null; pickable: number }): string {
 	const target = p.target === null ? "the accepted tickets" : `#${p.target}`;
 	return [
-		`drain-watchdog: unattended run on ${target}; you are idle with ${p.pickable} pickable ticket(s) in the drain queue. Do not ask the user — continue per the drain flow now: run the next pass on the next pickable ticket.`,
+		`drain-watchdog: unattended run on ${target}; you are idle with ${p.pickable} pickable ticket(s) in the drain queue. Do not ask the user — continue per the executor flow (config/prompts/executor.md, state in /tmp/executor/<repo-slug>/<target>/state.json) now. Work in parallel, not one ticket at a time: read the frontier fresh and, while slots are free (PARALLEL_WIDTH), start every independent pickable ticket at once, each in its own worktree. All work merges into the target's integration/<slug> branch, so parallel tickets stay close to the same base and conflicts stay small.`,
 		"Ambiguous or product-question tickets, and low-tolerance work (auth/authz, secrets/credentials, DB migrations, public API contracts, money/billing, data deletion, irreversible operations), must leave the queue through the tracker's exit labels (needs-info / ready-for-human / wontfix) instead of waiting.",
 		"When no pickable ticket is left and nothing is in flight, finish the closing steps if any, then call watchdog_done: the watchdog verifies the queue and completes the run at once.",
 	].join("\n");

@@ -1037,6 +1037,7 @@ const nudge = buildNudgeText({ target: 30, pickable: 2 });
 assert(nudge.includes("#30"), "nudge names the run target");
 assert(nudge.includes("Do not ask the user"), "nudge forbids user questions");
 assert(nudge.includes("ready-for-human"), "nudge points at the handoff exit");
+assert(nudge.includes("in parallel") && nudge.includes("integration/<slug>"), "nudge pushes parallel worktrees on the integration branch");
 assert(buildNudgeText({ target: null, pickable: 1 }).includes("the accepted tickets"));
 
 // Restore: latest valid entry wins, garbage never half-applies.
