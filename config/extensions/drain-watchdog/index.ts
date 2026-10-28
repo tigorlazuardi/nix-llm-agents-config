@@ -19,6 +19,9 @@
  *    refuses/pauses; it is never interpreted as "done" or an empty queue
  *    (docs/agents/issue-tracker.md refusal rule).
  *  - Tick order is fixed and the nudge is the last resort.
+ *  - #38: the closing-step signal is the executor's own state files
+ *    (/tmp/executor/<repo-slug>/.../state.json, closingStepsDone); a malformed
+ *    or unreadable file is an audited anomaly, never a pause (plain DONE stays plain).
  *
  * `progress` is dispatched by the live loop for child completion steers, queue
  * fingerprint changes, and recorded drain_handoffs (a handoff is progress by
@@ -36,8 +39,8 @@
  * PI_WATCHDOG_* env overrides wired from the Nix module as session variables.
  */
 
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { readFileSync, readdirSync } from "node:fs";
+import { basename, join } from "node:path";
 
 import { isRetryableAssistantError, StringEnum } from "@earendil-works/pi-ai";
 import type { AgentToolResult, ExecResult, ExtensionAPI, ExtensionCommandContext, ExtensionContext, ExtensionToolContext } from "@earendil-works/pi-coding-agent";
@@ -745,8 +748,96 @@ export function restoreDrainState(entries: readonly unknown[]): DrainState | nul
 	return null;
 }
 
-// --- State machine ---------------------------------------------------------------
+// --- Closing-step signal (#38) -------------------------------------------------
 
+/**
+ * One executor state file as the effect layer observed it: the path it was
+ * found at (audit detail only) and its bytes (null when unreadable —
+ * missing directory or an IO error; the pure side cannot tell those apart
+ * and must not).
+ */
+export type ExecutorStateFile = { path: string; content: string | null };
+
+/**
+ * Closing signal of one executor run-directory scan: does any target still
+ * have closing steps to run (the FINALIZING trigger), plus any anomaly that
+ * should be audited. One seam for the whole #38 decision; the effect layer
+ * only lists and reads files.
+ */
+export type ClosingSignal = { hasClosingSteps: boolean; anomalies: string[] };
+
+/**
+ * hasClosingSteps = any state file that parses AND carries `closingStepsDone:
+ * false` (an executor target still closing). Fail-safe by contract:
+ *
+ *  - missing /tmp/executor/<repo-slug> (no executor ever ran) -> no signal,
+ *    no anomaly: plain DONE stays plain (#38 AC3).
+ *  - target dirs with no state.json, an unparseable state.json, or a JSON that
+ *    parses but is not an object with a boolean closingStepsDone -> also "no
+ *    closing steps" (a DONE, not a pause), but as an audited anomaly — a half
+ *    -written or corrupt executor state must be visible in the audit trail, and
+ *    an unparseable file must never block an unattended run.
+ *  - closingStepsDone: true or absent with the file healthy -> no signal (the
+ *    executor reports closing finished; absent = the #34-contract field was
+ *    never written, and only "explicitly false" may claim closing work).
+ *
+ *  ponytail: malformed/unreadable state files are treated as "no closing
+ *  steps" + anomaly (DONE with an audit trail), the safer of the two options
+ *  (pause would hang an unattended run on a corrupt file; a false DONE is
+ *  bounded because the audit names the path). Make this a pause when a second
+ *  consumer needs strictness.
+ */
+export function readClosingSignal(entries: readonly ExecutorStateFile[]): ClosingSignal {
+	const anomalies: string[] = [];
+	for (const e of entries) {
+		if (e.content === null) {
+			anomalies.push(`${e.path}: unreadable`);
+			continue;
+		}
+		let parsed: unknown;
+		try {
+			parsed = JSON.parse(e.content);
+		} catch {
+			anomalies.push(`${e.path}: state.json is not valid JSON`);
+			continue;
+		}
+		const data = typeof parsed === "object" && parsed !== null ? (parsed as Record<string, unknown>) : null;
+		if (data === null || typeof data.closingStepsDone !== "boolean") {
+			anomalies.push(`${e.path}: parsed but closingStepsDone is not a boolean`);
+			continue;
+		}
+		if (data.closingStepsDone === false) return { hasClosingSteps: true, anomalies };
+	}
+	return { hasClosingSteps: false, anomalies };
+}
+
+/**
+ * Repo slug for the executor state root, from the watched repo path — the
+ * same convention the executor prompt's /tmp/executor/<repo-slug> contract
+ * uses (dev-journal's slugify pattern: lowercase, non-alphanumerics collapse
+ * to one dash, no leading/trailing dash).
+ */
+export function executorRepoSlug(cwd: string): string {
+	return basename(cwd).toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+}
+
+/**
+ * The executor's state root for this repo: /tmp/executor/<repo-slug>. The
+ * effect layer lists its per-target subdirs and reads each one's state.json;
+ * readClosingSignal stays the pure seam. Single-run state path for a known
+ * target is /tmp/executor/<repo-slug>/<target>/state.json (the #34 contract).
+ */
+export function executorStateRoot(cwd: string): string | null {
+	const slug = executorRepoSlug(cwd);
+	if (slug === "") return null;
+	return join("/tmp/executor", slug);
+}
+
+export function executorStateFilePath(cwd: string, target: number): string {
+	return join("/tmp/executor", executorRepoSlug(cwd), String(target), "state.json");
+}
+
+// --- State machine ---------------------------------------------------------------
 const WAIT: DrainAction = { type: "wait" };
 const stay = (state: DrainState): DrainTransition => ({ state, action: WAIT, refusal: null });
 
@@ -1122,6 +1213,43 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 		}, delay);
 	};
 
+	/**
+	 * #38 effect layer: list and read the executor's state files for this repo
+	 * and hand the raw bytes to the pure seam. Every failure mode (missing
+	 * root dir, unreadable file) becomes an ExecutorStateFile; deciding is
+	 * readClosingSignal's job alone. Runs synchronously between awaits, and
+	 * ticks re-check `closed` right after — no state change after shutdown.
+	 */
+	const readExecutorClosingSignal = (ctx: ExtensionContext): ClosingSignal => {
+		const repoRoot = executorStateRoot(ctx.cwd);
+		if (repoRoot === null) return { hasClosingSteps: false, anomalies: [] };
+		// One known target run: read its state.json directly; no target (count-only
+		// context): list every target dir under the repo root. Either way the same
+		// pure seam decides.
+		let statePaths: string[] | null;
+		if (runTarget !== null) {
+			statePaths = [executorStateFilePath(ctx.cwd, runTarget)];
+		} else {
+			try {
+				statePaths = readdirSync(repoRoot, { withFileTypes: true })
+					.filter((d) => d.isDirectory())
+					.map((d) => join(repoRoot, d.name, "state.json"));
+			} catch {
+				// Missing /tmp/executor/<repo-slug>: no executor ever ran for this repo —
+				// the plain-run case (AC3), no signal, no anomaly.
+				return { hasClosingSteps: false, anomalies: [] };
+			}
+		}
+		const files: ExecutorStateFile[] = statePaths.map((statePath) => {
+			try {
+				return { path: statePath, content: readFileSync(statePath, "utf8") };
+			} catch {
+				return { path: statePath, content: null };
+			}
+		});
+		return readClosingSignal(files);
+	};
+
 	type QueueResult = { ok: boolean; pickable: number; inflight: number; error: string };
 
 	// L5: this runs `bash -c` on the fenced drain-queue/drain-inflight blocks read live
@@ -1256,6 +1384,7 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 			const previousQueue = { ...lastQueue };
 			const q = await runQueueCommand(ctx);
 			if (closed) return; // M1: shutdown landed while the queue command was running.
+			const closingSignal = readExecutorClosingSignal(ctx);
 			const observedAt = Date.now();
 			const obs: TickObservation = {
 				running: false,
@@ -1273,9 +1402,13 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 				// The count-only contract cannot express which tickets block which,
 				// so DONE-with-leftovers observation is not available here.
 				leftoverBlocked: false,
-				// Closing-step detection is the #34 flow; plain DONE on an empty frontier.
-				hasClosingSteps: false,
+				// Closing steps come from the executor's own state files (#38; the #34
+				// state.json contract): the FINALIZING trigger of the #34 flow. A missing
+				// scan root is the plain-run case (plain DONE stays plain); anomalies
+				// are audited below, never a pause.
+				hasClosingSteps: closingSignal.hasClosingSteps,
 			};
+			if (closingSignal.anomalies.length > 0) audit("closing-signal-anomaly", { paths: closingSignal.anomalies });
 			// L2: assign before `apply` so a nudge/pause/audit in this same apply call
 			// reports THIS tick's pickable count, not the previous tick's (or arm-time's).
 			lastQueue = { pickable: q.pickable, inflight: q.inflight };
