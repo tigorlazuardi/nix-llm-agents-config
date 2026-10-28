@@ -40,6 +40,7 @@ let
   darwinEvaluation = builtins.tryEval darwin.config.home.activationPackage.drvPath;
   disabled = evaluate { programs.pi-coding-agent.enable = false; };
   localUpdaterEnabled = evaluate { programs.pi-coding-agent.localUpdater.enable = true; };
+  watchdogDisabled = evaluate { programs.pi-coding-agent.watchdog.enable = false; };
   watchdogEnabled = evaluate {
     programs.pi-coding-agent.watchdog = {
       enable = true;
@@ -795,17 +796,24 @@ in
       );
     assert !(default.config.home.sessionVariables ? PI_IDLE_COMPACT_THRESHOLD_TOKENS);
     assert !(default.config.home.sessionVariables ? PI_IDLE_COMPACT_DELAY_MS);
-    # watchdog is new and unproven in unattended runs: off by default (#30).
-    assert !default.config.programs.pi-coding-agent.watchdog.enable;
-    assert !(default.config.programs.pi-coding-agent.extensions or { } ? drain-watchdog);
+    # watchdog is on by default (inert until /watchdog is invoked); opt-out works.
+    assert default.config.programs.pi-coding-agent.watchdog.enable;
+    assert
+      default.config.programs.pi-coding-agent.extensions.drain-watchdog
+      == ./config/extensions/drain-watchdog;
+    assert default.config.home.sessionVariables.PI_WATCHDOG_TICK_MS == "60000";
+    assert default.config.home.sessionVariables.PI_WATCHDOG_IDLE_GRACE_MS == "180000";
+    assert default.config.home.sessionVariables.PI_WATCHDOG_STALL_LIMIT_MS == "2700000";
+    assert !watchdogDisabled.config.programs.pi-coding-agent.watchdog.enable;
+    assert !(watchdogDisabled.config.programs.pi-coding-agent.extensions or { } ? drain-watchdog);
     assert
       !(
-        default.config.home.file
-          ? "${default.config.programs.pi-coding-agent.configDir}/extensions/drain-watchdog"
+        watchdogDisabled.config.home.file
+          ? "${watchdogDisabled.config.programs.pi-coding-agent.configDir}/extensions/drain-watchdog"
       );
-    assert !(default.config.home.sessionVariables ? PI_WATCHDOG_TICK_MS);
-    assert !(default.config.home.sessionVariables ? PI_WATCHDOG_IDLE_GRACE_MS);
-    assert !(default.config.home.sessionVariables ? PI_WATCHDOG_STALL_LIMIT_MS);
+    assert !(watchdogDisabled.config.home.sessionVariables ? PI_WATCHDOG_TICK_MS);
+    assert !(watchdogDisabled.config.home.sessionVariables ? PI_WATCHDOG_IDLE_GRACE_MS);
+    assert !(watchdogDisabled.config.home.sessionVariables ? PI_WATCHDOG_STALL_LIMIT_MS);
     assert
       watchdogEnabled.config.programs.pi-coding-agent.extensions.drain-watchdog
       == ./config/extensions/drain-watchdog;

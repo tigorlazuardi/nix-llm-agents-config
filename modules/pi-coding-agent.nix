@@ -976,8 +976,10 @@ in
       # Disabled 2026-10-07: pi-blackhole owns compaction (turn_end/agent_end
       # auto-compact + /pi-vcc). Re-enable only if blackhole is removed.
       idleCompact.enable = lib.mkDefault false;
-      # New and unproven in real unattended runs; opt in per-host once validated.
-      watchdog.enable = lib.mkDefault false;
+      # On by default: /watchdog only acts when the operator invokes it (PREP),
+      # so loading the extension is inert until then. Opt out per-host with
+      # watchdog.enable = false.
+      watchdog.enable = lib.mkDefault true;
       package = lib.mkIf cfg.enable (lib.mkDefault pinnedPkgs.pi-coding-agent);
       settings = lib.mkMerge [
         (lib.mapAttrsRecursive (_: lib.mkDefault) defaultSettings)
