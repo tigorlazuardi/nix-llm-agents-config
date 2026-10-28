@@ -2333,9 +2333,19 @@ in
           ${./config/prompts}/executor.md
         grep -F '/tmp/executor/<repo-slug>/<target>/state.json' \
           ${./config/prompts}/executor.md
-        grep -F 'hardcodes `hasClosingSteps: false`' \
+        # #38: the closing section's two trigger modes agree with the extension's
+        # closing-signal read; each pin fails if its sentence is removed.
+        grep -F 'the watchdog reads `closingStepsDone` from `/tmp/executor/<repo-slug>/<target>/state.json` every tick' \
           ${./config/prompts}/executor.md
-        grep -F '`drain_stop` only pauses a run and never completes one' \
+        grep -F 'sends exactly one FINALIZING nudge' \
+          ${./config/prompts}/executor.md
+        grep -F 'Finishing means setting `closingStepsDone: true` in `state.json`: the watchdog reads it on its next tick and completes the run as DONE with its final report' \
+          ${./config/prompts}/executor.md
+        grep -F 'the watchdog pauses the run visibly (\"finalization not confirmed\") instead of nudging again' \
+          ${./config/prompts}/executor.md
+        grep -F 'your own empty-frontier observation, evaluated in your active turn, is the closing trigger' \
+          ${./config/prompts}/executor.md
+        grep -F '`drain_stop` only pauses a run and is never used to complete one' \
           ${./config/prompts}/executor.md
         grep -F 'non-agent = a blocker lacking `ready-for-agent`' \
           ${./config/prompts}/executor.md
