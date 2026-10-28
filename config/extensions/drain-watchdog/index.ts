@@ -145,7 +145,11 @@ export type DrainTransition = {
 
 // --- Design-default parameters -----------------------------------------------
 
-export const IDLE_GRACE_MS = 3 * 60_000;
+// ponytail: worst-case nudge latency after idle = IDLE_GRACE_MS + TICK_MS (the idle gate is only
+// evaluated on a tick); fixed to 60s + 15s; add a one-shot idleSince+grace timer if a tick this
+// frequent ever costs too much (each post-grace tick runs the drain-queue command).
+export const IDLE_GRACE_MS = 60_000;
+export const TICK_MS = 15_000;
 export const STALL_LIMIT_MS = 45 * 60_000;
 export const BREAKER_K = 4;
 export const HARD_CAP = 30;
@@ -1310,7 +1314,7 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 	// watchdog, so these locals ARE the live state; the gate reads them per call.
 
 	const env = process.env as Record<string, string | undefined>;
-	const tickMs = readIntEnv(env, "PI_WATCHDOG_TICK_MS", 60_000);
+	const tickMs = readIntEnv(env, "PI_WATCHDOG_TICK_MS", TICK_MS);
 	// M2: handleTick now takes these two as a TickConfig param (passed at the
 	// tick() call site below), so both can move freely in either direction —
 	// previously only handleTick's own frozen IDLE_GRACE_MS/STALL_LIMIT_MS

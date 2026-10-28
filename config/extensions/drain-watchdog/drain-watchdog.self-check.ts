@@ -29,6 +29,7 @@ import {
 	HARD_CAP,
 	IDLE_GRACE_MS,
 	INITIAL_STATE,
+	TICK_MS,
 	QUOTA_OUTAGE_BUDGET_MS,
 	SPEC_REVIEW_BUDGET_MS,
 	STALL_LIMIT_MS,
@@ -383,12 +384,12 @@ assert.deepEqual(transition(armed(), { type: "tick", obs: { ...baseObs(), allIdl
 assert.equal(
 	transition(armed(), { type: "tick", obs: { ...baseObs(), allIdleForMs: 1 * MIN } }, T, { idleGraceMs: 30_000, stallLimitMs: STALL_LIMIT_MS }).action.type,
 	"nudge",
-	"a shortened idleGraceMs lets a 1m-idle tick nudge instead of waiting out the frozen 3m default",
+	"a shortened idleGraceMs lets a 1m-idle tick nudge instead of waiting out the default grace",
 );
 assert.deepEqual(
 	transition(armed(), { type: "tick", obs: { ...baseObs(), allIdleForMs: 2 * MIN } }, T, { idleGraceMs: 5 * MIN, stallLimitMs: STALL_LIMIT_MS }).action,
 	{ type: "wait" },
-	"a widened idleGraceMs still waits past the frozen 3m default",
+	"a widened idleGraceMs still waits past the default grace",
 );
 assert.deepEqual(
 	transition(armed(), { type: "tick", obs: { ...baseObs(), childCount: 1, progressAgeMs: 5 * MIN } }, T, { idleGraceMs: IDLE_GRACE_MS, stallLimitMs: 2 * MIN }).action,
@@ -1083,7 +1084,7 @@ assert.deepEqual(
 // otherwise exercised by nothing but "the factory registers these listener names"
 // (below). Fake the global timer functions and pi.exec/appendEntry/sendMessage to
 // drive the real registered handlers end-to-end.
-type FakeTimer = { id: number; kind: "interval" | "timeout"; fire: () => unknown; cleared: boolean };
+type FakeTimer = { id: number; kind: "interval" | "timeout"; fire: () => unknown; cleared: boolean; delay?: number };
 
 const fakeWidgetTimers: FakeTimer[] = [];
 const liveWidgetTimers = () => fakeWidgetTimers.filter((t) => !t.cleared).length;
@@ -1103,7 +1104,7 @@ async function withFakeTimers<T>(
 	widgetTimers.length = 0; // per-run: leftovers of earlier rows must not leak in
 	let nextId = 1;
 	(globalThis as any).setInterval = (fn: (...args: unknown[]) => unknown, delay: number, ...args: unknown[]) => {
-		const t: FakeTimer = { id: nextId++, kind: "interval", fire: () => fn(...args), cleared: false };
+		const t: FakeTimer = { id: nextId++, kind: "interval", fire: () => fn(...args), cleared: false, delay };
 		// The 1 s widget countdown is cosmetic: it must not count as a tick timer.
 		if (delay === 1000) widgetTimers.push(t);
 		else timers.push(t);
@@ -1301,6 +1302,40 @@ await withNoAmbientSubagent(() =>
 		assert.equal(h.sent[0]!.customType, "drain-watchdog-nudge");
 		assert(h.audits.some((a) => a.type === "nudge"), "the nudge is audited");
 		assert.equal(h.execCalls.length, 2, "both the drain-queue and drain-inflight blocks ran (res2/dead-code regression guard)");
+	}),
+);
+
+// Nudge latency bound: the default grace/tick must put the first nudge within
+// IDLE_GRACE_MS + TICK_MS of going idle, and nothing fires before the grace.
+assert.equal(IDLE_GRACE_MS, 60_000, "default idle grace is 60s");
+assert.equal(TICK_MS, 15_000, "default tick is 15s");
+await withNoAmbientSubagent(() =>
+	withFakeTimers(async (timers, flush, clock) => {
+		const h = makeHarness(makeFixtureCwd());
+		h.entries.push(armedEntry());
+		h.handlers.session_start({}, h.ctx);
+		const tickTimer = timers.find((t) => t.kind === "interval" && !t.cleared)!;
+		assert.equal(tickTimer.delay, TICK_MS, "the armed tick interval defaults to TICK_MS");
+		h.setExec(async (_cmd, args) => ({ stdout: args[1]?.includes("drain-inflight") ? "1\n" : "2\n", stderr: "", code: 0, killed: false }));
+		// Tick-by-tick, like the real interval: silent until the grace has elapsed.
+		let elapsed = 0;
+		while (elapsed + TICK_MS < IDLE_GRACE_MS) {
+			clock.advance(TICK_MS);
+			elapsed += TICK_MS;
+			tickTimer.fire();
+			await flush();
+			assert.equal(h.sent.length, 0, `no nudge before the idle grace (idle ${elapsed}ms)`);
+			assert.equal(h.execCalls.length, 0, "no queue command runs before the idle grace");
+		}
+		clock.advance(IDLE_GRACE_MS - elapsed - 1);
+		tickTimer.fire();
+		await flush();
+		assert.equal(h.sent.length, 0, "no nudge 1ms before the idle grace");
+		clock.advance(1 + TICK_MS); // first tick at/after idle+grace, at most one tick period late
+		tickTimer.fire();
+		await flush();
+		await flush();
+		assert.equal(h.sent.length, 1, "the nudge fires within IDLE_GRACE_MS + TICK_MS of going idle");
 	}),
 );
 

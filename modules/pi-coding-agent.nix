@@ -606,16 +606,17 @@ in
 
     tickMs = lib.mkOption {
       type = lib.types.int;
-      default = 60000;
+      default = 15000;
       description = ''
         Interval between armed ticks that check idle/children/queue state.
+        A nudge fires at most idleGraceMs + tickMs after main goes idle.
         Exported to the extension as PI_WATCHDOG_TICK_MS.
       '';
     };
 
     idleGraceMs = lib.mkOption {
       type = lib.types.int;
-      default = 3 * 60000;
+      default = 60000;
       description = ''
         Idle time required after the last activity before a tick may nudge.
         Exported as PI_WATCHDOG_IDLE_GRACE_MS.

@@ -814,8 +814,8 @@ in
     assert
       default.config.programs.pi-coding-agent.extensions.drain-watchdog
       == ./config/extensions/drain-watchdog;
-    assert default.config.home.sessionVariables.PI_WATCHDOG_TICK_MS == "60000";
-    assert default.config.home.sessionVariables.PI_WATCHDOG_IDLE_GRACE_MS == "180000";
+    assert default.config.home.sessionVariables.PI_WATCHDOG_TICK_MS == "15000";
+    assert default.config.home.sessionVariables.PI_WATCHDOG_IDLE_GRACE_MS == "60000";
     assert default.config.home.sessionVariables.PI_WATCHDOG_STALL_LIMIT_MS == "2700000";
     assert !watchdogDisabled.config.programs.pi-coding-agent.watchdog.enable;
     assert !(watchdogDisabled.config.programs.pi-coding-agent.extensions or { } ? drain-watchdog);
