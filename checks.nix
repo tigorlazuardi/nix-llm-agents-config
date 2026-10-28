@@ -2351,7 +2351,7 @@ in
           ${./config/prompts}/executor.md
         grep -F 'PARALLEL_WIDTH = 3` tickets' \
           ${./config/prompts}/executor.md
-        grep -F 'gh pr list --head <integration-branch>' \
+        grep -F 'gh pr list --head executor/<target>-integration' \
           ${./config/prompts}/executor.md
         grep -F 'commit-or-discard' \
           ${./config/prompts}/executor.md
