@@ -997,6 +997,7 @@ in
           env-loader = lib.mkDefault ../config/extensions/env-loader;
           glossary-loader = lib.mkDefault ../config/extensions/glossary-loader;
           lazy-tools = lib.mkDefault ../config/extensions/lazy-tools;
+          no-until-loop = lib.mkDefault ../config/extensions/no-until-loop;
           bash-loop-guard = lib.mkDefault ../config/extensions/bash-loop-guard;
         }
         (lib.mkIf idleCompact.enable {
@@ -1048,6 +1049,10 @@ in
       };
       "${cfg.configDir}/extensions/lazy-tools" = {
         source = cfg.extensions.lazy-tools;
+        force = true;
+      };
+      "${cfg.configDir}/extensions/no-until-loop" = {
+        source = cfg.extensions.no-until-loop;
         force = true;
       };
       "${cfg.configDir}/extensions/bash-loop-guard" = {
