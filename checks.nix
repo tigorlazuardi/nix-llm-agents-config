@@ -973,6 +973,7 @@ in
       planningWayfinder = builtins.readFile (expectedPlanningPrompts + "/planning/wayfinder.md");
       planningSpec = builtins.readFile (expectedPlanningPrompts + "/planning/to-spec.md");
       planningTickets = builtins.readFile (expectedPlanningPrompts + "/planning/to-tickets.md");
+      planningMocks = builtins.readFile (expectedPlanningPrompts + "/planning/wayfinder-with-mocks.md");
     in
     assert pkgs.lib.hasInfix "model: omniroute/personal/frontier" planningWayfinder;
     assert pkgs.lib.hasInfix "skill: wayfinder" planningWayfinder;
@@ -980,12 +981,17 @@ in
     assert pkgs.lib.hasInfix "skill: to-spec" planningSpec;
     assert pkgs.lib.hasInfix "model: omniroute/personal/frontier" planningTickets;
     assert pkgs.lib.hasInfix "skill: to-tickets" planningTickets;
+    assert pkgs.lib.hasInfix "model: omniroute/personal/frontier" planningMocks;
+    assert pkgs.lib.hasInfix "skill: wayfinder-with-mocks" planningMocks;
     let
       planningModelPrompts =
         planningModelConfigured.config.home.file."${planningModelConfigured.config.programs.pi-coding-agent.configDir}/prompts".source;
     in
     assert pkgs.lib.hasInfix "model: omniroute/personal/worker" (
       builtins.readFile (planningModelPrompts + "/planning/wayfinder.md")
+    );
+    assert pkgs.lib.hasInfix "model: omniroute/personal/worker" (
+      builtins.readFile (planningModelPrompts + "/planning/wayfinder-with-mocks.md")
     );
     assert
       default.config.home.file."${default.config.programs.pi-coding-agent.configDir}/templates/drain".source

@@ -82,6 +82,14 @@ let
         ---
         Invoke the wayfinder skill process for: $@
       '')
+      (pkgs.writeTextDir "planning/wayfinder-with-mocks.md" ''
+        ---
+        description: Wayfinder with mocks — chart breadth-first via boundary mocks (on ${cfg.planningModel})
+        model: ${cfg.planningModel}
+        skill: wayfinder-with-mocks
+        ---
+        Invoke the wayfinder-with-mocks skill process for: $@
+      '')
       (pkgs.writeTextDir "planning/to-spec.md" ''
         ---
         description: To-spec — turn the map into a spec (on ${cfg.planningModel})
