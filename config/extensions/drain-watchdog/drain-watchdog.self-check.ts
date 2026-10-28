@@ -1095,6 +1095,9 @@ type Harness = {
 	sent: { customType: string; content: string }[];
 	execCalls: { command: string; args: string[] }[];
 	setExec: (impl: (command: string, args: string[]) => Promise<{ stdout: string; stderr: string; code: number; killed: boolean }>) => void;
+	/** Queue proof the mocked exec returns for the next bash calls (PREP needs >0
+	 *  pickable to arm; ticks need 0 for an empty frontier). */
+	setQueue: (pickable: number) => void;
 	/** Registered model tools by name (drain_handoff, drain_stop). */
 	tools: Record<string, { execute: (id: string, params: any, signal: any, update: any, ctx: any) => Promise<any> }>;
 	ctx: any;
@@ -1112,8 +1115,9 @@ function makeHarness(cwd: string): Harness {
 	const notifications: { message: string; level: string }[] = [];
 	const sent: { customType: string; content: string }[] = [];
 	const entries: unknown[] = [];
+	let queueValue = 0;
 	let execImpl: (command: string, args: string[]) => Promise<{ stdout: string; stderr: string; code: number; killed: boolean }> = async () => ({
-		stdout: "0\n",
+		stdout: `${queueValue}\n`,
 		stderr: "",
 		code: 0,
 		killed: false,
@@ -1156,7 +1160,7 @@ function makeHarness(cwd: string): Harness {
 		hasPendingMessages: () => false,
 		sessionManager: { getEntries: () => entries },
 	};
-	return { handlers, audits, notifications, sent, execCalls, setExec: (impl) => { execImpl = impl; }, tools, ctx, entries };
+	return { handlers, audits, notifications, sent, execCalls, setExec: (impl) => { execImpl = impl; }, setQueue: (pickable) => { queueValue = pickable; }, tools, ctx, entries };
 }
 
 // A real drain-queue + drain-inflight fixture on disk at <tmp>/docs/agents/issue-tracker.md.
@@ -1899,25 +1903,28 @@ assert.equal(restoreRunTarget([armedEntry({ runTarget: 0 })]), null, "0 is not a
 assert.equal(restoreRunTarget([]), null);
 assert.equal(restoreRunTarget([{ type: "message", role: "user" }]), null);
 
+/** Runs one PREP -> READY -> confirm cycle on an existing harness through the
+ *  real production path. The queue proof reads pickable 2 (armable); everything
+ *  after the arm reads 0 (empty frontier, plain DONE). */
+async function prepAgain(h: Harness, ref: string) {
+	h.setQueue(2);
+	await h.handlers["command:watchdog"](ref, h.ctx);
+	h.handlers.message_end({ message: { role: "assistant", content: [{ type: "text", text: "queue proof done\nREADY" }] } }, h.ctx);
+	await h.handlers.agent_settled({ aborted: false, messages: [] }, h.ctx);
+	h.setQueue(0);
+}
+
 /** Arms through the real production path: /watchdog #38 -> PREP (queue proof) ->
  *  model READY -> confirm. Returns the harness with an ARMED run, runTarget 38. */
 async function armThroughPrep(cwd: string, entries: unknown[] = []) {
 	const h = makeHarness(cwd);
-	let bashCalls = 0;
-	h.setExec(async (command) => {
-		if (command === "git") return { stdout: "main\n", stderr: "", code: 0, killed: false };
-		bashCalls += 1;
-		// First bash call is the drain-queue proof (pickable 2, armable); the
-		// optional drain-inflight block and every tick afterwards count 0.
-		return { stdout: bashCalls === 1 ? "2\n" : "0\n", stderr: "", code: 0, killed: false };
-	});
 	for (const e of entries) h.entries.push(e);
 	h.handlers.session_start({}, h.ctx);
-	await h.handlers["command:watchdog"]("#38", h.ctx);
-	h.handlers.message_end({ message: { role: "assistant", content: [{ type: "text", text: "queue proof done\nREADY" }] } }, h.ctx);
-	await h.handlers.agent_settled({ aborted: false, messages: [] }, h.ctx);
+	await prepAgain(h, "#38");
 	return h;
 }
+
+const liveTickTimers = (timers: { kind: string; cleared: boolean }[]) => timers.filter((t) => t.kind === "interval" && !t.cleared).length;
 
 const executorRootOf = (cwd: string) => join("/tmp", "executor", executorRepoSlug(cwd));
 
@@ -1933,6 +1940,7 @@ await withNoAmbientSubagent(() =>
 			const h = await armThroughPrep(cwd);
 			assert(h.audits.some((a) => a.type === "prep-proof"), "PREP ran through the real command path");
 			assert(h.audits.some((a) => a.type === "armed"), "READY + confirm armed the run (production path, runTarget set)");
+			assert.equal(restoreRunTarget(h.entries), 38, "the armed run persists its target with the state entry (L1)");
 			clock.advance(IDLE_GRACE_MS + 1000);
 			const tickTimer = timers.find((t) => t.kind === "interval" && !t.cleared)!;
 			tickTimer.fire();
@@ -1993,6 +2001,92 @@ await withNoAmbientSubagent(() =>
 			assert.equal(h.sent.filter((s) => s.content === FINALIZE_NUDGE_TEXT).length, 0);
 		} finally {
 			cleanup();
+			rmSync(cwd, { recursive: true, force: true });
+		}
+	}),
+);
+
+// G (live, AC2): /watchdog during FINALIZING must not replace the live closing
+// run. The PREP guard used to list only armed||backoff, so a second /watchdog in
+// the closing window reset state and killed the timer: the closing outcome was
+// never observed, and the persisted entry still said finalizing (divergence).
+await withNoAmbientSubagent(() =>
+	withFakeTimers(async (timers, flush, clock) => {
+		const cwd = makeFixtureCwd();
+		const cleanup = makeExecutorFixture(cwd, [{ dir: "38", state: { closingStepsDone: false } }]);
+		try {
+			const h = await armThroughPrep(cwd);
+			clock.advance(IDLE_GRACE_MS + 1000);
+			const tickTimer = timers.find((t) => t.kind === "interval" && !t.cleared)!;
+			tickTimer.fire();
+			await flush();
+			await flush();
+			assert.equal(persistedLatest(h.entries).data.phase, "finalizing", "the empty frontier with closing steps left enters FINALIZING");
+			const armedBefore = h.audits.filter((a) => a.type === "armed").length;
+			const liveTimersBefore = liveTickTimers(timers);
+			await h.handlers["command:watchdog"]("#40", h.ctx);
+			assert(h.notifications.some((n) => n.message.includes("run already active")), "a second /watchdog during FINALIZING is refused as active");
+			assert.equal(h.audits.filter((a) => a.type === "armed").length, armedBefore, "the refused command never arms #40");
+			assert(!h.audits.some((a) => a.type === "prep-proof" && (a.data as { target?: unknown }).target === 40), "no PREP started for #40");
+			assert.equal(persistedLatest(h.entries).data.phase, "finalizing", "the closing run is untouched (no silent reset)");
+			assert.equal(persistedLatest(h.entries).data.runTarget, 38, "the run target is unchanged");
+			assert.equal(liveTickTimers(timers), liveTimersBefore, "the tick timer is still live");
+			// And the untouched run still reaches its own outcome.
+			clock.advance(4 * MIN + 1000);
+			tickTimer.fire();
+			await flush();
+			await flush();
+			assert.equal(persistedLatest(h.entries).data.phase, "paused", "the live run still reaches its finalization outcome");
+			assert(h.audits.some((a) => a.type === "paused"), "that outcome is audited");
+		} finally {
+			cleanup();
+			rmSync(cwd, { recursive: true, force: true });
+		}
+	}),
+);
+
+// L1 (live): run lifecycle resets + persistence. A later run must never read the
+// previous run's target (a stale #38 state.json must not nudge #40), the target
+// must ride the persisted entry, and DONE/off must clear it so /watchdog status
+// does not claim a live run target.
+await withNoAmbientSubagent(() =>
+	withFakeTimers(async (timers, flush, clock) => {
+		const cwd = makeFixtureCwd();
+		try {
+			const h = await armThroughPrep(cwd); // no executor state: plain run
+			assert.equal(restoreRunTarget(h.entries), 38, "the armed run persists its target");
+			// off must clear a LIVE run's target, not leave it on the status line.
+			await h.handlers["command:watchdog"]("off", h.ctx);
+			h.handlers["command:watchdog"]("status", h.ctx);
+			assert(!h.notifications.at(-1)!.message.includes("run target"), "off clears a live run target (status proves it)");
+			await prepAgain(h, "#38");
+			assert.equal(restoreRunTarget(h.entries), 38, "the re-armed run persists its target");
+			clock.advance(IDLE_GRACE_MS + 1000);
+			let tickTimer = timers.filter((t) => t.kind === "interval" && !t.cleared).at(-1)!;
+			tickTimer.fire();
+			await flush();
+			await flush();
+			assert.equal(persistedLatest(h.entries).data.phase, "done", "#38 completes on the empty frontier");
+			// A stale state.json from the finished run must not leak into the next run.
+			const cleanup = makeExecutorFixture(cwd, [{ dir: "38", state: { closingStepsDone: false } }]);
+			try {
+				h.handlers["command:watchdog"]("status", h.ctx);
+				assert(!h.notifications.at(-1)!.message.includes("run target"), "DONE clears the run target (status proves it)");
+				await prepAgain(h, "#40");
+				const armed40 = h.audits.filter((a) => a.type === "armed").at(-1)!;
+				assert.equal(armed40.data.target, 40, "the new run arms #40");
+				assert.equal(restoreRunTarget(h.entries), 40, "the new run persists its own target");
+				clock.advance(IDLE_GRACE_MS + 1000);
+				tickTimer = timers.filter((t) => t.kind === "interval" && !t.cleared).at(-1)!;
+				tickTimer.fire();
+				await flush();
+				await flush();
+				assert.equal(persistedLatest(h.entries).data.phase, "done", "#40's empty frontier completes");
+				assert(!h.audits.some((a) => a.type === "finalize-nudge"), "the stale #38 file never nudges #40");
+			} finally {
+				cleanup();
+			}
+		} finally {
 			rmSync(cwd, { recursive: true, force: true });
 		}
 	}),

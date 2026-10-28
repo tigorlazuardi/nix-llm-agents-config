@@ -2358,6 +2358,14 @@ in
           echo 'executor.md must not contain: so it never sends the FINALIZING closing nudge' >&2
           exit 1
         fi
+        if grep -qF 'is the sole closing trigger' ${./config/prompts}/executor.md; then
+          echo 'executor.md must not contain: is the sole closing trigger' >&2
+          exit 1
+        fi
+        if grep -qF 'revisit this section when `hasClosingSteps` is wired' ${./config/prompts}/executor.md; then
+          echo 'executor.md must not contain: revisit this section when `hasClosingSteps` is wired' >&2
+          exit 1
+        fi
         grep -F '`drain_stop` only pauses a run and is never used to complete one' \
           ${./config/prompts}/executor.md
         grep -F 'non-agent = a blocker lacking `ready-for-agent`' \

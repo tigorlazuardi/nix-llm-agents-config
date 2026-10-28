@@ -680,6 +680,15 @@ const STATE_ENTRY_TYPE = "drain-watchdog-state";
 const DRAIN_PHASES: readonly DrainPhase[] = ["off", "armed", "backoff", "paused", "done", "finalizing"];
 
 /**
+ * A live run a new PREP must not replace (the run is being observed: work,
+ * backoff probe, or closing steps). `/watchdog off` is the way out; PAUSED has
+ * its own resume path. One definition, used by the PREP guard and the status
+ * detail line, so a phase added to the live loop cannot silently miss a guard
+ * again (#38 G: FINALIZING was missing from the PREP guard only).
+ */
+export const isActivePhase = (phase: DrainPhase): boolean => phase === "armed" || phase === "backoff" || phase === "finalizing";
+
+/**
  * Latest valid persisted watchdog state from session entries (null when the
  * session has none). Entries from before the last compaction may be gone, and
  * a fresh run keeps the latest valid entry only — garbage is ignored, never
@@ -1480,7 +1489,7 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 		const bits = [`phase ${state.phase}`];
 		if (state.pausedReason !== null) bits.push(`reason: ${state.pausedReason}`);
 		if (runTarget !== null) bits.push(`run target #${runTarget}`);
-		if (state.phase === "armed" || state.phase === "backoff" || state.phase === "finalizing") {
+		if (isActivePhase(state.phase)) {
 			bits.push(`nudges ${state.nudgeCount}`, `no-progress ${state.noProgressStreak}`, `queue ${lastQueue.pickable}/${lastQueue.inflight}`, `children ${childCount}`);
 		}
 		notify(`drain-watchdog: ${bits.join(" ")}`);
@@ -1513,7 +1522,7 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 			notify("drain-watchdog: PREP needs an interactive UI", "error");
 			return;
 		}
-		if (state.phase === "armed" || state.phase === "backoff") {
+		if (isActivePhase(state.phase)) {
 			notify("drain-watchdog: run already active — /watchdog off first", "warning");
 			return;
 		}
