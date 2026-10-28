@@ -2295,24 +2295,69 @@ in
           ${./config/prompts}/executor.md
         grep -F 'gh api repos/{owner}/{repo}/issues/<target>/sub_issues --paginate' \
           ${./config/prompts}/executor.md
+        grep -F '.issue_dependencies_summary.blocked_by==0 and ([.labels[].name]' \
+          ${./config/prompts}/executor.md
+        grep -F '(.assignees|length)==0 and .issue_dependencies_summary.blocked_by==0' \
+          ${./config/prompts}/executor.md
+        grep -F 'UNION the state-recorded SPLIT children, each candidate re-verified live' \
+          ${./config/prompts}/executor.md
+        grep -F 'MINUS every ticket the state file already holds as claimed, live, terminal, or `SPLIT_WAITING`' \
+          ${./config/prompts}/executor.md
         grep -F 'and the exact `checkCommand` runs on the integration branch after every merge' \
+          ${./config/prompts}/executor.md
+        grep -F 'run the exact `checkCommand` in the integration worktree at the merge commit' \
+          ${./config/prompts}/executor.md
+        grep -F 'form a FIFO queue in `state.json`' \
           ${./config/prompts}/executor.md
         grep -F 'at most one merge in flight' \
           ${./config/prompts}/executor.md
-        grep -F 'git reset --hard <pre-merge-sha>' \
+        grep -F '— and `closingStepsDone` in `state.json` is false — perform the closing steps exactly once' \
           ${./config/prompts}/executor.md
-        grep -F 'perform the closing steps exactly once' \
+        grep -F 'Persist `closingStepsDone: true`' \
+          ${./config/prompts}/executor.md
+        grep -F 'verify the checked-out branch is the integration branch and the pre-merge SHA is an ancestor of HEAD, then `git reset --hard <pre-merge-sha>`' \
+          ${./config/prompts}/executor.md
+        grep -F 'so the integration branch again equals `lastGreenIntegrationSha` and stays green' \
+          ${./config/prompts}/executor.md
+        grep -F 'Create the ticket worktree from `lastGreenIntegrationSha`' \
+          ${./config/prompts}/executor.md
+        grep -F 'updated only after a green post-merge check' \
+          ${./config/prompts}/executor.md
+        grep -F 'relaxes the single-writer-across-session rule of `/supervise` (which stays unchanged) to **one writer per worktree**' \
           ${./config/prompts}/executor.md
         grep -F 'every ticket passes its own standards review, executor-run check, and spec review before it may merge' \
           ${./config/prompts}/executor.md
         grep -F 'No end-of-run review of the integration branch exists' \
           ${./config/prompts}/executor.md
-        grep -F 'relaxes the single-writer-across-session rule of `/supervise` (which stays unchanged) to **one writer per worktree**' \
-          ${./config/prompts}/executor.md
-        grep -F 'PARALLEL_WIDTH = 3' \
+        grep -F 'No terminal leaves the ticket open, `ready-for-agent`, and assigned' \
           ${./config/prompts}/executor.md
         grep -F '/tmp/executor/<repo-slug>/<target>/state.json' \
           ${./config/prompts}/executor.md
+        grep -F 'hardcodes `hasClosingSteps: false`' \
+          ${./config/prompts}/executor.md
+        grep -F '`drain_stop` only pauses a run and never completes one' \
+          ${./config/prompts}/executor.md
+        grep -F 'non-agent = a blocker lacking `ready-for-agent`' \
+          ${./config/prompts}/executor.md
+        grep -F 'issues/<n>/dependencies/blocked_by --jq' \
+          ${./config/prompts}/executor.md
+        grep -F 'Children never survive session death' \
+          ${./config/prompts}/executor.md
+        grep -F 'ends with exactly one verdict line: `MERGED <merge-commit-sha>`, `RESET <pre-merge-sha>`' \
+          ${./config/prompts}/executor.md
+        grep -F 'repair from a temporary worktree at `lastGreenIntegrationSha`' \
+          ${./config/prompts}/executor.md
+        grep -F 'intentionally differs from `config/agents/orchestrator.md`' \
+          ${./config/prompts}/executor.md
+        grep -F 'PARALLEL_WIDTH = 3` tickets' \
+          ${./config/prompts}/executor.md
+        grep -F 'gh pr list --head <integration-branch>' \
+          ${./config/prompts}/executor.md
+        grep -F 'commit-or-discard' \
+          ${./config/prompts}/executor.md
+        # Negative pins: wrong width values and the SF2 check-skip regression must never appear.
+        ! grep -F 'PARALLEL_WIDTH = 30' ${./config/prompts}/executor.md
+        ! grep -F 'check: skipped' ${./config/prompts}/executor.md
         ! grep -RE '^(model|thinking|chain|loop|subagent|deterministic):' ${./config/prompts}
         test "$(grep -RE '^skill: writing-for-agents$' ${./config/prompts} | wc -l)" -eq 1
         test ! -e ${./config/prompts}/setup-drain-agents.md
