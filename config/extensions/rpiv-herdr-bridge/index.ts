@@ -40,4 +40,22 @@ export default function (pi: ExtensionAPI) {
 		}
 		pi.events.emit("herdr:blocked", { active: true, label: label ?? "Ask user question" });
 	});
+
+	// pix-runtime (pix-sudo, pix-pretty gates) publishes aggregate agent state on
+	// `pix:agent-state`; forward only the blocked transitions so herdr flips the pane.
+	let pixBlocked = false;
+	pi.events.on("pix:agent-state", (data: { state?: string; message?: string }) => {
+		const blocked = data?.state === "blocked";
+		if (blocked === pixBlocked) return;
+		pixBlocked = blocked;
+		if (!blocked) {
+			pi.events.emit("herdr:blocked", { active: false });
+			return;
+		}
+		const text = data?.message ?? "Pi needs your attention";
+		pi.events.emit("herdr:blocked", {
+			active: true,
+			label: text.length > MAX_LABEL ? `${text.slice(0, MAX_LABEL - 1)}…` : text,
+		});
+	});
 }

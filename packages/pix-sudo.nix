@@ -18,6 +18,11 @@ buildNpmPackage {
 
   # ponytail: omit host Pi packages; offline load check proves peer resolution.
   postPatch = ''
+    # ponytail: root prompt waits forever by default (herdr shows blocked + notifies);
+    # set PIX_SUDO_PROMPT_TIMEOUT_MS=<ms> for a dead-man's switch. Make an option when a second consumer exists.
+    substituteInPlace src/index.ts \
+      --replace-fail 'const ROOT_PROMPT_TIMEOUT_MS = 60_000;' \
+      'const ROOT_PROMPT_TIMEOUT_MS = Number(process.env.PIX_SUDO_PROMPT_TIMEOUT_MS ?? 0);'
     cp ${./pix-sudo-package-lock.json} package-lock.json
     ${nodejs}/bin/node -e 'const fs = require("fs"); const p = require("./package.json"); delete p.peerDependencies; fs.writeFileSync("package.json", JSON.stringify(p, null, 2) + "\n")'
   '';

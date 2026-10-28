@@ -1905,6 +1905,7 @@ in
         grep -F 'rpiv:ask-user:blocked' ${./config/extensions/rpiv-herdr-bridge/index.ts}
         grep -F '"herdr:blocked", { active: false }' ${./config/extensions/rpiv-herdr-bridge/index.ts}
         grep -F '"herdr:blocked", { active: true, label' ${./config/extensions/rpiv-herdr-bridge/index.ts}
+        grep -F 'pix:agent-state' ${./config/extensions/rpiv-herdr-bridge/index.ts}
 
         export HOME="$TMPDIR/home"
         export PI_CODING_AGENT_DIR="$HOME/.pi/agent"
@@ -2052,6 +2053,8 @@ in
         # default export must be present (pi's loader requires a factory function;
         # named-only export = "Extension does not export a valid factory function").
         grep -F 'export default function' ${expectedPixSudoPath}/src/index.ts
+        # root prompt must not auto-deny after 60 s (patched in packages/pix-sudo.nix).
+        grep -F 'const ROOT_PROMPT_TIMEOUT_MS = Number(process.env.PIX_SUDO_PROMPT_TIMEOUT_MS ?? 0);' ${expectedPixSudoPath}/src/index.ts
         pi --offline --no-extensions --no-skills --no-prompt-templates --no-context-files \
           -e ${expectedPixSudoPath} \
           --list-models > pi.log 2>&1
