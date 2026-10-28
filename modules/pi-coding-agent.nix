@@ -68,6 +68,38 @@ let
       appendMattSkillInstruction "to-tickets" mattSkills.to-tickets
         toTicketsGranularityInstruction;
   };
+  planningPrompts = pkgs.symlinkJoin {
+    name = "pi-planning-prompts";
+    paths = [
+      ../config/prompts
+    ]
+    ++ [
+      (pkgs.writeTextDir "planning/wayfinder.md" ''
+        ---
+        description: Wayfinder — map a spec from an idea (on ${cfg.planningModel})
+        model: ${cfg.planningModel}
+        skill: wayfinder
+        ---
+        Invoke the wayfinder skill process for: $@
+      '')
+      (pkgs.writeTextDir "planning/to-spec.md" ''
+        ---
+        description: To-spec — turn the map into a spec (on ${cfg.planningModel})
+        model: ${cfg.planningModel}
+        skill: to-spec
+        ---
+        Invoke the to-spec skill process for: $@
+      '')
+      (pkgs.writeTextDir "planning/to-tickets.md" ''
+        ---
+        description: To-tickets — slice the spec into tickets (on ${cfg.planningModel})
+        model: ${cfg.planningModel}
+        skill: to-tickets
+        ---
+        Invoke the to-tickets skill process for: $@
+      '')
+    ];
+  };
   defaultModels = builtins.fromJSON (builtins.readFile ../config/models.json);
   mcpPlugin = cfg.plugins.pi-mcp-adapter;
   blackholePlugin = cfg.plugins.pi-blackhole;
@@ -526,6 +558,16 @@ in
         inherits the Pi settings default provider and model.
       '';
     };
+  };
+
+  options.programs.pi-coding-agent.planningModel = lib.mkOption {
+    type = lib.types.str;
+    default = "omniroute/personal/frontier";
+    description = ''
+      Model written into the frontmatter of the generated planning prompt
+      templates (`/wayfinder`, `/to-spec`, `/to-tickets`). Set to a different
+      `provider/model-id` on machines that route planning to another model.
+    '';
   };
 
   options.programs.pi-coding-agent.idleCompact = {
@@ -1070,7 +1112,7 @@ in
         force = true;
       };
       "${cfg.configDir}/prompts" = {
-        source = ../config/prompts;
+        source = planningPrompts;
         force = true;
       };
       "${cfg.configDir}/rules" = {

@@ -49,6 +49,9 @@ let
       stallLimitMs = 900000;
     };
   };
+  planningModelConfigured = evaluate {
+    programs.pi-coding-agent.planningModel = "omniroute/personal/worker";
+  };
   messagingRelayEnabled = evaluate {
     programs.pi-coding-agent.plugins.pi-messaging-relay.enable = true;
   };
@@ -410,6 +413,8 @@ let
     openaiApiKey = "!${pkgs.coreutils}/bin/cat /run/secrets/openai-api-key";
     provider = "openai";
   };
+  expectedPlanningPrompts =
+    default.config.home.file."${default.config.programs.pi-coding-agent.configDir}/prompts".source;
 in
 {
   diet-lsp = expectedDietLsp;
@@ -961,9 +966,27 @@ in
     assert !invalidWebAccessLiteralCredentialEvaluation.success;
     assert
       default.config.home.file."${default.config.programs.pi-coding-agent.configDir}/prompts".source
-      == ./config/prompts;
+      == expectedPlanningPrompts;
     assert
       default.config.home.file."${default.config.programs.pi-coding-agent.configDir}/prompts".force;
+    let
+      planningWayfinder = builtins.readFile (expectedPlanningPrompts + "/planning/wayfinder.md");
+      planningSpec = builtins.readFile (expectedPlanningPrompts + "/planning/to-spec.md");
+      planningTickets = builtins.readFile (expectedPlanningPrompts + "/planning/to-tickets.md");
+    in
+    assert pkgs.lib.hasInfix "model: omniroute/personal/frontier" planningWayfinder;
+    assert pkgs.lib.hasInfix "skill: wayfinder" planningWayfinder;
+    assert pkgs.lib.hasInfix "model: omniroute/personal/frontier" planningSpec;
+    assert pkgs.lib.hasInfix "skill: to-spec" planningSpec;
+    assert pkgs.lib.hasInfix "model: omniroute/personal/frontier" planningTickets;
+    assert pkgs.lib.hasInfix "skill: to-tickets" planningTickets;
+    let
+      planningModelPrompts =
+        planningModelConfigured.config.home.file."${planningModelConfigured.config.programs.pi-coding-agent.configDir}/prompts".source;
+    in
+    assert pkgs.lib.hasInfix "model: omniroute/personal/worker" (
+      builtins.readFile (planningModelPrompts + "/planning/wayfinder.md")
+    );
     assert
       default.config.home.file."${default.config.programs.pi-coding-agent.configDir}/templates/drain".source
       == ./config/templates/drain;
