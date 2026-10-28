@@ -72,6 +72,7 @@ import {
 	queueFingerprint,
 	readIntEnv,
 	restoreDrainState,
+	restoreRunTarget,
 
 // The default export is the #30 factory; imported separately so the named list
 // above stays comparable to the core's export list.
@@ -1146,7 +1147,11 @@ function makeHarness(cwd: string): Harness {
 	const ctx: any = {
 		hasUI: true,
 		cwd,
-		ui: { notify: (message: string, level = "info") => notifications.push({ message, level }) },
+		ui: {
+			notify: (message: string, level = "info") => notifications.push({ message, level }),
+			// The PREP -> READY -> arm flow asks once; interactive rows need an answer.
+			confirm: async () => true,
+		},
 		isIdle: () => true,
 		hasPendingMessages: () => false,
 		sessionManager: { getEntries: () => entries },
@@ -1870,6 +1875,152 @@ await withNoAmbientSubagent(() =>
 			assert.equal(h.sent.filter((s) => s.content === FINALIZE_NUDGE_TEXT).length, 1);
 		} finally {
 			cleanup();
+		}
+	}),
+);
+
+// --- #38 A/C: production arm path + targeted reads ---------------------------------------
+
+// A (pure): a file the effect layer reported missing (ENOENT) is silence — no
+// signal and no anomaly — while a real read failure and malformed JSON stay
+// anomalies. This is the seam that keeps a plain run from auditing a false
+// "unreadable" state.json on every tick.
+assert.deepEqual(readClosingSignal([{ path: "/tmp/executor/x/38/state.json", content: null, missing: true }]), { hasClosingSteps: false, anomalies: [] });
+assert.deepEqual(readClosingSignal([{ path: "/tmp/executor/x/38/state.json", content: null }]), { hasClosingSteps: false, anomalies: ["/tmp/executor/x/38/state.json: unreadable"] });
+assert.deepEqual(readClosingSignal([{ path: "/tmp/executor/x/38/state.json", content: "{not json", missing: false }]), { hasClosingSteps: false, anomalies: ["/tmp/executor/x/38/state.json: state.json is not valid JSON"] });
+// A missing sibling never masks a real closing target (scan path).
+assert.equal(readClosingSignal([{ path: "/tmp/executor/x/40/state.json", content: null, missing: true }, { path: "/tmp/executor/x/38/state.json", content: JSON.stringify({ closingStepsDone: false }) }]).hasClosingSteps, true);
+
+// C (pure): the restored run target rides on the persisted state entry.
+assert.equal(restoreRunTarget([armedEntry({ runTarget: 38 })]), 38, "a restored run keeps its target");
+assert.equal(restoreRunTarget([armedEntry({ runTarget: 38 }), armedEntry({ runTarget: 40 })]), 40, "latest entry wins");
+assert.equal(restoreRunTarget([armedEntry({ runTarget: "38" })]), null, "a non-numeric target degrades to the scan path");
+assert.equal(restoreRunTarget([armedEntry({ runTarget: 0 })]), null, "0 is not a target");
+assert.equal(restoreRunTarget([]), null);
+assert.equal(restoreRunTarget([{ type: "message", role: "user" }]), null);
+
+/** Arms through the real production path: /watchdog #38 -> PREP (queue proof) ->
+ *  model READY -> confirm. Returns the harness with an ARMED run, runTarget 38. */
+async function armThroughPrep(cwd: string, entries: unknown[] = []) {
+	const h = makeHarness(cwd);
+	let bashCalls = 0;
+	h.setExec(async (command) => {
+		if (command === "git") return { stdout: "main\n", stderr: "", code: 0, killed: false };
+		bashCalls += 1;
+		// First bash call is the drain-queue proof (pickable 2, armable); the
+		// optional drain-inflight block and every tick afterwards count 0.
+		return { stdout: bashCalls === 1 ? "2\n" : "0\n", stderr: "", code: 0, killed: false };
+	});
+	for (const e of entries) h.entries.push(e);
+	h.handlers.session_start({}, h.ctx);
+	await h.handlers["command:watchdog"]("#38", h.ctx);
+	h.handlers.message_end({ message: { role: "assistant", content: [{ type: "text", text: "queue proof done\nREADY" }] } }, h.ctx);
+	await h.handlers.agent_settled({ aborted: false, messages: [] }, h.ctx);
+	return h;
+}
+
+const executorRootOf = (cwd: string) => join("/tmp", "executor", executorRepoSlug(cwd));
+
+// A (live, AC3): every real /watchdog #N run arms with a target set. With no
+// executor state at all the targeted read must be silent — DONE on the empty
+// frontier, no closing-signal-anomaly audit on any tick. This is the production
+// path the restore-only rows above never exercised.
+await withNoAmbientSubagent(() =>
+	withFakeTimers(async (timers, flush, clock) => {
+		const cwd = makeFixtureCwd();
+		rmSync(executorRootOf(cwd), { recursive: true, force: true });
+		try {
+			const h = await armThroughPrep(cwd);
+			assert(h.audits.some((a) => a.type === "prep-proof"), "PREP ran through the real command path");
+			assert(h.audits.some((a) => a.type === "armed"), "READY + confirm armed the run (production path, runTarget set)");
+			clock.advance(IDLE_GRACE_MS + 1000);
+			const tickTimer = timers.find((t) => t.kind === "interval" && !t.cleared)!;
+			tickTimer.fire();
+			await flush();
+			await flush();
+			assert.equal(persistedLatest(h.entries).data.phase, "done", "a plain run still reaches DONE (AC3)");
+			assert.equal(h.audits.filter((a) => a.type === "closing-signal-anomaly").length, 0, "a missing state.json is not an anomaly (AC3)");
+			assert.equal(h.sent.filter((s) => s.content === FINALIZE_NUDGE_TEXT).length, 0, "no FINALIZING nudge without a closing signal");
+		} finally {
+			rmSync(executorRootOf(cwd), { recursive: true, force: true });
+			rmSync(cwd, { recursive: true, force: true });
+		}
+	}),
+);
+
+// A (live, targeted read): a stale SIBLING target's closingStepsDone:false must
+// not drive the armed run — the run target's own absent state.json is the only
+// input. Disabling the direct-read branch (scanning instead) turns this into a
+// FINALIZING nudge and fails the row.
+await withNoAmbientSubagent(() =>
+	withFakeTimers(async (timers, flush, clock) => {
+		const cwd = makeFixtureCwd();
+		const cleanup = makeExecutorFixture(cwd, [{ dir: "40", state: { closingStepsDone: false } }]);
+		try {
+			const h = await armThroughPrep(cwd);
+			clock.advance(IDLE_GRACE_MS + 1000);
+			const tickTimer = timers.find((t) => t.kind === "interval" && !t.cleared)!;
+			tickTimer.fire();
+			await flush();
+			await flush();
+			assert.equal(persistedLatest(h.entries).data.phase, "done", "the run target's own missing state.json means no closing steps");
+			assert.equal(h.sent.filter((s) => s.content === FINALIZE_NUDGE_TEXT).length, 0, "a stale sibling target never nudges this run");
+			assert.equal(h.audits.filter((a) => a.type === "closing-signal-anomaly").length, 0);
+		} finally {
+			cleanup();
+			rmSync(cwd, { recursive: true, force: true });
+		}
+	}),
+);
+
+// C (live): a restored ARMED run keeps its persisted target, so it reads #38
+// and ignores the stale sibling #40 — no spurious FINALIZING nudge after restart.
+await withNoAmbientSubagent(() =>
+	withFakeTimers(async (timers, flush, clock) => {
+		const cwd = makeFixtureCwd();
+		const cleanup = makeExecutorFixture(cwd, [{ dir: "40", state: { closingStepsDone: false } }]);
+		try {
+			const h = makeHarness(cwd);
+			h.entries.push(armedEntry({ runTarget: 38 }));
+			h.handlers.session_start({}, h.ctx);
+			assert.equal(restoreRunTarget(h.entries), 38, "session_start restored the target");
+			clock.advance(IDLE_GRACE_MS + 1000);
+			const tickTimer = timers.find((t) => t.kind === "interval" && !t.cleared)!;
+			tickTimer.fire();
+			await flush();
+			await flush();
+			assert.equal(persistedLatest(h.entries).data.phase, "done", "a restored run reads its own target, not every target dir");
+			assert.equal(h.sent.filter((s) => s.content === FINALIZE_NUDGE_TEXT).length, 0);
+		} finally {
+			cleanup();
+			rmSync(cwd, { recursive: true, force: true });
+		}
+	}),
+);
+
+// A (live, genuine IO error): a state.json that exists but cannot be read as a
+// file (a directory -> EISDIR) is a real failure, not a missing file: it stays
+// an anomaly. Only ENOENT is silent.
+await withNoAmbientSubagent(() =>
+	withFakeTimers(async (timers, flush, clock) => {
+		const cwd = makeFixtureCwd();
+		const root = executorRootOf(cwd);
+		rmSync(root, { recursive: true, force: true });
+		mkdirSync(join(root, "38", "state.json"), { recursive: true });
+		try {
+			const h = await armThroughPrep(cwd);
+			clock.advance(IDLE_GRACE_MS + 1000);
+			const tickTimer = timers.find((t) => t.kind === "interval" && !t.cleared)!;
+			tickTimer.fire();
+			await flush();
+			await flush();
+			assert.equal(persistedLatest(h.entries).data.phase, "done", "an unreadable state file never blocks the run");
+			const anomaly = h.audits.find((a) => a.type === "closing-signal-anomaly");
+			assert(anomaly !== undefined, "a genuine read error is still audited");
+			assert(String(anomaly!.data.paths).includes("state.json"));
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+			rmSync(cwd, { recursive: true, force: true });
 		}
 	}),
 );
