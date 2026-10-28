@@ -2526,7 +2526,7 @@ in
           ${./config/prompts}/executor.md
         grep -F 'git branch --no-track integration/<slug> origin/<default-branch>' \
           ${./config/prompts}/executor.md
-        grep -F '`--no-track` is mandatory' \
+        grep -F '`--no-track` on `git branch` is mandatory' \
           ${./config/prompts}/executor.md
         grep -F 'git worktree add /tmp/executor/<repo-slug>/<target>/integration integration/<slug>' \
           ${./config/prompts}/executor.md
