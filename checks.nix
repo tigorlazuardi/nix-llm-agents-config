@@ -2427,11 +2427,23 @@ in
           ${./config/prompts}/executor.md
         grep -F 'a `SPLIT_WAITING` origin whose SPLIT child has closed is a candidate' \
           ${./config/prompts}/executor.md
-        ! grep -F 'against main' ${./config/prompts}/executor.md
-        ! grep -F 'push the integration branch' ${./config/prompts}/executor.md
-        # Negative pins: wrong width values and the check-skip regression must never appear.
-        ! grep -F 'PARALLEL_WIDTH = 30' ${./config/prompts}/executor.md
-        ! grep -F 'check: skipped' ${./config/prompts}/executor.md
+        if grep -qF 'against main' ${./config/prompts}/executor.md; then
+          echo 'executor.md must not contain: against main' >&2
+          exit 1
+        fi
+        if grep -qF 'push the integration branch' ${./config/prompts}/executor.md; then
+          echo 'executor.md must not contain: push the integration branch' >&2
+          exit 1
+        fi
+        # Negative pins (explicit if/exit: a bare `! grep` never trips errexit): wrong width values and the check-skip regression must never appear.
+        if grep -qF 'PARALLEL_WIDTH = 30' ${./config/prompts}/executor.md; then
+          echo 'executor.md must not contain: PARALLEL_WIDTH = 30' >&2
+          exit 1
+        fi
+        if grep -qF 'check: skipped' ${./config/prompts}/executor.md; then
+          echo 'executor.md must not contain: check: skipped' >&2
+          exit 1
+        fi
         ! grep -RE '^(model|thinking|chain|loop|subagent|deterministic):' ${./config/prompts}
         test "$(grep -RE '^skill: writing-for-agents$' ${./config/prompts} | wc -l)" -eq 1
         test ! -e ${./config/prompts}/setup-drain-agents.md
