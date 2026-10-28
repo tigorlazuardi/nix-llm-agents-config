@@ -2399,6 +2399,36 @@ in
           ${./config/prompts}/executor.md
         grep -F 'origin/<default-branch>` (the local `<default-branch>` tip when no remote exists)' \
           ${./config/prompts}/executor.md
+        grep -F '.[] | select(.state=="open" and (.assignees|length)==0 and .issue_dependencies_summary.blocked_by==0 and ([.labels[].name] | (index("ready-for-agent") != null and index("needs-info") == null and index("ready-for-human") == null and index("wontfix") == null))) | .number' \
+          ${./config/prompts}/executor.md
+        grep -F 'issues/<n> --jq '"'"'select(.state=="open" and (.assignees|length)==0 and .issue_dependencies_summary.blocked_by==0 and ([.labels[].name] | (index("ready-for-agent") != null and index("needs-info") == null and index("ready-for-human") == null and index("wontfix") == null))) | .number' \
+          ${./config/prompts}/executor.md
+        grep -F '(open, `ready-for-agent`, no assignee, none of `needs-info` / `ready-for-human` / `wontfix`, no open native blockers)' \
+          ${./config/prompts}/executor.md
+        grep -F 'git worktree add --no-track /tmp/executor/<repo-slug>/<target>/integration -b executor/<target>-integration origin/<default-branch>' \
+          ${./config/prompts}/executor.md
+        grep -F '`--no-track` is mandatory' \
+          ${./config/prompts}/executor.md
+        grep -F 'gh repo view --json defaultBranchRef --jq .defaultBranchRef.name' \
+          ${./config/prompts}/executor.md
+        grep -F 'git -C <integration-worktree> push -u origin executor/<target>-integration:executor/<target>-integration' \
+          ${./config/prompts}/executor.md
+        grep -F 'gh pr create --base <default-branch> --head executor/<target>-integration' \
+          ${./config/prompts}/executor.md
+        grep -F 'The executor never pushes to `<default-branch>` and never runs a bare `git push`' \
+          ${./config/prompts}/executor.md
+        grep -F 'an implementer or reviewer malformed or missing verdict (a merger'"'"'s is recoverable under merge loop step 4, never a terminal by itself)' \
+          ${./config/prompts}/executor.md
+        grep -F 'then exactly one counted fix-loop pass for that ticket' \
+          ${./config/prompts}/executor.md
+        grep -F 'Merger `BLOCKED` → guarded reset, ticket `BLOCKED`' \
+          ${./config/prompts}/executor.md
+        grep -F '`ready-for-human` whenever a human action or decision is required (low-tolerance handoff, split-depth cap, no strictly smaller scope, merger `BLOCKED`, an implementer or reviewer malformed or missing verdict, any other implementer `BLOCKED`)' \
+          ${./config/prompts}/executor.md
+        grep -F 'a `SPLIT_WAITING` origin whose SPLIT child has closed is a candidate' \
+          ${./config/prompts}/executor.md
+        ! grep -F 'against main' ${./config/prompts}/executor.md
+        ! grep -F 'push the integration branch' ${./config/prompts}/executor.md
         # Negative pins: wrong width values and the check-skip regression must never appear.
         ! grep -F 'PARALLEL_WIDTH = 30' ${./config/prompts}/executor.md
         ! grep -F 'check: skipped' ${./config/prompts}/executor.md
