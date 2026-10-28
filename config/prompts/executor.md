@@ -1,5 +1,5 @@
 ---
-description: Executor — parallel frontier loop: per-ticket worktrees, serialized merger, integration branch, two-axis gates, SPLIT rule
+description: "Executor — parallel frontier loop: per-ticket worktrees, serialized merger, integration branch, two-axis gates, SPLIT rule"
 argument-hint: "<target issue-number> — invoking message carries the immutable execution tuple"
 ---
 Executor run for target: $@

@@ -2355,11 +2355,18 @@ in
           expectedPackage
           pkgs.check-jsonschema
           pkgs.nodejs_22
+          pkgs.yq-go
         ];
       }
       ''
         set -- ${./config/prompts}/*.md
         test "$#" -eq 11
+        # Frontmatter must be valid YAML: an unquoted `key: value` inside description
+        # makes the prompt-template plugin skip the whole template at runtime.
+        for f in "$@"; do
+          awk 'NR > 1 && /^---$/ { exit } NR > 1' "$f" > fm.yml
+          yq '.' fm.yml > /dev/null
+        done
         grep -F 'standards: 10 minutes, spec: 20 minutes' ${./config/prompts}/executor.md
         grep -F 'repos/{owner}/{repo}/issues/<origin>/dependencies/blocked_by -F issue_id="$child_db"' \
           ${./config/prompts}/executor.md
