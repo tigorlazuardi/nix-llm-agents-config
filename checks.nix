@@ -2355,7 +2355,51 @@ in
           ${./config/prompts}/executor.md
         grep -F 'commit-or-discard' \
           ${./config/prompts}/executor.md
-        # Negative pins: wrong width values and the SF2 check-skip regression must never appear.
+        grep -F '.[] | select(.state=="open" and (.assignees|length)==0 and .issue_dependencies_summary.blocked_by==0 and ([.labels[].name]' \
+          ${./config/prompts}/executor.md
+        grep -F 'issues/<n> --jq '"'"'select(.state=="open" and (.assignees|length)==0 and .issue_dependencies_summary.blocked_by==0 and ([.labels[].name]' \
+          ${./config/prompts}/executor.md
+        grep -F '(it equals `lastGreenIntegrationSha`; if it does not, apply the resume reconciliation first)' \
+          ${./config/prompts}/executor.md
+        grep -F '`PASSED` closes the ticket with the evidence comment; `FAILED` and `ESCALATED` relabel it `ready-for-human`' \
+          ${./config/prompts}/executor.md
+        grep -F 'gh issue edit <n> --remove-label ready-for-agent --add-label <label> --remove-assignee @me' \
+          ${./config/prompts}/executor.md
+        grep -F '`needs-info` only when information is missing from the human' \
+          ${./config/prompts}/executor.md
+        grep -F 'malformed, missing, or `HANDOVER` merger verdict' \
+          ${./config/prompts}/executor.md
+        grep -F 'A second bad verdict of any of those three classes (`CONFLICT`, malformed or missing, `HANDOVER`)' \
+          ${./config/prompts}/executor.md
+        grep -F 'Never a third merger run for one merge attempt and never a stalled queue' \
+          ${./config/prompts}/executor.md
+        grep -F 'git merge --no-ff --no-edit <ticket-branch>' \
+          ${./config/prompts}/executor.md
+        grep -F 'git merge --no-ff --no-edit <lastGreenIntegrationSha>' \
+          ${./config/prompts}/executor.md
+        grep -F 'UNION the state-recorded `SPLIT_WAITING` origins' \
+          ${./config/prompts}/executor.md
+        grep -F 'A `SPLIT_WAITING` origin is never removed before its per-id check' \
+          ${./config/prompts}/executor.md
+        grep -F 'spawn a fresh implementer in the kept worktree and branch it already owns' \
+          ${./config/prompts}/executor.md
+        grep -F 'so it keeps the set non-empty until respawned and terminal' \
+          ${./config/prompts}/executor.md
+        grep -F 'verify the recorded run no longer writes' \
+          ${./config/prompts}/executor.md
+        grep -F 'goes back to the head of the merge queue (`MERGE_QUEUED`) for a fresh merger with no failed-pass charge' \
+          ${./config/prompts}/executor.md
+        grep -F 'never adopt it unchecked' \
+          ${./config/prompts}/executor.md
+        grep -F '(iii) remove the integration worktree last' \
+          ${./config/prompts}/executor.md
+        grep -F 'git -C <integration-worktree> branch -d <branch>' \
+          ${./config/prompts}/executor.md
+        grep -F 'from an explicit start point, never from whatever is checked out' \
+          ${./config/prompts}/executor.md
+        grep -F 'origin/<default-branch>` (the local `<default-branch>` tip when no remote exists)' \
+          ${./config/prompts}/executor.md
+        # Negative pins: wrong width values and the check-skip regression must never appear.
         ! grep -F 'PARALLEL_WIDTH = 30' ${./config/prompts}/executor.md
         ! grep -F 'check: skipped' ${./config/prompts}/executor.md
         ! grep -RE '^(model|thinking|chain|loop|subagent|deterministic):' ${./config/prompts}
