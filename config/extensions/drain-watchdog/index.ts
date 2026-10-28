@@ -1901,7 +1901,12 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 				notify("drain-watchdog: operator declined; nothing armed");
 				return;
 			}
-			armRun(target, prepPickable, prepInflight);
+			if (!armRun(target, prepPickable, prepInflight)) return;
+			// Kick-off: the operator just confirmed, the turn has settled, and the queue
+			// is non-empty — start the first pass now instead of waiting a full idle
+			// grace for the first nudge. Not a core nudge: no nudgeCount, no cooldown.
+			audit("kickoff", { target, pickable: prepPickable });
+			deliver(NUDGE_MESSAGE_TYPE, buildNudgeText({ target, pickable: prepPickable }));
 		}
 	});
 }

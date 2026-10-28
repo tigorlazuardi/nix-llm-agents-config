@@ -2213,6 +2213,10 @@ await withNoAmbientSubagent(() =>
 			await h.handlers.agent_settled({ aborted: false, messages: [] }, h.ctx);
 			h.handlers["command:watchdog"]("status", h.ctx);
 			assert(h.notifications.some((n) => n.message.includes("phase armed") && n.message.includes("run target #38")), "the discovered target arms through the normal PREP path");
+			assert(h.audits.some((a) => a.type === "kickoff" && a.data.target === 38), "arming kicks the first pass off immediately");
+			assert.equal(h.sent.filter((m) => m.customType === "drain-watchdog-nudge").length, 1, "exactly one kick-off message is delivered at arm");
+			assert(h.sent[h.sent.length - 1].content.includes("#38"), "the kick-off names the run target");
+			assert.equal(persistedLatest(h.entries).data.nudgeCount, 0, "the kick-off is not a counted nudge");
 		} finally {
 			rmSync(cwd, { recursive: true, force: true });
 		}
