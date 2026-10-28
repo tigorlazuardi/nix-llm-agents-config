@@ -373,18 +373,23 @@ assert.deepEqual(
 );
 
 // 2. Idle grace not reached → wait.
-assert.deepEqual(transition(armed(), { type: "tick", obs: { ...baseObs(), allIdleForMs: 1 * MIN } }, T).action, {
+assert.deepEqual(transition(armed(), { type: "tick", obs: { ...baseObs(), allIdleForMs: IDLE_GRACE_MS - 1 } }, T).action, {
 	type: "wait",
 });
+assert.equal(
+	transition(armed(), { type: "tick", obs: { ...baseObs(), allIdleForMs: IDLE_GRACE_MS } }, T).action.type,
+	"nudge",
+	"a tick exactly at the idle grace nudges",
+);
 
 // M2: idleGraceMs/stallLimitMs used to be decorative — handleTick always read
 // its own frozen IDLE_GRACE_MS/STALL_LIMIT_MS constants, so a configured
 // (narrower) threshold changed notify/audit text but never the actual gate.
 // A custom TickConfig must move both gates for real, in both directions.
 assert.equal(
-	transition(armed(), { type: "tick", obs: { ...baseObs(), allIdleForMs: 1 * MIN } }, T, { idleGraceMs: 30_000, stallLimitMs: STALL_LIMIT_MS }).action.type,
+	transition(armed(), { type: "tick", obs: { ...baseObs(), allIdleForMs: 45_000 } }, T, { idleGraceMs: 30_000, stallLimitMs: STALL_LIMIT_MS }).action.type,
 	"nudge",
-	"a shortened idleGraceMs lets a 1m-idle tick nudge instead of waiting out the default grace",
+	"a shortened idleGraceMs lets a 45s-idle tick nudge instead of waiting out the default grace",
 );
 assert.deepEqual(
 	transition(armed(), { type: "tick", obs: { ...baseObs(), allIdleForMs: 2 * MIN } }, T, { idleGraceMs: 5 * MIN, stallLimitMs: STALL_LIMIT_MS }).action,
