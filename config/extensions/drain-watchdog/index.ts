@@ -748,15 +748,37 @@ export function restoreDrainState(entries: readonly unknown[]): DrainState | nul
 	return null;
 }
 
+/**
+ * #38 C: the run target persisted with the state entry, restored separately so
+ * the pure DrainState shape stays untouched. Without it a restored run has no
+ * target and would scan every /tmp/executor/<slug>/* directory, letting a stale
+ * sibling target's closingStepsDone:false nudge (then pause) an unrelated run.
+ * Latest entry wins; an invalid value degrades to null (scan path).
+ */
+export function restoreRunTarget(entries: readonly unknown[]): number | null {
+	for (let i = entries.length - 1; i >= 0; i--) {
+		const e = entries[i];
+		if (typeof e !== "object" || e === null) continue;
+		const entry = e as { type?: unknown; customType?: unknown; data?: unknown };
+		if (entry.type !== "custom" || entry.customType !== STATE_ENTRY_TYPE) continue;
+		if (typeof entry.data !== "object" || entry.data === null) continue;
+		const value = (entry.data as { runTarget?: unknown }).runTarget;
+		return typeof value === "number" && Number.isInteger(value) && value > 0 ? value : null;
+	}
+	return null;
+}
+
 // --- Closing-step signal (#38) -------------------------------------------------
 
 /**
  * One executor state file as the effect layer observed it: the path it was
- * found at (audit detail only) and its bytes (null when unreadable —
- * missing directory or an IO error; the pure side cannot tell those apart
- * and must not).
+ * found at (audit detail only) and its bytes, or the read outcome when there
+ * were none. `missing` separates "no file / no target dir" (ENOENT: an
+ * executor never ran, or a sibling target — no signal AND no anomaly) from a
+ * real IO failure (content null, missing false: unreadable, an anomaly). The
+ * effect layer only classifies the syscall result; deciding stays here.
  */
-export type ExecutorStateFile = { path: string; content: string | null };
+export type ExecutorStateFile = { path: string; content: string | null; missing?: boolean };
 
 /**
  * Closing signal of one executor run-directory scan: does any target still
@@ -770,13 +792,16 @@ export type ClosingSignal = { hasClosingSteps: boolean; anomalies: string[] };
  * hasClosingSteps = any state file that parses AND carries `closingStepsDone:
  * false` (an executor target still closing). Fail-safe by contract:
  *
- *  - missing /tmp/executor/<repo-slug> (no executor ever ran) -> no signal,
- *    no anomaly: plain DONE stays plain (#38 AC3).
- *  - target dirs with no state.json, an unparseable state.json, or a JSON that
- *    parses but is not an object with a boolean closingStepsDone -> also "no
- *    closing steps" (a DONE, not a pause), but as an audited anomaly — a half
- *    -written or corrupt executor state must be visible in the audit trail, and
- *    an unparseable file must never block an unattended run.
+ *  - a file reported `missing` (ENOENT: no /tmp/executor/<repo-slug>, no
+ *    target dir, or the target's own state.json absent while the caller reads
+ *    one known target) -> no signal, no anomaly: plain DONE stays plain (#38
+ *    AC3), and a targeted plus a scanning read of the same absent state agree.
+ *  - an unparseable state.json, an unreadable file (read failed for a reason
+ *    other than ENOENT), or a JSON that parses but is not an object with a
+ *    boolean closingStepsDone -> also "no closing steps" (a DONE, not a
+ *    pause), but as an audited anomaly — a half-written or corrupt executor
+ *    state must be visible in the audit trail, and an unparseable file must
+ *    never block an unattended run.
  *  - closingStepsDone: true with a healthy file -> no signal (the executor
  *    reports closing finished). A parseable file without a boolean
  *    closingStepsDone violates the #34 state.json contract (the field is
@@ -792,6 +817,7 @@ export type ClosingSignal = { hasClosingSteps: boolean; anomalies: string[] };
 export function readClosingSignal(entries: readonly ExecutorStateFile[]): ClosingSignal {
 	const anomalies: string[] = [];
 	for (const e of entries) {
+		if (e.missing === true) continue; // ENOENT: nothing was ever written there.
 		if (e.content === null) {
 			anomalies.push(`${e.path}: unreadable`);
 			continue;
@@ -1180,7 +1206,12 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 	};
 
 	const persist = () => {
-		pi.appendEntry(STATE_ENTRY_TYPE, { ...state });
+		// #38 C: runTarget rides along so a restored run keeps reading its own
+		// target's state.json instead of scanning every target dir (a stale sibling
+		// /tmp/executor/<slug>/<other>/state.json must not trigger FINALIZING on a
+		// different run). restoreDrainState ignores the extra key; restoreRunTarget
+		// reads it back.
+		pi.appendEntry(STATE_ENTRY_TYPE, { ...state, runTarget });
 	};
 
 	const startLoop = () => {
@@ -1245,8 +1276,12 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 		const files: ExecutorStateFile[] = statePaths.map((statePath) => {
 			try {
 				return { path: statePath, content: readFileSync(statePath, "utf8") };
-			} catch {
-				return { path: statePath, content: null };
+			} catch (error) {
+				// ENOENT covers both "no /tmp/executor/<repo-slug> for this repo" (the
+				// plain-run case) and "this target has no state.json yet" — a missing
+				// file is not a corrupt one, so it is not an anomaly. Every other IO
+				// failure (EACCES, EISDIR, ...) stays content:null for the seam to audit.
+				return { path: statePath, content: null, missing: (error as { code?: string } | null)?.code === "ENOENT" };
 			}
 		});
 		return readClosingSignal(files);
@@ -1718,6 +1753,8 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 			return;
 		}
 		state = restored;
+		// #38 C: keep the run target across a restart (targeted state read).
+		runTarget = restoreRunTarget(ctx.sessionManager.getEntries());
 		if (state.phase === "armed" || state.phase === "finalizing") {
 			audit("restored", { phase: state.phase });
 			startLoop();

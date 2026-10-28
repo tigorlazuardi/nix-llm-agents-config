@@ -2345,6 +2345,19 @@ in
           ${./config/prompts}/executor.md
         grep -F 'your own empty-frontier observation, evaluated in your active turn, is the closing trigger' \
           ${./config/prompts}/executor.md
+        grep -F 'with no leading or trailing dash' \
+          ${./config/prompts}/executor.md
+        # #38 negative pins: the pre-#38 honesty text claimed the watchdog could
+        # never send FINALIZING. It is now false, and a stale sentence coming back
+        # (merge, revert, copy) would make the prompt contradict the extension.
+        if grep -qF 'hardcodes `hasClosingSteps: false`' ${./config/prompts}/executor.md; then
+          echo 'executor.md must not contain: hardcodes `hasClosingSteps: false`' >&2
+          exit 1
+        fi
+        if grep -qF 'so it never sends the FINALIZING closing nudge' ${./config/prompts}/executor.md; then
+          echo 'executor.md must not contain: so it never sends the FINALIZING closing nudge' >&2
+          exit 1
+        fi
         grep -F '`drain_stop` only pauses a run and is never used to complete one' \
           ${./config/prompts}/executor.md
         grep -F 'non-agent = a blocker lacking `ready-for-agent`' \
