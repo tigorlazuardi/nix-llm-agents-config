@@ -2290,6 +2290,29 @@ in
         grep -F 'standards: 10 minutes, spec: 20 minutes' ${./config/prompts}/executor.md
         grep -F 'repos/{owner}/{repo}/issues/<origin>/dependencies/blocked_by -F issue_id="$child_db"' \
           ${./config/prompts}/executor.md
+        # #34 executor parallel topology: load-bearing invariants (each pin fails if its sentence is removed).
+        grep -F 'Never derive the frontier from conversation memory' \
+          ${./config/prompts}/executor.md
+        grep -F 'gh api repos/{owner}/{repo}/issues/<target>/sub_issues --paginate' \
+          ${./config/prompts}/executor.md
+        grep -F 'and the exact `checkCommand` runs on the integration branch after every merge' \
+          ${./config/prompts}/executor.md
+        grep -F 'at most one merge in flight' \
+          ${./config/prompts}/executor.md
+        grep -F 'git reset --hard <pre-merge-sha>' \
+          ${./config/prompts}/executor.md
+        grep -F 'perform the closing steps exactly once' \
+          ${./config/prompts}/executor.md
+        grep -F 'every ticket passes its own standards review, executor-run check, and spec review before it may merge' \
+          ${./config/prompts}/executor.md
+        grep -F 'No end-of-run review of the integration branch exists' \
+          ${./config/prompts}/executor.md
+        grep -F 'relaxes the single-writer-across-session rule of `/supervise` (which stays unchanged) to **one writer per worktree**' \
+          ${./config/prompts}/executor.md
+        grep -F 'PARALLEL_WIDTH = 3' \
+          ${./config/prompts}/executor.md
+        grep -F '/tmp/executor/<repo-slug>/<target>/state.json' \
+          ${./config/prompts}/executor.md
         ! grep -RE '^(model|thinking|chain|loop|subagent|deterministic):' ${./config/prompts}
         test "$(grep -RE '^skill: writing-for-agents$' ${./config/prompts} | wc -l)" -eq 1
         test ! -e ${./config/prompts}/setup-drain-agents.md
