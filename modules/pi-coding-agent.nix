@@ -21,7 +21,7 @@ let
     )
   );
   grillingStopInstruction = "Stop asking questions when we reach a shared understanding and big decision was already made, because relatively smaller decisions would automatically derive.";
-  toTicketsSeamInstruction = "Fleet addition: every implementation ticket is at most one testable seam — one behavior provable by a single focused test or runnable check. Split tickets larger than that during slicing. When a ticket grows beyond one seam during implementation or review, never grow its scope: carve the overflow into a new ticket. That new ticket blocks this one only when this ticket genuinely cannot be finished without it; otherwise leave the new ticket independent with no blocking edge.";
+  toTicketsGranularityInstruction = "A ticket carries exactly ONE acceptance criterion — one behavior provable by a single focused test or runnable check. If a draft lists multiple checkable criteria, split it during slicing; the first ticket may carry the shared setup the others block on. When a ticket grows beyond one criterion during implementation or review, never grow its scope: carve the overflow into a new ticket — blocking this one only when it genuinely cannot finish without it, otherwise independent. Every ticket stays vertical: green and demoable alone, never layer-only. Chain tickets only on genuine interface or data dependency, never for ordering convenience. A criterion whose evidence needs human eyes, external systems, or secrets is not an agent ticket — route it ready-for-human at slicing time.";
   appendMattSkillInstruction =
     name: source: instruction:
     pkgs.runCommand "mattpocock-skill-${name}" { } ''
@@ -62,9 +62,11 @@ let
   patchedMattSkills = mattSkills // {
     # ponytail: v1.2 grilling uses frontier rounds; keep local stop patch disabled.
     # grilling = appendMattSkillInstruction "grilling" mattSkills.grilling grillingStopInstruction;
-    # Fleet rule: implementation tickets are capped at one testable seam; overflow
-    # becomes a new ticket, blocking only when it truly gates this ticket.
-    to-tickets = appendMattSkillInstruction "to-tickets" mattSkills.to-tickets toTicketsSeamInstruction;
+    # Granularity cap: one acceptance criterion per ticket; overflow becomes a
+    # new ticket, blocking only when it truly gates this ticket.
+    to-tickets =
+      appendMattSkillInstruction "to-tickets" mattSkills.to-tickets
+        toTicketsGranularityInstruction;
   };
   defaultModels = builtins.fromJSON (builtins.readFile ../config/models.json);
   mcpPlugin = cfg.plugins.pi-mcp-adapter;
