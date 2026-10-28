@@ -22,6 +22,8 @@ let
   );
   grillingStopInstruction = "Stop asking questions when we reach a shared understanding and big decision was already made, because relatively smaller decisions would automatically derive.";
   toTicketsGranularityInstruction = "A ticket carries exactly ONE acceptance criterion — one behavior provable by a single focused test or runnable check. If a draft lists multiple checkable criteria, split it during slicing; the first ticket may carry the shared setup the others block on. When a ticket grows beyond one criterion during implementation or review, never grow its scope: carve the overflow into a new ticket — blocking this one only when it genuinely cannot finish without it, otherwise independent. Every ticket stays vertical: green and demoable alone, never layer-only. Chain tickets only on genuine interface or data dependency, never for ordering convenience. A criterion whose evidence needs human eyes, external systems, or secrets is not an agent ticket — route it ready-for-human at slicing time.";
+  wayfinderIntegrationBranchInstruction = "When the map is created, also create a LOCAL branch integration/<slug-of-map-title> (slug: lowercase, words joined by -, short) from origin/<default-branch> with git branch --no-track integration/<slug> origin/<default-branch>. When the map is published as a ticket, publish that branch with an explicit refspec: git push origin integration/<slug>:integration/<slug> (never a bare git push). Mention the branch name in the map issue body.";
+  toSpecIntegrationBranchInstruction = "If the source map already names an integration branch, mention that same branch in the spec issue body and create nothing. Otherwise create integration/<slug-of-spec-title> (slug: lowercase, words joined by -, short) locally from origin/<default-branch> with git branch --no-track integration/<slug> origin/<default-branch>, and mention it in the spec issue body. Never push with a bare git push; use an explicit refspec integration/<slug>:integration/<slug>.";
   appendMattSkillInstruction =
     name: source: instruction:
     pkgs.runCommand "mattpocock-skill-${name}" { } ''
@@ -67,6 +69,13 @@ let
     to-tickets =
       appendMattSkillInstruction "to-tickets" mattSkills.to-tickets
         toTicketsGranularityInstruction;
+    # Integration branch is planned at map/spec time; the executor reuses it.
+    wayfinder =
+      appendMattSkillInstruction "wayfinder" mattSkills.wayfinder
+        wayfinderIntegrationBranchInstruction;
+    to-spec =
+      appendMattSkillInstruction "to-spec" mattSkills.to-spec
+        toSpecIntegrationBranchInstruction;
   };
   planningPrompts = pkgs.symlinkJoin {
     name = "pi-planning-prompts";

@@ -891,6 +891,13 @@ in
     assert pkgs.lib.hasInfix "genuinely cannot finish without it" toTicketsSkillMd;
     assert pkgs.lib.hasInfix "never layer-only" toTicketsSkillMd;
     assert pkgs.lib.hasInfix "route it ready-for-human at slicing time" toTicketsSkillMd;
+    # wayfinder and to-spec carry the integration-branch patch.
+    assert pkgs.lib.hasInfix "git push origin integration/<slug>:integration/<slug>" (
+      builtins.readFile (default.config.programs.pi-coding-agent.skills.wayfinder + "/SKILL.md")
+    );
+    assert pkgs.lib.hasInfix "mention that same branch in the spec issue body" (
+      builtins.readFile (default.config.programs.pi-coding-agent.skills.to-spec + "/SKILL.md")
+    );
     # ponytail: assert required/excluded skills only; upstream additions must not block input updates.
     assert !(default.config.programs.pi-coding-agent.skills ? tuxedo-todo);
     assert !(default.config.programs.pi-coding-agent.skills ? design-an-interface);
@@ -2463,7 +2470,7 @@ in
           ${./config/prompts}/executor.md
         grep -F 'PARALLEL_WIDTH = 3` tickets' \
           ${./config/prompts}/executor.md
-        grep -F 'gh pr list --head executor/<target>-integration' \
+        grep -F 'gh pr list --head integration/<slug>' \
           ${./config/prompts}/executor.md
         grep -F 'commit-or-discard' \
           ${./config/prompts}/executor.md
@@ -2517,15 +2524,20 @@ in
           ${./config/prompts}/executor.md
         grep -F '(open, `ready-for-agent`, no assignee, none of `needs-info` / `ready-for-human` / `wontfix`, no open native blockers)' \
           ${./config/prompts}/executor.md
-        grep -F 'git worktree add --no-track /tmp/executor/<repo-slug>/<target>/integration -b executor/<target>-integration origin/<default-branch>' \
+        grep -F 'git branch --no-track integration/<slug> origin/<default-branch>' \
           ${./config/prompts}/executor.md
         grep -F '`--no-track` is mandatory' \
           ${./config/prompts}/executor.md
+        grep -F 'git worktree add /tmp/executor/<repo-slug>/<target>/integration integration/<slug>' \
+          ${./config/prompts}/executor.md
+        grep -F 'never rename it later' \
+          ${./config/prompts}/executor.md
+        if grep -qF 'executor/<target>-integration' ${./config/prompts}/executor.md; then exit 1; fi
         grep -F 'gh repo view --json defaultBranchRef --jq .defaultBranchRef.name' \
           ${./config/prompts}/executor.md
-        grep -F 'git -C <integration-worktree> push -u origin executor/<target>-integration:executor/<target>-integration' \
+        grep -F 'git -C <integration-worktree> push -u origin integration/<slug>:integration/<slug>' \
           ${./config/prompts}/executor.md
-        grep -F 'gh pr create --base <default-branch> --head executor/<target>-integration' \
+        grep -F 'gh pr create --base <default-branch> --head integration/<slug>' \
           ${./config/prompts}/executor.md
         grep -F 'The executor never pushes to `<default-branch>` and never runs a bare `git push`' \
           ${./config/prompts}/executor.md
