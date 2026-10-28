@@ -1510,7 +1510,7 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 
 	/** Queue proof for a chosen target, then the READY instruction (shared by the
 	 *  explicit-ref path and the watchdog_target hand-back). */
-	const prepProof = async (target: number, ctx: ExtensionContext): Promise<string | null> => {
+	const prepProof = async (target: number, ctx: ExtensionContext, sendInstruction: boolean): Promise<string | null> => {
 		const q = await runQueueCommand(ctx);
 		if (closed) return "session is shutting down"; // M1: session_shutdown fired while the queue command was running.
 		const refusal = armRefusal(q.pickable, q.ok);
@@ -1524,7 +1524,9 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 		prepInflight = q.inflight;
 		audit("prep-proof", { target, pickable: q.pickable, inflight: q.inflight });
 		notify(`drain-watchdog PREP: target #${target}, ${q.pickable} pickable, ${q.inflight} inflight. Waiting for the model's readiness proof (READY) then your confirmation.`, "info");
-		pi.sendUserMessage(PREP_INSTRUCTION(target, q.pickable));
+		// From a tool call the agent is mid-turn and sendUserMessage throws "Agent is
+		// already processing"; the tool path returns the instruction as its result.
+		if (sendInstruction) pi.sendUserMessage(PREP_INSTRUCTION(target, q.pickable));
 		return null;
 	};
 
@@ -1562,7 +1564,7 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 			pi.sendUserMessage(DISCOVER_INSTRUCTION(ref));
 			return;
 		}
-		await prepProof(resolution.number, ctx);
+		await prepProof(resolution.number, ctx, true);
 	};
 
 	const runWatchdogCommand = async (rawArgs: string, ctx: ExtensionCommandContext) => {
@@ -1753,9 +1755,9 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 			}
 			discovering = false; // one pick per request; a refused proof needs a fresh /watchdog.
 			audit("prep-target", { target: issue });
-			const error = await prepProof(issue, toolCtx);
+			const error = await prepProof(issue, toolCtx, false);
 			if (error !== null) return { content: [{ type: "text", text: `watchdog_target: ${error}` }], isError: true } as AgentToolResult;
-			return { content: [{ type: "text", text: `Target #${issue} accepted. PREP continues: prove readiness and end a turn with READY.` }], details: { issue } };
+			return { content: [{ type: "text", text: `Target #${issue} accepted.\n${PREP_INSTRUCTION(issue, prepPickable)}` }], details: { issue } };
 		},
 	});
 

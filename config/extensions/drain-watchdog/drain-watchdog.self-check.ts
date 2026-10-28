@@ -2201,8 +2201,10 @@ await withNoAmbientSubagent(() =>
 			const ok = await h.tools.watchdog_target!.execute("d1", { issue: 38 }, undefined, undefined, h.ctx);
 			assert(!ok.isError, "the pick is accepted while discovery is pending");
 			assert(h.audits.some((a) => a.type === "prep-proof" && a.data.target === 38), "the chosen target gets the queue proof");
-			assert.equal(h.userMessages.length, 2, "PREP continues with the READY instruction");
-			assert(h.userMessages[1].includes("#38") && h.userMessages[1].includes("READY"));
+			// The tool runs mid-turn: sendUserMessage would throw "Agent is already
+			// processing", so the READY instruction rides the tool result instead.
+			assert.equal(h.userMessages.length, 1, "the tool path sends no user message");
+			assert(ok.content[0].text.includes("#38") && ok.content[0].text.includes("READY"), "the READY instruction is the tool result");
 
 			const again = await h.tools.watchdog_target!.execute("d2", { issue: 40 }, undefined, undefined, h.ctx);
 			assert(again.isError, "one pick per discovery request");
