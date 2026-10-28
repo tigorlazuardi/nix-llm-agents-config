@@ -2299,9 +2299,9 @@ in
           ${./config/prompts}/executor.md
         grep -F '(.assignees|length)==0 and .issue_dependencies_summary.blocked_by==0' \
           ${./config/prompts}/executor.md
-        grep -F 'UNION the state-recorded SPLIT children, each candidate re-verified live' \
+        grep -F 'UNION the state-recorded SPLIT children UNION the state-recorded `SPLIT_WAITING` origins, each candidate re-verified live' \
           ${./config/prompts}/executor.md
-        grep -F 'MINUS every ticket the state file already holds as claimed, live, terminal, or `SPLIT_WAITING`' \
+        grep -F 'MINUS every ticket the state file already holds as claimed, live, or terminal' \
           ${./config/prompts}/executor.md
         grep -F 'and the exact `checkCommand` runs on the integration branch after every merge' \
           ${./config/prompts}/executor.md
