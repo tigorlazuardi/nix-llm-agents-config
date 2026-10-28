@@ -5,7 +5,7 @@
  * network, no clock, no subprocesses, no pi-API calls at runtime — this module
  * is the single pure seam the self-check asserts against (plans/drain-watchdog
  * flow.html sections 0-6, 10). The default export at the bottom is the pi
- * extension factory: the `/watchdog` command, the drain_handoff/drain_stop/watchdog_target
+ * extension factory: the `/watchdog` command, the watchdog_handoff/watchdog_stop/watchdog_target
  * model tools (main sessions only), the ARMED tick loop, nudges via steer,
  * state/audit session entries, and every timer. Timers are created only
  * on arm (never in the factory body), and child sessions never reach any of it.
@@ -24,10 +24,10 @@
  *    or unreadable file is an audited anomaly, never a pause (plain DONE stays plain).
  *
  * `progress` is dispatched by the live loop for child completion steers, queue
- * fingerprint changes, and recorded drain_handoffs (a handoff is progress by
+ * fingerprint changes, and recorded watchdog_handoffs (a handoff is progress by
  * design, flow.html section 5 — the breaker stays cold). Only the harness
- * decides completion: `llmDone` is accepted from FINALIZING alone (flow.html
- * sections 3 and 10).
+ * decides completion: `llmDone` (watchdog_done) is accepted from ARMED or
+ * FINALIZING only when the live queue proves nothing is left (`doneRefusal`).
  *
  * Imports `isRetryableAssistantError` from @earendil-works/pi-ai, so the module
  * needs pi-ai resolvable (checks.nix symlinks it from the pi runtime into the
@@ -90,6 +90,29 @@ export type TickObservation = {
 	hasClosingSteps: boolean;
 };
 
+/** What the effect layer saw when the model called watchdog_done. */
+export type DoneObservation = {
+	queueOk: boolean;
+	pickable: number;
+	inflight: number;
+	childCount: number;
+	hasClosingSteps: boolean;
+};
+
+/**
+ * Why a watchdog_done promise must be refused, or null when the run is really
+ * finished. The model only supplies the claim; the live queue, the child count
+ * and the executor's closing flag decide.
+ */
+export function doneRefusal(o: DoneObservation): string | null {
+	if (!o.queueOk) return "the drain queue could not be read; cannot verify that the run is finished";
+	if (o.pickable > 0) return `${o.pickable} pickable ticket(s) remain in the drain queue; keep working or hand them off with watchdog_handoff`;
+	if (o.inflight > 0) return `${o.inflight} ticket(s) are still in flight; finish or release them first`;
+	if (o.childCount > 0) return `${o.childCount} child session(s) are still running`;
+	if (o.hasClosingSteps) return "closing steps are not done yet (closingStepsDone is false in the executor state.json); run them, set closingStepsDone: true, then call watchdog_done again";
+	return null;
+}
+
 export type DrainAction =
 	| { type: "wait" }
 	| { type: "nudge" }
@@ -109,7 +132,9 @@ export type DrainEvent =
 	| { type: "providerError"; kind: ProviderErrorKind; message?: string }
 	| { type: "probeOk" }
 	| { type: "llmStop"; reason?: string }
-	| { type: "llmDone" }
+	// watchdog_done: the model's "promise". Carries the effect layer's live
+	// observation; the core accepts it only when `doneRefusal` finds nothing left.
+	| { type: "llmDone"; obs: DoneObservation }
 	| { type: "progress" };
 
 export type DrainTransition = {
@@ -417,21 +442,21 @@ export function handoffExit(kind: HandoffKind): { label: string } {
 }
 
 /**
- * drain_handoff/drain_stop availability gate. The tools exist only in the
+ * watchdog_handoff/watchdog_stop availability gate. The tools exist only in the
  * main-session factory, but a registered tool must still refuse when the
  * factory somehow runs in a child context (children can NEVER invoke them,
  * flow.html section 5) and when no watchdog run is live (nothing to hand off
  * against, nothing to pause). Smallest sound no-active-run behavior: an error
- * result — drain_handoff would otherwise look recorded when it did nothing,
- * and drain_stop only matters while a run is live.
+ * result — watchdog_handoff would otherwise look recorded when it did nothing,
+ * and watchdog_stop only matters while a run is live.
  */
 export type ToolGate =
 	| { ok: true }
 	| { ok: false; error: string };
 
-export function drainToolGate(kind: "handoff" | "stop", childSession: boolean, phase: DrainPhase): ToolGate {
-	if (childSession) return { ok: false, error: `drain_${kind} is main-session only; child sessions cannot invoke it` };
-	if (phase === "off" || phase === "done") return { ok: false, error: `drain_${kind} ignored: no active watchdog run (phase ${phase}); arm one with /watchdog first` };
+export function watchdogToolGate(kind: "handoff" | "stop" | "done", childSession: boolean, phase: DrainPhase): ToolGate {
+	if (childSession) return { ok: false, error: `watchdog_${kind} is main-session only; child sessions cannot invoke it` };
+	if (phase === "off" || phase === "done") return { ok: false, error: `watchdog_${kind} ignored: no active watchdog run (phase ${phase}); arm one with /watchdog first` };
 	return { ok: true };
 }
 
@@ -668,13 +693,14 @@ export function buildNudgeText(p: { target: number | null; pickable: number }): 
 	return [
 		`drain-watchdog: unattended run on ${target}; you are idle with ${p.pickable} pickable ticket(s) in the drain queue. Do not ask the user — continue per the drain flow now: run the next pass on the next pickable ticket.`,
 		"Ambiguous or product-question tickets, and low-tolerance work (auth/authz, secrets/credentials, DB migrations, public API contracts, money/billing, data deletion, irreversible operations), must leave the queue through the tracker's exit labels (needs-info / ready-for-human / wontfix) instead of waiting.",
+		"When no pickable ticket is left and nothing is in flight, finish the closing steps if any, then call watchdog_done: the watchdog verifies the queue and completes the run at once.",
 	].join("\n");
 }
 
 
 /** Closing nudge of a finalizing flow (flow.html section 10; one per successful delivery). */
 export const FINALIZE_NUDGE_TEXT =
-	"drain-watchdog: frontier is empty. Finish the closing steps (final review, integration branch/PR, cleanup) and stop; do not open new work.";
+	"drain-watchdog: frontier is empty. Finish the closing steps (final review, integration branch/PR, cleanup), set closingStepsDone: true, then call watchdog_done; do not open new work.";
 
 // --- Operator UI (persistent widget + command completion) --------------------
 
@@ -717,6 +743,8 @@ export type WidgetView = {
 	nudgeCount: number;
 	noProgressStreak: number;
 	idleMs: number;
+	/** Time until the watchdog may nudge (idle grace and cooldown); 0 = due at the next tick. */
+	nudgeInMs?: number;
 	pausedReason: string | null;
 	backoffKind: "transient" | "quota" | null;
 };
@@ -768,7 +796,7 @@ export function watchdogWidgetLines(v: WidgetView): string[] | null {
 	const ref = v.target === null ? "(target belum dipilih)" : `${kind === null ? "" : `${kind} `}#${v.target}${title}`;
 	if (v.phase === "paused") body = `${v.pausedReason ?? "alasan tidak tercatat"}`;
 	else if (v.phase === "off" || v.phase === "done") body = `${v.pickable} pickable terakhir`;
-	else body = `${v.pickable} pickable \u00b7 ${v.children} jalan \u00b7 nudge ${v.nudgeCount}/${HARD_CAP} \u00b7 idle ${clock(v.idleMs)} \u00b7 breaker ${v.noProgressStreak}/${BREAKER_K}`;
+	else body = `${v.pickable} pickable \u00b7 ${v.children} jalan \u00b7 nudge ${v.nudgeCount}/${HARD_CAP} \u00b7 idle ${clock(v.idleMs)} \u00b7 ${v.nudgeInMs === undefined ? "" : v.nudgeInMs > 0 ? `nudge dalam ${clock(v.nudgeInMs)} \u00b7 ` : "nudge di tick berikut \u00b7 "}breaker ${v.noProgressStreak}/${BREAKER_K}`;
 	return [
 		`${paint(color, "\u250c")} watchdog ${paint("bold", paint(color, head))} ${paint(color, "\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500")}`,
 		`${paint(color, "\u2502")} ${ref}`,
@@ -1007,11 +1035,11 @@ const PAUSE_REASON = {
 	hardCap: "hard nudge cap reached; run paused",
 	outage: "provider outage budget exhausted",
 	abort: "aborted (Esc/abort)",
-	llmStop: "drain_stop",
+	llmStop: "watchdog_stop",
 	finalize: "finalization not confirmed after the closing nudge; run paused",
 } as const;
 
-/** drain_stop's own reason text overrides the generic llmStop reason when given. */
+/** watchdog_stop's own reason text overrides the generic llmStop reason when given. */
 const stopReason = (reason: string | undefined): string =>
 	reason === undefined || reason.trim() === "" ? PAUSE_REASON.llmStop : reason.trim();
 
@@ -1026,10 +1054,11 @@ const toPaused = (state: DrainState, reason: string): DrainTransition => ({
  * no-op enforced once at the top of `transition`. OFF, PAUSED and DONE own
  * almost nothing on purpose: only `arm` (from OFF) and `resume` (from PAUSED)
  * leave them, and DONE is terminal (a new run starts from INITIAL_STATE).
- * `llmDone` is FINALIZING-only: the model cannot declare the run finished from
- * ARMED/BACKOFF (flow.html sections 3, 10); there it is a no-op, which keeps the
- * run going (safer than pausing an unattended run on a model's early claim) and
- * lets the #31 tool report the refusal back to the model.
+ * `llmDone` (watchdog_done) is accepted from ARMED and FINALIZING but only with
+ * a live observation that `doneRefusal` clears (empty queue, nothing in flight,
+ * no children, no open closing steps); a refused claim is a no-op that keeps the
+ * run going, and the tool reports the reason back to the model. BACKOFF never
+ * accepts it: a provider outage is not a finished run.
  */
 const EVENT_PHASES: Record<DrainEvent["type"], readonly DrainPhase[]> = {
 	arm: ["off"],
@@ -1040,7 +1069,7 @@ const EVENT_PHASES: Record<DrainEvent["type"], readonly DrainPhase[]> = {
 	providerError: ["armed", "backoff", "finalizing"],
 	probeOk: ["backoff"],
 	llmStop: ["armed", "backoff", "finalizing"],
-	llmDone: ["finalizing"],
+	llmDone: ["armed", "finalizing"],
 	progress: ["armed", "backoff", "finalizing"],
 };
 
@@ -1219,11 +1248,15 @@ export function transition(state: DrainState, event: DrainEvent, now: number, co
 			// reach the breaker/hard cap through a provider blip.
 			return stay({ ...state, phase: "armed", backoffKind: null, backoffRung: 0, backoffStartMs: null });
 		case "llmStop":
-			// drain_stop is an explicit pause: the model named environment-level breakage,
+			// watchdog_stop is an explicit pause: the model named environment-level breakage,
 			// and its reason travels into pausedReason/audit/notify verbatim.
 			return toPaused(state, stopReason(event.reason));
 		case "llmDone":
-			return stay({ ...state, phase: "done", pausedReason: null });
+			// Promise path: verified against the live observation, never taken on faith.
+			// Refused -> no-op (the tool reports the reason). Accepted -> the same DONE
+			// action as the tick path, so timers stop and the final report is audited.
+			if (doneRefusal(event.obs) !== null) return stay(state);
+			return { state: { ...state, phase: "done", pausedReason: null }, action: { type: "done", leftovers: false }, refusal: null };
 		// L3: `breaker`/`hardCap` DrainEvents (distinct from the tick-internal
 		// noProgressStreak/nudgeCount gates above, which still use PAUSE_REASON.breaker/
 		// hardCap) had no dispatcher anywhere in this file — removed per their own
@@ -1295,6 +1328,7 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 	let timer: Timer | null = null;
 	let probeTimer: Timer | null = null;
 	let tickInFlight = false;
+	let widgetTimer: Timer | null = null;
 	let uiPromptDepth = 0;
 	let childCount = 0;
 	let probeInFlight = false;
@@ -1323,6 +1357,10 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 		if (timer !== null) {
 			clearInterval(timer);
 			timer = null;
+		}
+		if (widgetTimer !== null) {
+			clearInterval(widgetTimer);
+			widgetTimer = null;
 		}
 	};
 	const clearProbeTimer = () => {
@@ -1368,6 +1406,8 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 		timer = setInterval(() => {
 			void tick();
 		}, tickMs);
+		// Countdown to the next nudge moves per second; the tick only runs per minute.
+		widgetTimer = setInterval(refreshWidget, WIDGET_REFRESH_MS);
 	};
 
 	/**
@@ -1480,6 +1520,7 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 	};
 
 	const WIDGET_KEY = "drain-watchdog";
+	const WIDGET_REFRESH_MS = 1000;
 
 	/** Redraws the persistent widget from live state; cheap, idempotent, never throws into callers. */
 	const refreshWidget = () => {
@@ -1498,6 +1539,7 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 				nudgeCount: state.nudgeCount,
 				noProgressStreak: state.noProgressStreak,
 				idleMs: Date.now() - idleSinceMs,
+				nudgeInMs: Math.max(0, idleGraceMs - (Date.now() - idleSinceMs), state.nextAllowedAt - Date.now()),
 				pausedReason: state.pausedReason,
 				backoffKind: state.backoffKind,
 			});
@@ -1794,7 +1836,7 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 	type HandoffParams = { issue: number; kind: HandoffKind; reason: string };
 
 	/**
-	 * drain_handoff effect: pre-read labels, label swap, reason comment, then feed
+	 * watchdog_handoff effect: pre-read labels, label swap, reason comment, then feed
 	 * the core a progress event (a handoff is progress by design, flow.html
 	 * section 5 — the breaker stays cold) and persist+audit. Order is label swap
 	 * then comment: the only possible partial state is swapped-but-uncommented,
@@ -1828,7 +1870,7 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 			// Partial state, reported honestly: the ticket already left the queue
 			// (label swapped) but carries no reason comment yet.
 			throw new Error(
-				`HANDOFF PARTIAL: label ${label} was applied to #${params.issue} but the reason comment failed (exit ${comment.code}): ${comment.stderr.trim() || comment.stdout.trim()}. The ticket is out of the pickable queue; add the comment manually or retry drain_handoff.`,
+				`HANDOFF PARTIAL: label ${label} was applied to #${params.issue} but the reason comment failed (exit ${comment.code}): ${comment.stderr.trim() || comment.stdout.trim()}. The ticket is out of the pickable queue; add the comment manually or retry watchdog_handoff.`,
 			);
 		}
 
@@ -1839,27 +1881,27 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 		return { text: handoffResultText(params.issue, label) };
 	};
 
-	/** drain_stop effect: pause with the model's reason; the core owns resume. */
+	/** watchdog_stop effect: pause with the model's reason; the core owns resume. */
 	const runStop = (reason: string) => {
 		const trimmed = reason.trim();
 		const stop = transition(state, { type: "llmStop", reason: trimmed }, Date.now());
 		if (stop.state.phase === state.phase && stop.action.type === "wait") {
 			// Gate already covered off/done; this is the residual no-op guard (e.g. a
 			// concurrent pause landed between the gate and here).
-			return { text: `drain_stop ignored: no active watchdog run (phase ${state.phase})` };
+			return { text: `watchdog_stop ignored: no active watchdog run (phase ${state.phase})` };
 		}
-		apply(stop, "drain_stop");
+		apply(stop, "watchdog_stop");
 		return { text: `Watchdog paused: ${stop.state.pausedReason ?? PAUSE_REASON.llmStop}. /watchdog resume when ready.` };
 	};
 
 	pi.registerTool({
-		name: "drain_handoff",
-		label: "Drain Handoff",
+		name: "watchdog_handoff",
+		label: "Watchdog Handoff",
 		description:
 			"Remove a drain-queue ticket by the tracker's exit path: swaps ready-for-agent for the kind's exit label, posts the reason as a comment, and records watchdog progress. Main session only. Kinds: needs-info (ambiguous/missing spec), human (needs a human decision/action, ESCALATE, or low-tolerance work: auth, secrets, migrations, public API, money, data deletion), wontfix (will not be done).",
 		promptSnippet: "Exit a drain-queue ticket to its tracker exit label with an audited reason comment (handoff counts as watchdog progress)",
 		promptGuidelines: [
-			"Use drain_handoff instead of raw gh edits so label and reason comment stay consistent; hand low-tolerance work (auth/authz, secrets/credentials, DB migrations, public API contracts, money/billing, data deletion, irreversible operations) through kind human BEFORE claiming the ticket.",
+			"Use watchdog_handoff instead of raw gh edits so label and reason comment stay consistent; hand low-tolerance work (auth/authz, secrets/credentials, DB migrations, public API contracts, money/billing, data deletion, irreversible operations) through kind human BEFORE claiming the ticket.",
 		],
 		parameters: Type.Object({
 			issue: Type.Integer({ description: "Issue number to hand off" }),
@@ -1867,13 +1909,13 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 			reason: Type.String({ description: "One-paragraph reason posted as the issue comment" }),
 		}),
 		async execute(_id, params, _signal, _update, toolCtx) {
-			const gate = drainToolGate("handoff", isChildSession(process.env), state.phase);
+			const gate = watchdogToolGate("handoff", isChildSession(process.env), state.phase);
 			if (!gate.ok) return { content: [{ type: "text", text: gate.error }], isError: true } as AgentToolResult;
-			if (closed) return { content: [{ type: "text", text: "drain_handoff ignored: session is shutting down" }], isError: true } as AgentToolResult;
+			if (closed) return { content: [{ type: "text", text: "watchdog_handoff ignored: session is shutting down" }], isError: true } as AgentToolResult;
 			// Validate the kind at the boundary (TypeBox statics are loose on older
 			// typebox snapshots): fail closed instead of trusting the schema cast.
 			if (params.kind !== "needs-info" && params.kind !== "human" && params.kind !== "wontfix") {
-				return { content: [{ type: "text", text: `drain_handoff: unknown kind ${JSON.stringify(params.kind)} (use "needs-info", "human", or "wontfix")` }], isError: true } as AgentToolResult;
+				return { content: [{ type: "text", text: `watchdog_handoff: unknown kind ${JSON.stringify(params.kind)} (use "needs-info", "human", or "wontfix")` }], isError: true } as AgentToolResult;
 			}
 			const { issue, kind, reason } = params; // narrowed consts for the runner
 			try {
@@ -1881,29 +1923,78 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 				if (closed) return { content: [{ type: "text", text: `HANDOFF PARTIAL: GitHub was updated for #${issue} but the watchdog state was not recorded — the session shut down mid-handoff.` }], isError: true } as AgentToolResult;
 				return { content: [{ type: "text", text }], details: { issue, kind } };
 			} catch (e) {
-				return { content: [{ type: "text", text: `drain_handoff failed: ${String(e)}` }], isError: true } as AgentToolResult;
+				return { content: [{ type: "text", text: `watchdog_handoff failed: ${String(e)}` }], isError: true } as AgentToolResult;
+			}
+		},
+	});
+
+	/**
+	 * watchdog_done effect: the model's promise that nothing is left. The live
+	 * queue, child count and executor closing flag are re-read here and the core
+	 * decides; a refused promise changes nothing and the reason goes back to the
+	 * model. Accepted -> the same DONE action as the tick path, no idle wait.
+	 */
+	const runDone = async (toolCtx: ExtensionToolContext): Promise<{ text: string; ok: boolean }> => {
+		const q = await runQueueCommand(toolCtx);
+		if (closed) return { text: "watchdog_done ignored: session is shutting down", ok: false };
+		const closing = readExecutorClosingSignal(toolCtx);
+		const obs: DoneObservation = { queueOk: q.ok, pickable: q.pickable, inflight: q.inflight, childCount, hasClosingSteps: closing.hasClosingSteps };
+		lastQueue = { pickable: q.pickable, inflight: q.inflight };
+		const refusal = doneRefusal(obs);
+		if (refusal !== null) {
+			audit("done-refused", { reason: refusal, ...obs });
+			refreshWidget();
+			return { text: `watchdog_done refused: ${refusal}.`, ok: false };
+		}
+		if (closing.anomalies.length > 0) audit("closing-signal-anomaly", { paths: closing.anomalies });
+		apply(transition(state, { type: "llmDone", obs }, Date.now()), "watchdog_done");
+		return { text: "Run complete: the drain queue is empty and nothing is in flight. The watchdog is DONE; write the final report now.", ok: true };
+	};
+
+	pi.registerTool({
+		name: "watchdog_done",
+		label: "Watchdog Done",
+		description:
+			"Declare the unattended drain run finished. The watchdog re-reads the drain queue, in-flight tickets, running children and the executor's closingStepsDone flag; only when nothing is left does it complete the run (DONE) immediately, without waiting for idle time. Otherwise it refuses and says what remains. Main session only.",
+		promptSnippet: "Declare the drain run finished once the queue is empty; the watchdog verifies and completes it",
+		promptGuidelines: [
+			"Call watchdog_done when no pickable ticket is left, nothing is in flight, and any closing steps have run; the watchdog verifies and refuses a premature call.",
+		],
+		parameters: Type.Object({}),
+		async execute(_id, _params, _signal, _update, toolCtx) {
+			const gate = watchdogToolGate("done", isChildSession(process.env), state.phase);
+			if (!gate.ok) return { content: [{ type: "text", text: gate.error }], isError: true } as AgentToolResult;
+			if (closed) return { content: [{ type: "text", text: "watchdog_done ignored: session is shutting down" }], isError: true } as AgentToolResult;
+			if (state.phase !== "armed" && state.phase !== "finalizing") {
+				return { content: [{ type: "text", text: `watchdog_done ignored: phase ${state.phase} cannot complete (only armed or finalizing)` }], isError: true } as AgentToolResult;
+			}
+			try {
+				const { text, ok } = await runDone(toolCtx);
+				return { content: [{ type: "text", text }], isError: !ok, details: { phase: state.phase } } as AgentToolResult;
+			} catch (e) {
+				return { content: [{ type: "text", text: `watchdog_done failed: ${String(e)}` }], isError: true } as AgentToolResult;
 			}
 		},
 	});
 
 	pi.registerTool({
-		name: "drain_stop",
-		label: "Drain Stop",
+		name: "watchdog_stop",
+		label: "Watchdog Stop",
 		description:
 			"Pause the unattended drain run for environment-level breakage (missing gh auth, dirty repo, disk full) — not for single-ticket problems. Records the reason in the audit trail; /watchdog resume continues afterwards. Main session only.",
 		promptSnippet: "Pause the drain watchdog run for environment-level breakage, reason audited",
 		promptGuidelines: [
-			"Use drain_stop only for environment-level breakage (gh auth gone, repo broken, disk full); hand single-ticket problems through drain_handoff instead.",
+			"Use watchdog_stop only for environment-level breakage (gh auth gone, repo broken, disk full); hand single-ticket problems through watchdog_handoff instead.",
 		],
 		parameters: Type.Object({
 			reason: Type.String({ description: "What broke in the environment, for the audit trail and the operator" }),
 		}),
 		async execute(_id, params, _signal, _update, _toolCtx) {
-			const gate = drainToolGate("stop", isChildSession(process.env), state.phase);
+			const gate = watchdogToolGate("stop", isChildSession(process.env), state.phase);
 			if (!gate.ok) return { content: [{ type: "text", text: gate.error }], isError: true } as AgentToolResult;
-			if (closed) return { content: [{ type: "text", text: "drain_stop ignored: session is shutting down" }], isError: true } as AgentToolResult;
+			if (closed) return { content: [{ type: "text", text: "watchdog_stop ignored: session is shutting down" }], isError: true } as AgentToolResult;
 			const { text } = runStop(params.reason);
-			if (closed) return { content: [{ type: "text", text: "drain_stop raced session shutdown; re-run it after restart (state is persisted)." }], isError: true } as AgentToolResult;
+			if (closed) return { content: [{ type: "text", text: "watchdog_stop raced session shutdown; re-run it after restart (state is persisted)." }], isError: true } as AgentToolResult;
 			return { content: [{ type: "text", text }], details: { pausedReason: state.pausedReason } };
 		},
 	});

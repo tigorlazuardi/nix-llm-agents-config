@@ -1327,7 +1327,7 @@ in
         piRuntime=${expectedPackage}/lib/node_modules/pi-monorepo
         ln -s "$piRuntime/node_modules/@earendil-works/pi-ai" drain-watchdog/node_modules/@earendil-works/pi-ai
         ln -s "$piRuntime" drain-watchdog/node_modules/@earendil-works/pi-coding-agent
-        # drain_handoff/drain_stop schemas (#31) use typebox directly, like dev-journal.
+        # watchdog_* tool schemas (#31) use typebox directly, like dev-journal.
         ln -s "$piRuntime/node_modules/typebox" drain-watchdog/node_modules/typebox
 
         # M5(c): `node --experimental-strip-types` below only erases type annotations; it
@@ -2347,7 +2347,7 @@ in
           ${./config/prompts}/executor.md
         grep -F 'sends exactly one FINALIZING nudge' \
           ${./config/prompts}/executor.md
-        grep -F 'Finishing means setting `closingStepsDone: true` in `state.json`: the watchdog reads it on its next tick and completes the run as DONE with its final report' \
+        grep -F 'Finishing means setting `closingStepsDone: true` in `state.json` and then calling `watchdog_done`: the watchdog re-reads the queue and the flag and completes the run as DONE at once' \
           ${./config/prompts}/executor.md
         grep -F 'the watchdog pauses the run visibly ("finalization not confirmed") instead of nudging again' \
           ${./config/prompts}/executor.md
@@ -2374,8 +2374,9 @@ in
           echo 'executor.md must not contain: revisit this section when `hasClosingSteps` is wired' >&2
           exit 1
         fi
-        grep -F '`drain_stop` only pauses a run and is never used to complete one' \
+        grep -F '`watchdog_stop` only pauses a run and is never used to complete one' \
           ${./config/prompts}/executor.md
+        grep -F 'completion is `watchdog_done`' ${./config/prompts}/executor.md
         grep -F 'non-agent = a blocker lacking `ready-for-agent`' \
           ${./config/prompts}/executor.md
         grep -F 'issues/<n>/dependencies/blocked_by --jq' \

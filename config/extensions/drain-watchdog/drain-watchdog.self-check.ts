@@ -9,7 +9,7 @@
  * label mapping, the SPLIT predicate, and the arm refusal condition. Also
  * covers #30's live-loop helpers (env parsing, /watchdog argument grammar,
  * target resolution, queue block extraction, READY/error detection, state
- * restore), #31's drain_handoff/drain_stop tool seams (gate rules, label
+ * restore), #31's watchdog_handoff/watchdog_stop tool seams (gate rules, label
  * parsing, gh argv plan, result text) and the tools' harness-driven behavior
  * (happy path with captured argv, child/phase gating, llmStop pause+resume,
  * exec-failure consistency), plus the factory's child-vs-main registration
@@ -37,7 +37,8 @@ import {
 	TRANSIENT_OUTAGE_BUDGET_MS,
 	armRefusal,
 	classifyProviderError,
-	drainToolGate,
+	watchdogToolGate,
+	doneRefusal,
 	handoffExit,
 	handoffResultText,
 	isChildSession,
@@ -301,30 +302,44 @@ assert.equal(unknownBreak.state.noProgressStreak, BREAKER_K);
 const stopped = transition(armOK.state, { type: "llmStop" }, 40_000);
 assert.equal(stopped.state.phase, "paused");
 assert.equal(stopped.action.type, "pause");
-// #31: drain_stop's own reason travels into pausedReason; empty/missing keeps
+// #31: watchdog_stop's own reason travels into pausedReason; empty/missing keeps
 // the generic llmStop reason. The reason is NOT trimmed to emptiness silently.
-assert.equal(stopped.state.pausedReason, "drain_stop");
+assert.equal(stopped.state.pausedReason, "watchdog_stop");
 const stoppedWithReason = transition(armOK.state, { type: "llmStop", reason: "gh auth expired on the runner" }, 40_001);
 assert.equal(stoppedWithReason.state.pausedReason, "gh auth expired on the runner");
-assert.equal(transition(armOK.state, { type: "llmStop", reason: "   " }, 40_002).state.pausedReason, "drain_stop");
+assert.equal(transition(armOK.state, { type: "llmStop", reason: "   " }, 40_002).state.pausedReason, "watchdog_stop");
 // From BACKOFF and FINALIZING too (llmStop owners), with the reason kept.
 assert.equal(transition({ ...armed(), phase: "backoff", backoffKind: "transient" }, { type: "llmStop", reason: "disk full" }, 40_003).state.pausedReason, "disk full");
 assert.equal(transition({ ...armed(), phase: "finalizing" }, { type: "llmStop", reason: "repo dirty beyond repair" }, 40_004).state.pausedReason, "repo dirty beyond repair");
 // llmStop from PAUSED/OFF/DONE stays a no-op (EVENT_PHASES matrix covers it; spot-check).
 assert.equal(transition(pausedStateFor(), { type: "llmStop", reason: "x" }, 40_005).state.phase, "paused");
 
-const finisher = transition({ ...armed(), phase: "finalizing" }, { type: "llmDone" }, 41_000);
+const doneClear = { queueOk: true, pickable: 0, inflight: 0, childCount: 0, hasClosingSteps: false };
+const finisher = transition({ ...armed(), phase: "finalizing" }, { type: "llmDone", obs: doneClear }, 41_000);
 assert.equal(finisher.state.phase, "done");
-// The model cannot declare victory: llmDone from ARMED/BACKOFF is a no-op (flow.html
-// sections 3, 10; #27 story 9). Only FINALIZING accepts it.
+assert.deepEqual(finisher.action, { type: "done", leftovers: false }, "the promise path emits the same DONE action as the tick path");
+// watchdog_done (llmDone) is a verified promise: ARMED accepts it too, but only when
+// the live observation shows nothing left. The model's claim alone never completes.
 {
-	const early = transition(armOK.state, { type: "llmDone" }, 42_000);
-	assert.equal(early.state.phase, "armed");
-	assert.deepEqual(early.state, armOK.state);
-	assert.deepEqual(early.action, { type: "wait" });
+	const ok = transition(armOK.state, { type: "llmDone", obs: doneClear }, 42_000);
+	assert.equal(ok.state.phase, "done", "empty queue: ARMED completes at once, no idle wait");
+	assert.deepEqual(ok.action, { type: "done", leftovers: false });
+	for (const bad of [
+		{ ...doneClear, pickable: 1 },
+		{ ...doneClear, inflight: 1 },
+		{ ...doneClear, childCount: 1 },
+		{ ...doneClear, hasClosingSteps: true },
+		{ ...doneClear, queueOk: false },
+	]) {
+		const early = transition(armOK.state, { type: "llmDone", obs: bad }, 42_000);
+		assert.deepEqual(early.state, armOK.state, `refused promise changes nothing: ${JSON.stringify(bad)}`);
+		assert.deepEqual(early.action, { type: "wait" });
+		assert.notEqual(doneRefusal(bad), null);
+	}
+	assert.equal(doneRefusal(doneClear), null);
+	// BACKOFF never accepts it: a provider outage is not a finished run.
 	const bo = transition(armOK.state, { type: "providerError", kind: "transient" }, 42_001).state;
-	assert.equal(transition(bo, { type: "llmDone" }, 42_002).state.phase, "backoff");
-	assert.deepEqual(transition(bo, { type: "llmDone" }, 42_002).state, bo);
+	assert.deepEqual(transition(bo, { type: "llmDone", obs: doneClear }, 42_002).state, bo);
 	assert.equal(finisher.state.pausedReason, null);
 }
 // FINALIZING accepts the other model/harness events too (positive owners).
@@ -558,7 +573,7 @@ assert.equal(JSON.stringify(snapshot), before);
 		{ type: "providerError", kind: "unknown" },
 		{ type: "probeOk" },
 		{ type: "llmStop" },
-		{ type: "llmDone" },
+		{ type: "llmDone", obs: { queueOk: true, pickable: 0, inflight: 0, childCount: 0, hasClosingSteps: false } },
 		{ type: "progress" },
 	];
 	// Phases allowed to act per event; everything else must be a pure no-op.
@@ -571,7 +586,7 @@ assert.equal(JSON.stringify(snapshot), before);
 		providerError: ["armed", "backoff", "finalizing"],
 		probeOk: ["backoff"],
 		llmStop: ["armed", "backoff", "finalizing"],
-		llmDone: ["finalizing"],
+		llmDone: ["armed", "finalizing"],
 		progress: ["armed", "backoff", "finalizing"],
 	};
 	let checked = 0;
@@ -811,21 +826,24 @@ assert.throws(() => handoffExit("toString" as HandoffKind));
 
 // Gate: a child can never invoke either tool, from any phase; a live run passes.
 for (const phase of ["off", "armed", "backoff", "paused", "done", "finalizing"] as const) {
-	assert.deepEqual(drainToolGate("handoff", true, phase), { ok: false, error: "drain_handoff is main-session only; child sessions cannot invoke it" }, `child blocked at ${phase}`);
-	assert.deepEqual(drainToolGate("stop", true, phase), { ok: false, error: "drain_stop is main-session only; child sessions cannot invoke it" }, `child blocked at ${phase}`);
+	assert.deepEqual(watchdogToolGate("handoff", true, phase), { ok: false, error: "watchdog_handoff is main-session only; child sessions cannot invoke it" }, `child blocked at ${phase}`);
+	assert.deepEqual(watchdogToolGate("stop", true, phase), { ok: false, error: "watchdog_stop is main-session only; child sessions cannot invoke it" }, `child blocked at ${phase}`);
 }
-assert.deepEqual(drainToolGate("handoff", false, "armed"), { ok: true });
-assert.deepEqual(drainToolGate("stop", false, "backoff"), { ok: true });
-assert.deepEqual(drainToolGate("stop", false, "paused"), { ok: true });
-assert.deepEqual(drainToolGate("stop", false, "finalizing"), { ok: true });
+assert.deepEqual(watchdogToolGate("handoff", false, "armed"), { ok: true });
+assert.deepEqual(watchdogToolGate("stop", false, "backoff"), { ok: true });
+assert.deepEqual(watchdogToolGate("stop", false, "paused"), { ok: true });
+assert.deepEqual(watchdogToolGate("stop", false, "finalizing"), { ok: true });
 // No active run (off/done): an error result, never a silent success — a silent
-// drain_handoff would look recorded when nothing happened.
-assert.equal(drainToolGate("handoff", false, "off").ok, false);
-assert.equal(drainToolGate("handoff", false, "done").ok, false);
-assert.equal(drainToolGate("stop", false, "off").ok, false);
-assert.equal(drainToolGate("stop", false, "done").ok, false);
+// watchdog_handoff would look recorded when nothing happened.
+assert.equal(watchdogToolGate("handoff", false, "off").ok, false);
+assert.equal(watchdogToolGate("handoff", false, "done").ok, false);
+assert.equal(watchdogToolGate("stop", false, "off").ok, false);
+assert.equal(watchdogToolGate("stop", false, "done").ok, false);
+assert.deepEqual(watchdogToolGate("done", false, "armed"), { ok: true });
+assert.equal(watchdogToolGate("done", true, "armed").ok, false, "children never complete the run");
+assert.equal(watchdogToolGate("done", false, "off").ok, false);
 // The off/done error names the situation and the way out.
-assert(String(drainToolGate("stop", false, "done").ok === false && JSON.stringify(drainToolGate("stop", false, "done")).includes("no active watchdog run")));
+assert(String(watchdogToolGate("stop", false, "done").ok === false && JSON.stringify(watchdogToolGate("stop", false, "done")).includes("no active watchdog run")));
 
 // gh argv plan: exact label swap (remove first), then the reason comment.
 const plan = planHandoffCommands(42, "human");
@@ -931,6 +949,11 @@ assert(watchdogWidgetLines(baseView)![0].includes("\x1b[32m"), "armed is green")
 assert(plain(watchdogWidgetLines({ ...baseView, info: { kind: "map", title: "m" } })).includes("MAP #35"));
 assert(plain(watchdogWidgetLines({ ...baseView, info: { kind: "spec", title: "s" } })).includes("SPEC #35"));
 assert(plain(watchdogWidgetLines({ ...baseView, info: null })).includes("#35") && !plain(watchdogWidgetLines({ ...baseView, info: null })).includes("TIKET"), "unknown kind falls back to the bare number");
+// Countdown to the next nudge: mm:ss, minutes keep counting past 60 (3 h = 180:00).
+assert(plain(watchdogWidgetLines({ ...baseView, nudgeInMs: 138_000 })).includes("nudge dalam 2:18"));
+assert(plain(watchdogWidgetLines({ ...baseView, nudgeInMs: 3 * 3_600_000 })).includes("nudge dalam 180:00"), "hours are minutes: 3 h = 180:00");
+assert(plain(watchdogWidgetLines({ ...baseView, nudgeInMs: 0 })).includes("nudge di tick berikut"));
+assert(!plain(watchdogWidgetLines(baseView)).includes("nudge dalam"), "no countdown without a nudgeInMs");
 const pausedLines = watchdogWidgetLines({ ...baseView, phase: "paused", pausedReason: "no progress for 45m (stall)" })!;
 assert(pausedLines[0].includes("\x1b[31m") && plain(pausedLines).includes("PAUSED") && plain(pausedLines).includes("no progress for 45m (stall)") && plain(pausedLines).includes("/watchdog resume"), "paused is red with reason and next action");
 assert(plain(watchdogWidgetLines({ ...baseView, phase: "backoff", backoffKind: "quota" })).includes("BACKOFF (quota)"));
@@ -1062,6 +1085,9 @@ assert.deepEqual(
 // drive the real registered handlers end-to-end.
 type FakeTimer = { id: number; kind: "interval" | "timeout"; fire: () => unknown; cleared: boolean };
 
+const fakeWidgetTimers: FakeTimer[] = [];
+const liveWidgetTimers = () => fakeWidgetTimers.filter((t) => !t.cleared).length;
+
 type FakeClock = { advance: (ms: number) => void };
 
 /** Replace the global timer functions (and Date.now) for the duration of `run`; never a real timer fires. */
@@ -1073,10 +1099,14 @@ async function withFakeTimers<T>(
 	const realClearInterval = globalThis.clearInterval;
 	const realClearTimeout = globalThis.clearTimeout;
 	const timers: FakeTimer[] = [];
+	const widgetTimers = fakeWidgetTimers;
+	widgetTimers.length = 0; // per-run: leftovers of earlier rows must not leak in
 	let nextId = 1;
-	(globalThis as any).setInterval = (fn: (...args: unknown[]) => unknown, _delay: number, ...args: unknown[]) => {
+	(globalThis as any).setInterval = (fn: (...args: unknown[]) => unknown, delay: number, ...args: unknown[]) => {
 		const t: FakeTimer = { id: nextId++, kind: "interval", fire: () => fn(...args), cleared: false };
-		timers.push(t);
+		// The 1 s widget countdown is cosmetic: it must not count as a tick timer.
+		if (delay === 1000) widgetTimers.push(t);
+		else timers.push(t);
 		return t as any;
 	};
 	(globalThis as any).setTimeout = (fn: (...args: unknown[]) => unknown, _delay: number, ...args: unknown[]) => {
@@ -1103,7 +1133,8 @@ async function withFakeTimers<T>(
 	const clock: FakeClock = { advance: (ms) => { clockMs += ms; } };
 	const flush = () => new Promise<void>((resolve) => realSetTimeout(resolve, 0));
 	try {
-		return await run(timers, flush, clock);
+		const result = await run(timers, flush, clock);
+		return result;
 	} finally {
 		globalThis.setInterval = realSetInterval;
 		globalThis.setTimeout = realSetTimeout;
@@ -1140,7 +1171,7 @@ type Harness = {
 	/** Queue proof the mocked exec returns for the next bash calls (PREP needs >0
 	 *  pickable to arm; ticks need 0 for an empty frontier). */
 	setQueue: (pickable: number) => void;
-	/** Registered model tools by name (drain_handoff, drain_stop). */
+	/** Registered model tools by name (watchdog_handoff, watchdog_stop). */
 	tools: Record<string, { execute: (id: string, params: any, signal: any, update: any, ctx: any) => Promise<any> }>;
 	ctx: any;
 	/** The live state-entry list the default sessionManager serves; pre-seed
@@ -1326,7 +1357,7 @@ await withNoAmbientSubagent(() =>
 );
 
 
-// --- #31: drain_handoff / drain_stop model tools (harness) ------------------------
+// --- #31: watchdog_handoff / watchdog_stop model tools (harness) ------------------------
 
 // A handoff gh session: the issue view returns a pickable issue (ready-for-agent
 // only), both mutations succeed. The comment call echoes back the final body
@@ -1353,7 +1384,7 @@ await withNoAmbientSubagent(() =>
 		h.setExec(ghHandoffImpl());
 		clock.advance(IDLE_GRACE_MS + 1000); // a real tick would nudge; nothing fires while the tool runs
 		const before = timers.filter((t) => !t.cleared).length;
-		const res = await h.tools.drain_handoff!.execute("t1", { issue: 42, kind: "human", reason: "needs an operator decision on the migration order" }, undefined, undefined, h.ctx);
+		const res = await h.tools.watchdog_handoff!.execute("t1", { issue: 42, kind: "human", reason: "needs an operator decision on the migration order" }, undefined, undefined, h.ctx);
 		await flush();
 		// Exact gh argv, in order: view (pre-read), edit (label swap), comment (reason).
 		assert.deepEqual(h.execCalls.map((c) => [c.command, ...c.args]), [
@@ -1397,11 +1428,11 @@ await withNoAmbientSubagent(() =>
 		});
 		process.env.PI_SUBAGENT_ID = "child-caller";
 		try {
-			const stop = await h.tools.drain_stop!.execute("t2", { reason: "environment broke" }, undefined, undefined, h.ctx);
-			assert.equal(stop.isError, true, "a child cannot invoke drain_stop");
+			const stop = await h.tools.watchdog_stop!.execute("t2", { reason: "environment broke" }, undefined, undefined, h.ctx);
+			assert.equal(stop.isError, true, "a child cannot invoke watchdog_stop");
 			assert(String(stop.content[0].text).includes("main-session only"));
-			const handoff = await h.tools.drain_handoff!.execute("t3", { issue: 42, kind: "wontfix", reason: "x" }, undefined, undefined, h.ctx);
-			assert.equal(handoff.isError, true, "a child cannot invoke drain_handoff");
+			const handoff = await h.tools.watchdog_handoff!.execute("t3", { issue: 42, kind: "wontfix", reason: "x" }, undefined, undefined, h.ctx);
+			assert.equal(handoff.isError, true, "a child cannot invoke watchdog_handoff");
 			assert(String(handoff.content[0].text).includes("main-session only"));
 		} finally {
 			delete process.env.PI_SUBAGENT_ID;
@@ -1412,15 +1443,15 @@ await withNoAmbientSubagent(() =>
 	}),
 );
 
-// AC3: drain_stop pauses with the model's reason in the audit + notify, and
+// AC3: watchdog_stop pauses with the model's reason in the audit + notify, and
 // /watchdog resume works afterwards.
 await withNoAmbientSubagent(() =>
 	withFakeTimers(async (_timers, _flush, _clock) => {
 		const h = makeHarness(makeFixtureCwd());
 		h.entries.push(armedEntry());
 		h.handlers.session_start({}, h.ctx);
-		const res = await h.tools.drain_stop!.execute("t4", { reason: "gh auth is gone on this runner" }, undefined, undefined, h.ctx);
-		assert(!res.isError, "drain_stop succeeds on a live run");
+		const res = await h.tools.watchdog_stop!.execute("t4", { reason: "gh auth is gone on this runner" }, undefined, undefined, h.ctx);
+		assert(!res.isError, "watchdog_stop succeeds on a live run");
 		assert(String(res.content[0].text).includes("paused"));
 		const pauseAudit = h.audits.find((a) => a.type === "paused");
 		assert(pauseAudit !== undefined, "the stop is audited as paused");
@@ -1434,19 +1465,45 @@ await withNoAmbientSubagent(() =>
 		// Resume still works afterwards: paused -> armed, tick interval back, audited.
 		await h.handlers["command:watchdog"]("resume", h.ctx);
 		const resumeAudit = [...h.audits].reverse().find((a) => a.type === "transition");
-		assert(resumeAudit !== undefined && resumeAudit.data.from === "paused" && resumeAudit.data.to === "armed", "resume works after drain_stop");
+		assert(resumeAudit !== undefined && resumeAudit.data.from === "paused" && resumeAudit.data.to === "armed", "resume works after watchdog_stop");
 		const armedPersisted = persistedLatest(h.entries);
 		assert.equal(armedPersisted.data.phase, "armed");
 	}),
 );
 
-// drain_stop with no active run: an error result that says why, no state change.
+// watchdog_done: a verified promise. Refused while tickets remain (nothing changes),
+// accepted at once on an empty queue (DONE, timers stopped, audited, no idle wait).
+await withNoAmbientSubagent(() =>
+	withFakeTimers(async (timers) => {
+		const h = makeHarness(makeFixtureCwd());
+		h.entries.push(armedEntry());
+		h.handlers.session_start({}, h.ctx);
+		h.setQueue(2);
+		const early = await h.tools.watchdog_done!.execute("d1", {}, undefined, undefined, h.ctx);
+		assert.equal(early.isError, true, "premature promise is refused");
+		assert(String(early.content[0].text).includes("2 pickable"), "the refusal names what remains");
+		assert.equal(persistedLatest(h.entries)?.data?.phase ?? "armed", "armed", "a refused promise leaves the run armed");
+		assert(h.audits.some((a) => a.type === "done-refused"));
+		h.setQueue(0);
+		const res = await h.tools.watchdog_done!.execute("d2", {}, undefined, undefined, h.ctx);
+		assert(!res.isError, "empty queue: the promise is accepted");
+		assert.equal(persistedLatest(h.entries).data.phase, "done");
+		assert(h.audits.some((a) => a.type === "done"), "DONE is audited");
+		assert(h.notifications.some((n) => n.message.includes("DONE")));
+		assert.equal(timers.filter((t) => !t.cleared).length, 0, "DONE clears every timer");
+		assert.equal(liveWidgetTimers(), 0, "DONE also stops the widget countdown");
+		const again = await h.tools.watchdog_done!.execute("d3", {}, undefined, undefined, h.ctx);
+		assert.equal(again.isError, true, "a finished run cannot be completed twice");
+	}),
+);
+
+// watchdog_stop with no active run: an error result that says why, no state change.
 await withNoAmbientSubagent(() =>
 	withFakeTimers(async () => {
 		const h = makeHarness(makeFixtureCwd());
 		h.handlers.session_start({}, h.ctx); // no state entry: the watchdog is OFF
-		const res = await h.tools.drain_stop!.execute("t5", { reason: "nothing is running" }, undefined, undefined, h.ctx);
-		assert.equal(res.isError, true, "drain_stop without a live run errors with the reason");
+		const res = await h.tools.watchdog_stop!.execute("t5", { reason: "nothing is running" }, undefined, undefined, h.ctx);
+		assert.equal(res.isError, true, "watchdog_stop without a live run errors with the reason");
 		assert(String(res.content[0].text).includes("no active watchdog run"));
 		assert.equal(h.audits.find((a) => a.type === "paused" || a.type === "transition"), undefined, "no state change when there is no run");
 	}),
@@ -1464,7 +1521,7 @@ await withNoAmbientSubagent(() =>
 			if (args[1] === "edit") return { stdout: "", stderr: "", code: 0, killed: false };
 			return { stdout: "", stderr: "gh: permission denied for comments", code: 4, killed: false };
 		});
-		const res = await h.tools.drain_handoff!.execute("t6", { issue: 9, kind: "needs-info", reason: "spec is ambiguous" }, undefined, undefined, h.ctx);
+		const res = await h.tools.watchdog_handoff!.execute("t6", { issue: 9, kind: "needs-info", reason: "spec is ambiguous" }, undefined, undefined, h.ctx);
 		await flush();
 		assert.equal(res.isError, true, "a failed comment fails the tool result");
 		assert(String(res.content[0].text).includes("HANDOFF PARTIAL"), "the partial state is reported explicitly");
@@ -1486,7 +1543,7 @@ await withNoAmbientSubagent(() =>
 			if (args[1] === "view") return { stdout: "", stderr: "gh: issue not found", code: 1, killed: false };
 			return { stdout: "", stderr: "must not run", code: 0, killed: false };
 		});
-		const res = await h.tools.drain_handoff!.execute("t7", { issue: 404, kind: "human", reason: "x" }, undefined, undefined, h.ctx);
+		const res = await h.tools.watchdog_handoff!.execute("t7", { issue: 404, kind: "human", reason: "x" }, undefined, undefined, h.ctx);
 		assert.equal(res.isError, true);
 		assert(String(res.content[0].text).includes("gh issue view 404"), "the failing gh step is named");
 		assert.equal(h.execCalls.length, 1, "nothing runs after the failed pre-read");
@@ -1498,7 +1555,7 @@ await withNoAmbientSubagent(() =>
 			if (args[1] === "view") return { stdout: "ready-for-human\n", stderr: "", code: 0, killed: false };
 			return { stdout: "", stderr: "", code: 0, killed: false };
 		});
-		const retry = await h.tools.drain_handoff!.execute("t8", { issue: 404, kind: "human", reason: "x" }, undefined, undefined, h.ctx);
+		const retry = await h.tools.watchdog_handoff!.execute("t8", { issue: 404, kind: "human", reason: "x" }, undefined, undefined, h.ctx);
 		assert.equal(retry.isError, true);
 		// The ticket is already out of the queue (no ready-for-agent left), so the
 		// retry refuses in the pre-read before any mutation runs.
@@ -2209,7 +2266,7 @@ delete process.env.PI_SUBAGENT_ID;
 const mainPi = makeMockPi() as any;
 watchdogExtension(mainPi as any);
 assert(mainPi.commands.includes("watchdog"), "main factory registers /watchdog");
-assert.deepEqual(mainPi.tools.sort(), ["drain_handoff", "drain_stop", "watchdog_target"], "main factory registers exactly the drain tools (#31) and watchdog_target");
+assert.deepEqual(mainPi.tools.sort(), ["watchdog_done", "watchdog_handoff", "watchdog_stop", "watchdog_target"], "main factory registers exactly the drain tools (#31) and watchdog_target");
 assert(mainPi.events.includes("session_start"), "main factory restores state");
 assert(mainPi.events.includes("agent_settled"), "main factory handles Esc and the READY confirm");
 assert(mainPi.events.includes("agent_end"), "main factory reports provider errors");

@@ -111,8 +111,9 @@ stateDiagram-v2
   BACKOFF --> PAUSED: budget outage habis atau auth error
   ARMED --> DONE: frontier 0 dan child 0
   ARMED --> FINALIZING: frontier 0, flow punya langkah penutup
-  FINALIZING --> DONE: drain_stop done
-  ARMED --> PAUSED: breaker, hard cap, gh gagal, Esc, atau drain_stop
+  FINALIZING --> DONE: watchdog_done
+  ARMED --> PAUSED: breaker, hard cap, gh gagal, Esc, atau watchdog_stop
+  ARMED --> DONE: watchdog_done (queue terverifikasi kosong, tanpa menunggu idle)
   PAUSED --> ARMED: "/drain-watch resume"
   ARMED --> OFF: "/drain-watch off"
   DONE --> [*]
@@ -166,7 +167,7 @@ flowchart TD
   H -- tidak --> I{"frontier = 0<br/>DAN child = 0?"}
   I -- ya --> I2{"ada ready terblokir<br/>atau flow punya finalisasi?"}
   I2 -- "terblokir oleh tiket non-agent" --> DONEB["DONE-dengan-sisa + notify<br/>'B terblokir oleh A (needs-info)'"]
-  I2 -- "flow punya finalisasi" --> FIN["FINALIZING: satu nudge<br/>'selesaikan code-review, PR, cleanup,<br/>lalu drain_stop(done)'"]
+  I2 -- "flow punya finalisasi" --> FIN["FINALIZING: satu nudge<br/>'selesaikan code-review, PR, cleanup,<br/>lalu watchdog_done'"]
   I2 -- tidak --> DONE["DONE + notify ringkasan<br/>selesai N, handoff M"]
   I -- tidak --> J{"ada child berjalan?"}
   J -- ya --> K{"ada progress<br/>dalam stallLimit?"}
@@ -186,8 +187,8 @@ flowchart TD
       <ul>
         <li>Daftar tiket tersisa (nomor + judul)</li>
         <li>"Jangan bertanya ke user. Lanjutkan flow: spawn pass berikutnya."</li>
-        <li>"Tiket ambigu/butuh info/butuh manusia → <code>drain_handoff</code>, lalu lanjut."</li>
-        <li>"Tiket low-tolerance (auth, secrets, migrasi, dll.) → <code>drain_handoff ready-for-human</code>, jangan dikerjakan."</li>
+        <li>"Tiket ambigu/butuh info/butuh manusia → <code>watchdog_handoff</code>, lalu lanjut."</li>
+        <li>"Tiket low-tolerance (auth, secrets, migrasi, dll.) → <code>watchdog_handoff ready-for-human</code>, jangan dikerjakan."</li>
       </ul>
     </div>
     <div class="card">
@@ -235,7 +236,7 @@ flowchart TD
       <tr><td class="warn"><b>PAUSED</b> breaker</td><td><code>breakerK</code> nudge tanpa progress, atau <code>hardCap</code> tercapai</td><td><code>/drain-watch resume</code></td></tr>
       <tr><td class="warn"><b>PAUSED</b> user</td><td>Esc / abort / outcome <code>aborted</code></td><td><code>/drain-watch resume</code></td></tr>
       <tr><td class="warn"><b>PAUSED</b> infra</td><td><code>gh</code> gagal, budget outage habis, atau error auth</td><td>Perbaiki lalu <code>resume</code></td></tr>
-      <tr><td class="warn"><b>PAUSED</b> LLM</td><td>LLM memanggil <code>drain_stop(reason)</code> (lingkungan rusak, bukan soal satu tiket)</td><td>Human menangani lalu <code>resume</code></td></tr>
+      <tr><td class="warn"><b>PAUSED</b> LLM</td><td>LLM memanggil <code>watchdog_stop(reason)</code> (lingkungan rusak, bukan soal satu tiket)</td><td>Human menangani lalu <code>resume</code></td></tr>
       <tr><td class="dim"><b>OFF</b></td><td><code>/drain-watch off</code></td><td>Manual <code>on</code></td></tr>
     </table>
   </div>
@@ -253,7 +254,7 @@ sequenceDiagram
   participant G as GitHub
   participant U as User
   C-->>M: steer: BLOCKED / ESCALATE / NEEDS_HUMAN_REVIEW
-  M->>H: drain_handoff(issue, kind, reason)
+  M->>H: watchdog_handoff(issue, kind, reason)
   H->>G: komentar(reason) + ganti label<br/>keluar dari pickable (cara per tracker, lihat bagian 8)
   H->>H: audit entry, progress++, noProgressStreak = 0
   H-->>M: ok, queue sisa N, tiket berikutnya #X
@@ -263,7 +264,7 @@ sequenceDiagram
     H->>U: DONE: selesai N, handoff M (daftar + alasan)
   end
   opt masalah level lingkungan (auth gh hilang, repo kotor, disk penuh)
-    M->>H: drain_stop(reason)
+    M->>H: watchdog_stop(reason)
     H->>U: PAUSED + notify (alasan)
   end
 </pre>
@@ -334,7 +335,7 @@ flowchart TD
       <b>Ketika child yang kena error</b>
       <ul>
         <li>Child gagal → completion failure datang ke main sebagai steer. Itu terhitung <b>progress</b> (ada event), bukan stall.</li>
-        <li>Main memutuskan sesuai flow (retry pass, atau <code>drain_handoff</code> kalau habis budget).</li>
+        <li>Main memutuskan sesuai flow (retry pass, atau <code>watchdog_handoff</code> kalau habis budget).</li>
         <li>Watchdog tidak menyentuh child dan tidak mem-poll transcript.</li>
         <li>Kalau <i>semua</i> child kena kuota yang sama, main akan kena juga → jalur BACKOFF di atas.</li>
       </ul>
@@ -368,7 +369,7 @@ flowchart TB
   W -. "memantau &amp; menyuruh lanjut" .-> O
   O -- "1 accepted scope" --> S
   S -- "verdict + evidence" --> O
-  O -- "tiket tidak bisa lanjut" --> H["drain_handoff<br/>needs-info / ready-for-human"]
+  O -- "tiket tidak bisa lanjut" --> H["watchdog_handoff<br/>needs-info / ready-for-human"]
 </pre>
   </div>
   <div class="card" style="margin-top:16px">
@@ -381,7 +382,7 @@ flowchart TB
       <tr><td><b>Quality gate</b></td><td>Standards review, <code>checkCommand</code>, spec review. Fix loop maks 10</td><td><code>tdd</code> per tiket. <code>code-review</code> <b>sekali di akhir</b>, fix oleh satu implementer</td><td>build-lead, quick-reviewer, deep-reviewer. Budget 10</td><td>Tidak ada. Bukan tugasnya</td></tr>
       <tr><td><b>State</b></td><td>Path report/evidence per run</td><td>Tracker + integration branch. Tidak ada state loop</td><td>Ledger JSON di komentar tracker, contract ber-hash, singleton</td><td><code>appendEntry</code> di sesi (nudge, streak, state)</td></tr>
       <tr><td><b>Selesai kalau</b></td><td>PASS / blocked / 10 fix gagal</td><td class="warn">Semua tiket selesai, <b>dinilai model</b></td><td>Ticket kosong terbukti di semua project/tier</td><td>Queue frontier 0 dan child 0, <b>dinilai harness</b></td></tr>
-      <tr><td><b>Jalan keluar human</b></td><td>Return terminal <code>BLOCKED</code>/<code>ESCALATE</code> ke user</td><td class="bad">Tidak didefinisikan</td><td>Pindah ke role <code>needsHumanReview</code></td><td><code>drain_handoff</code> (label + komentar) dan <code>drain_stop</code></td></tr>
+      <tr><td><b>Jalan keluar human</b></td><td>Return terminal <code>BLOCKED</code>/<code>ESCALATE</code> ke user</td><td class="bad">Tidak didefinisikan</td><td>Pindah ke role <code>needsHumanReview</code></td><td><code>watchdog_handoff</code> (label + komentar) dan <code>watchdog_stop</code></td></tr>
       <tr><td><b>Enforcement dari harness</b></td><td class="bad">Tidak ada</td><td class="bad">Tidak ada</td><td class="warn">Hanya di prompt. Bisa berhenti sendiri</td><td class="ok">Ada. Inilah isinya</td></tr>
       <tr><td><b>Setup</b></td><td>Tidak ada</td><td>Tracker + <code>/setup-matt-pocock-skills</code></td><td>Berat: <code>/drain-wizard</code>, contract, 7 agent, mapping role</td><td>Ringan: satu extension + satu tombol</td></tr>
     </table>
@@ -401,7 +402,7 @@ flowchart TB
       <b class="warn">2. "Selesai" bukan hanya tiket habis</b>
       <p style="margin:6px 0 0">implement-spec masih punya langkah <b>setelah</b> tiket terakhir: <code>code-review</code> di integration branch, fix, PR ready, cleanup worktree. Kalau DONE ditetapkan saat queue = 0, watchdog berhenti sebelum fase finalisasi.</p>
       <ul>
-        <li>Usul: state <b>FINALIZING</b>. Saat frontier habis, satu nudge khusus: "selesaikan finalisasi lalu panggil <code>drain_stop(done)</code>".</li>
+        <li>Usul: state <b>FINALIZING</b>. Saat frontier habis, satu nudge khusus: "selesaikan finalisasi lalu panggil <code>watchdog_done</code>".</li>
         <li>Hanya aktif untuk flow yang punya langkah penutup. Untuk flow per-tiket murni (supervise berulang, /drain) langsung DONE.</li>
         <li>Ini sedikit melonggarkan prinsip "model tidak menyatakan selesai". Tapi hanya untuk penutup, bukan untuk tiket.</li>
       </ul>
@@ -485,7 +486,7 @@ gh api graphql ... | jq ...
         <li><b>Aktivasi:</b> manual <code>/drain-watch on</code>, atau otomatis saat <code>/supervise</code> / <code>/drain</code>?</li>
         <li><b>Default waktu</b> di bagian 3 cocok untuk unattended semalaman?</li>
         <li><b>Notifikasi saat PAUSED/DONE:</b> cukup <code>ui.notify</code>, atau perlu keluar sesi (relay)?</li>
-        <li><b>Jalan keluar human:</b> tool <code>drain_handoff</code> + <code>drain_stop</code> (usulan), atau model pakai <code>gh</code> langsung?</li>
+        <li><b>Jalan keluar human:</b> tool <code>watchdog_handoff</code> + <code>watchdog_stop</code> (usulan), atau model pakai <code>gh</code> langsung?</li>
         <li><b>Cakupan:</b> GitHub label saja dulu, atau <code>/drain</code> dengan ledger juga?</li>
         <li><b>Blocking:</b> terjawab. GitHub pakai dependency native (<code>blocked_by</code>, open saja), Jira link <code>Blocks</code>. Sisa: blok <code>drain-queue</code> di docs (bagian 8) diterima atau tidak?</li>
         <li><b>Sisa risiko (bagian 10):</b> pengukuran durasi review per axis belum ada mekanismenya di harness (perlu diukur sebelum kode).</li>
