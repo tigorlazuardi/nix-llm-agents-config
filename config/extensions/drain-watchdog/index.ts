@@ -1,5 +1,5 @@
 /**
- * drain-watchdog: pure decision core + the #30 live effect layer.
+ * drain-watchdog: pure decision core + the #30/#32 live effect layer.
  *
  * Every function above the factory is deterministic and side-effect free: no
  * network, no clock, no subprocesses, no pi-API calls at runtime — this module
@@ -94,7 +94,7 @@ export type DrainAction =
 	| { type: "stallNotify" }
 	| { type: "pause"; reason: string }
 	| { type: "done"; leftovers: boolean }
-	| { type: "probe"; delayMs: number };
+	| { type: "probe"; delayMs: number; jitter: ProbeJitter };
 
 export type DrainEvent =
 	| { type: "arm"; queueOk: boolean; pickable: number }
@@ -102,7 +102,8 @@ export type DrainEvent =
 	| { type: "resume" }
 	| { type: "abort" }
 	| { type: "tick"; obs: TickObservation }
-	| { type: "providerError"; kind: ProviderErrorKind }
+	// `message` is the raw provider error text; the #32 reset-time honor parses it at the probe seam.
+	| { type: "providerError"; kind: ProviderErrorKind; message?: string }
 	| { type: "probeOk" }
 	| { type: "llmStop"; reason?: string }
 	| { type: "llmDone" }
@@ -254,14 +255,115 @@ export function nextLadderDelayMs(kind: "transient" | "quota", rung: number): nu
 }
 
 /**
- * Jittered delay: `baseMs` scaled into +-20% by an injected `r` in [0, 1)
+ * Probe-jitter policy for the #32 backoff effect path.
+ *
+ * - `symmetric` (±20%, `jitteredDelayMs`): default for pure ladder steps, so
+ *   parallel sessions wake the provider apart on recovery.
+ * - `after` (0…+20%, `jitterAfterMs`): a reset-time-driven probe may only fire
+ *   AT or AFTER the advertised reset instant — an early wake fails for certain
+ *   and would burn the one probe the ladder bought.
+ */
+export type ProbeJitter = "symmetric" | "after";
+
+/** Minute/hour/second unit table for REL_RESET_RE capture 2 (keyed by first letter). */
+const RESET_UNITS: Record<string, number> = { m: 60_000, h: 3_600_000, s: 1_000 };
+
+/** Probe text: a minimal nudge, not a prompt (flow.html section 6). */
+export const PROBE_TEXT = "drain-watchdog probe: continue the drain flow.";
+
+/** Any "reset/retry/try again ... at/after/in" hint — cheap pre-filter before the precise parses. */
+const RESET_HINT = /\b(?:resets?|try again|retry)\b[^.\n]*\b(?:at|after|in)\b/i;
+/** Relative reset: "reset after 5m", "resets in 30 minutes", "retry after 300 seconds". */
+const REL_RESET_RE = /\b(?:reset|resets|retry|try again)[^\d\n]{0,20}(\d{1,4})\s*(m(?:in(?:ute)?)?s?|h(?:our)?s?|s(?:econd)?s?)\b/i;
+/** Absolute ISO-ish reset: "reset at 2026-01-31T14:32" (date required — "at 14:32" is the clock form). */
+const ISO_RESET_RE = /\b\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(?::\d{2})?\b/;
+/** Clock-time reset: "resets at 14:32" / "reset at 2:07:00 PM" (pad via 24h conversion). */
+const CLOCK_RESET_RE = /\b(?:reset|resets|retry|try again)[^.\n]{0,20}at\s+(\d{1,2}:\d{2}(?::\d{2})?)\s*(AM|PM)?/i;
+
+/** Probe text goes to the model as a steer; keep it structurally minimal and distinct. */
+export function isProbeText(content: string): boolean {
+	return content === PROBE_TEXT;
+}
+
+/**
+ * Reset time carried by a provider error, as a delay in ms from `now`.
+ *
+ * Accepted (loose, English provider texts; case-insensitive):
+ *   "reset after 5m" / "resets in 5 minutes" / "retry after 300 seconds"
+ *   "try again after 90m" — a window over MAX_RESET_DELAY_MS is unusable (null);
+ *   "resets at 14:32"           — clock time (HH:MM or HH:MM:SS), today or +1 day, LOCAL
+ *   "reset at 2026-01-31T14:32" — ISO-ish date-time (offset-less forms parse LOCAL)
+ *
+ * Returns null when the text carries no usable reset time (caller keeps the
+ * ladder step): no hint, a window over MAX_RESET_DELAY_MS, or an instant that
+ * already passed (clock skew, provider slack). A reset inside the window
+ * clamps to [0, MAX_RESET_DELAY_MS] so a passed reset probes immediately and
+ * no reset can out-wait the outage budget that also bounds the run.
+ */
+export const MAX_RESET_DELAY_MS = 30 * 60_000;
+export function parseResetTimeMs(message: string, now: number): number | null {
+	if (!RESET_HINT.test(message)) return null;
+	const rel = REL_RESET_RE.exec(message);
+	if (rel !== null) {
+		const n = Number.parseInt(rel[1]!, 10);
+		const ms = n * RESET_UNITS[rel[2]![0]!.toLowerCase()]!;
+		if (ms <= 0 || ms > MAX_RESET_DELAY_MS) return null;
+		return ms;
+	}
+	const iso = ISO_RESET_RE.exec(message);
+	if (iso !== null) {
+		const t = Date.parse(iso[0]!);
+		return Number.isNaN(t) ? null : Math.min(Math.max(t - now, 0), MAX_RESET_DELAY_MS);
+	}
+	const clock = CLOCK_RESET_RE.exec(message);
+	if (clock === null) return null;
+	const [hh, mm, ss] = clock[1]!.split(":").map(Number);
+	if (!Number.isFinite(hh) || !Number.isFinite(mm)) return null;
+	const ampm = clock[2]?.toUpperCase();
+	const hour24 = ampm === "PM" && hh < 12 ? hh + 12 : ampm === "AM" && hh === 12 ? 0 : hh;
+	const target = new Date(now);
+	target.setHours(hour24, mm!, ss ?? 0, 0);
+	if (target.getTime() <= now) target.setDate(target.getDate() + 1);
+	const delay = target.getTime() - now;
+	return delay > MAX_RESET_DELAY_MS ? null : delay;
+}
+
+/**
+ * Probe delay for a provider error at `now`, on `kind`'s ladder at `rung`.
+ * A parsed reset time overrides (clamped) the ladder step; a plain ladder
+ * step comes back symmetric-jitter, a reset-driven step `after`-jitter.
+ */
+export function probeDelayForError(
+	message: string,
+	now: number,
+	kind: "transient" | "quota",
+	rung: number,
+): { delayMs: number; jitter: ProbeJitter } {
+	const reset = parseResetTimeMs(message, now);
+	if (reset !== null) return { delayMs: reset, jitter: "after" };
+	return { delayMs: nextLadderDelayMs(kind, rung), jitter: "symmetric" };
+}
+
+/**
+ * Jittered delay: `baseMs` scaled into ±20% by an injected `r` in [0, 1)
  * (the caller passes Math.random(); the core stays pure). r outside [0, 1] is
  * clamped and NaN is treated as the midpoint, so a bad source never widens the
- * band. Consumed by the #32 backoff effect path when it schedules a probe.
+ * band.
  */
 export function jitteredDelayMs(baseMs: number, r: number): number {
 	const unit = Number.isNaN(r) ? 0.5 : Math.min(Math.max(r, 0), 1);
 	return Math.round(baseMs * (1 - JITTER_FRACTION + 2 * JITTER_FRACTION * unit));
+}
+
+/**
+ * Upward-only jitter for reset-driven probes: `baseMs` scaled into [baseMs,
+ * baseMs*1.2] by an injected `r` in [0, 1). A probe waiting out a provider's
+ * reset instant may fire AT or AFTER the advertised time — never before it,
+ * or the wake fails for certain. Bounds/clamp/NaN follow `jitteredDelayMs`.
+ */
+export function jitterAfterMs(baseMs: number, r: number): number {
+	const unit = Number.isNaN(r) ? 0.5 : Math.min(Math.max(r, 0), 1);
+	return Math.round(baseMs * (1 + JITTER_FRACTION * unit));
 }
 
 // NOTE (recorded): the cooldown ladder is keyed on the run's TOTAL nudge
@@ -549,8 +651,6 @@ export function buildNudgeText(p: { target: number | null; pickable: number }): 
 	].join("\n");
 }
 
-/** Minimal backoff probe: one cheap wake after a provider error, not a prompt. */
-export const PROBE_TEXT = "drain-watchdog probe: continue the drain flow.";
 
 /** Closing nudge of a finalizing flow (flow.html section 10; one per successful delivery). */
 export const FINALIZE_NUDGE_TEXT =
@@ -680,13 +780,21 @@ const EVENT_PHASES: Record<DrainEvent["type"], readonly DrainPhase[]> = {
 	progress: ["armed", "backoff", "finalizing"],
 };
 
+/**
+ * Enter/escalate BACKOFF and emit the probe action. #32: when the error text
+ * carries a reset time, `probeDelayForError` overrides (clamped) the ladder
+ * step; a reset-driven probe is flagged `after`-jitter so the effect layer
+ * never schedules it before the advertised reset instant.
+ */
 function enterBackoff(
 	state: DrainState,
 	kind: "transient" | "quota",
 	now: number,
 	escalate: boolean,
+	message: string | undefined,
 ): DrainTransition {
 	const rung = escalate ? state.backoffRung + 1 : 0;
+	const probe = probeDelayForError(message ?? "", now, kind, rung);
 	return {
 		state: {
 			...state,
@@ -697,7 +805,7 @@ function enterBackoff(
 			pausedReason: null,
 			nextAllowedAt: now,
 		},
-		action: { type: "probe", delayMs: nextLadderDelayMs(kind, rung) },
+		action: { type: "probe", delayMs: probe.delayMs, jitter: probe.jitter },
 		refusal: null,
 	};
 }
@@ -776,13 +884,13 @@ function handleTick(state: DrainState, obs: TickObservation, now: number, config
 	}
 
 	// Provider error on the last ended run hands over to the backoff path.
-	if (obs.lastError !== null) return onProviderError(state, classifyProviderError(obs.lastError), now);
+	if (obs.lastError !== null) return onProviderError(state, classifyProviderError(obs.lastError), now, obs.lastError);
 
 	// Nudge is the last resort.
 	return recordNudge(state, now, { type: "nudge" });
 }
 
-function onProviderError(state: DrainState, kind: ProviderErrorKind, now: number): DrainTransition {
+function onProviderError(state: DrainState, kind: ProviderErrorKind, now: number, message: string | undefined): DrainTransition {
 	if (kind === "auth") return toPaused(state, PAUSE_REASON.auth);
 	const inBackoff = state.phase === "backoff";
 	// Unknown errors count toward the breaker.
@@ -800,10 +908,10 @@ function onProviderError(state: DrainState, kind: ProviderErrorKind, now: number
 		if (state.backoffStartMs !== null && now - state.backoffStartMs >= budget) {
 			return toPaused(state, PAUSE_REASON.outage);
 		}
-		return enterBackoff({ ...state, noProgressStreak: streak }, outageKind, now, !upgrade);
+		return enterBackoff({ ...state, noProgressStreak: streak }, outageKind, now, !upgrade, message);
 	}
 	// Outside backoff: enter at rung 0. Unknown rides the transient ladder.
-	return enterBackoff({ ...state, noProgressStreak: streak }, kind === "quota" ? "quota" : "transient", now, false);
+	return enterBackoff({ ...state, noProgressStreak: streak }, kind === "quota" ? "quota" : "transient", now, false, message);
 }
 
 /** Fixed tick order per the design; the nudge is always the last resort. */
@@ -840,7 +948,7 @@ export function transition(state: DrainState, event: DrainEvent, now: number, co
 		case "tick":
 			return handleTick(state, event.obs, now, config);
 		case "providerError":
-			return onProviderError(state, event.kind, now);
+			return onProviderError(state, event.kind, now, event.message);
 		case "probeOk":
 			// One successful probe restores normal behavior and resets the ladder. It is
 			// NOT progress, so the no-progress streak survives: a stuck run must still
@@ -979,14 +1087,17 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 		}, tickMs);
 	};
 
-	const scheduleProbe = (baseDelayMs: number) => {
+	/**
+	 * Probe timer at the effect boundary (#32): the core's probe action carries the
+	 * base delay plus a jitter policy — `symmetric` for ladder steps (±20%,
+	 * parallel wakes hit the provider apart), `after` for reset-time-driven probes
+	 * (0…+20%, never before the advertised reset instant). On a failed probe
+	 * delivery BACKOFF can wedge; the next real event or /watchdog resume recovers it.
+	 */
+	const scheduleProbe = (baseDelayMs: number, jitter: ProbeJitter = "symmetric") => {
 		if (closed) return; // M1: never arm a timer after session_shutdown.
 		clearProbeTimer();
-		// Jitter at the effect boundary: the core's ladder value is the base; the
-		// delivery widens it +-20% (jitteredDelayMs) so parallel wakes do not hit the
-		// provider together. On a failed probe delivery BACKOFF can wedge; the next
-		// real event or /watchdog resume recovers it.
-		const delay = jitteredDelayMs(baseDelayMs, Math.random());
+		const delay = jitter === "after" ? jitterAfterMs(baseDelayMs, Math.random()) : jitteredDelayMs(baseDelayMs, Math.random());
 		probeTimer = setTimeout(() => {
 			probeTimer = null;
 			if (closed || state.phase !== "backoff") return; // M1: shutdown may land mid-delay.
@@ -1102,8 +1213,8 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 				runTarget = null;
 				break;
 			case "probe":
-				audit("probe-scheduled", { rung: state.backoffRung, delayMs: t.action.delayMs });
-				scheduleProbe(t.action.delayMs);
+				audit("probe-scheduled", { rung: state.backoffRung, delayMs: t.action.delayMs, jitter: t.action.jitter });
+				scheduleProbe(t.action.delayMs, t.action.jitter);
 				break;
 		}
 	};
@@ -1463,6 +1574,10 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 			notify(`drain-watchdog: restored live run (${state.phase}) after restart`);
 		} else if (state.phase === "backoff") {
 			audit("restored", { phase: "backoff", kind: state.backoffKind, rung: state.backoffRung });
+			// #32: the raw error text is not persisted, so a restored BACKOFF re-probes on
+			// the ladder step (symmetric jitter); only the live outage that just parsed a
+			// reset time gets the reset-driven `after` jitter. The outage budget still
+			// measures from the restored backoffStartMs, so no budget time is lost.
 			scheduleProbe(nextLadderDelayMs(state.backoffKind ?? "transient", state.backoffRung));
 			// The probe timer also needs the tick loop alive for probeOk restoration.
 			startLoop();
@@ -1527,8 +1642,9 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 		const err = extractLastError(event.messages);
 		if (err !== null) {
 			// One providerError per failed run; ticks never re-report it (tick
-			// observations carry lastError: null on purpose).
-			apply(transition(state, { type: "providerError", kind: classifyProviderError(err) }, Date.now()), "provider-error");
+			// observations carry lastError: null on purpose). The raw text rides along:
+			// the #32 probe seam parses a carried reset time out of it.
+			apply(transition(state, { type: "providerError", kind: classifyProviderError(err), message: err }, Date.now()), "provider-error");
 		} else if (wasProbe) {
 			apply(transition(state, { type: "probeOk" }, Date.now()), "probe-ok");
 		}

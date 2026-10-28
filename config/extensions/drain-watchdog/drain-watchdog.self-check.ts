@@ -21,7 +21,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { DrainEvent, DrainState, HandoffKind, TickObservation } from "./index.ts";
+import type { DrainEvent, DrainState, HandoffKind, ProbeJitter, TickObservation } from "./index.ts";
 import {
 	BREAKER_K,
 	DEFAULT_TICK_CONFIG,
@@ -40,8 +40,12 @@ import {
 	handoffExit,
 	handoffResultText,
 	isChildSession,
+	jitterAfterMs,
 	jitteredDelayMs,
+	MAX_RESET_DELAY_MS,
 	nextLadderDelayMs,
+	parseResetTimeMs,
+	probeDelayForError,
 	parseLabelList,
 	parseQueueOutput,
 	planHandoffCommands,
@@ -50,8 +54,9 @@ import {
 
 	buildNudgeText,
 	extractFencedBlock,
-	extractIssueNumbers,
 	extractLastError,
+	isProbeText,
+	extractIssueNumbers,
 	isReadyDeclaration,
 	isSubagentCompletionNotice,
 	isSubagentSpawnTool,
@@ -153,7 +158,7 @@ const backoffIn = transition(armOK.state, { type: "providerError", kind: "transi
 assert.equal(backoffIn.state.phase, "backoff");
 assert.equal(backoffIn.state.backoffKind, "transient");
 assert.equal(backoffIn.state.backoffRung, 0);
-assert.deepEqual(backoffIn.action, { type: "probe", delayMs: 1 * MIN });
+assert.deepEqual(backoffIn.action, { type: "probe", delayMs: 1 * MIN, jitter: "symmetric" });
 
 // Transient: each later error escalates one rung; rungs clamp at the ladder top.
 const transientDelays: number[] = [];
@@ -170,7 +175,7 @@ assert.deepEqual(transientDelays, [2, 5, 10, 20, 30, 30].map((m) => m * MIN));
 // Quota: rung 0 from armed, then 1 h / 2 h / 3 h, clamped at 3 h.
 const quotaIn = transition(armOK.state, { type: "providerError", kind: "quota" }, 12_000);
 assert.equal(quotaIn.state.backoffKind, "quota");
-assert.deepEqual(quotaIn.action, { type: "probe", delayMs: 30 * MIN });
+assert.deepEqual(quotaIn.action, { type: "probe", delayMs: 30 * MIN, jitter: "symmetric" });
 const quotaDelays: number[] = [];
 let q = quotaIn.state;
 for (let i = 1; i <= 4; i++) {
@@ -252,19 +257,19 @@ assert.equal(probed.state.backoffStartMs, null);
 	assert.equal(up.state.phase, "backoff");
 	assert.equal(up.state.backoffKind, "quota");
 	assert.equal(up.state.backoffRung, 0);
-	assert.deepEqual(up.action, { type: "probe", delayMs: 30 * MIN });
+	assert.deepEqual(up.action, { type: "probe", delayMs: 30 * MIN, jitter: "symmetric" });
 	assert.equal(up.state.backoffStartMs, t0);
 	// Later quota errors climb the quota ladder; the budget is 12 h, not 6 h.
 	const q2 = transition(up.state, { type: "providerError", kind: "quota" }, t0 + 7 * HOUR);
 	assert.equal(q2.state.phase, "backoff");
-	assert.deepEqual(q2.action, { type: "probe", delayMs: 60 * MIN });
+	assert.deepEqual(q2.action, { type: "probe", delayMs: 60 * MIN, jitter: "symmetric" });
 	const q3 = transition(q2.state, { type: "providerError", kind: "quota" }, t0 + 12 * HOUR + MIN);
 	assert.equal(q3.state.phase, "paused");
 	// Opposite order: a transient error inside a quota outage keeps the quota ladder + budget.
 	const qFirst = transition(armOK.state, { type: "providerError", kind: "quota" }, t0);
 	const tAfter = transition(qFirst.state, { type: "providerError", kind: "transient" }, t0 + HOUR);
 	assert.equal(tAfter.state.backoffKind, "quota");
-	assert.deepEqual(tAfter.action, { type: "probe", delayMs: 60 * MIN });
+	assert.deepEqual(tAfter.action, { type: "probe", delayMs: 60 * MIN, jitter: "symmetric" });
 	// Unknown inside a quota outage also keeps the quota kind (documented deviation).
 	assert.equal(transition(qFirst.state, { type: "providerError", kind: "unknown" }, t0 + HOUR).state.backoffKind, "quota");
 }
@@ -468,7 +473,7 @@ assert.deepEqual(
 // 9. Provider error on the last run → backoff path, not a plain nudge.
 const tickBackoff = transition(armed(), { type: "tick", obs: { ...baseObs(), lastError: "500 Internal Server Error" } }, T);
 assert.equal(tickBackoff.state.phase, "backoff");
-assert.deepEqual(tickBackoff.action, { type: "probe", delayMs: 1 * MIN });
+assert.deepEqual(tickBackoff.action, { type: "probe", delayMs: 1 * MIN, jitter: "symmetric" });
 
 // 9b. Tick-path auth error pauses immediately (not a probe, not a nudge).
 const tickAuth = transition(armed(), { type: "tick", obs: { ...baseObs(), lastError: "401 Unauthorized" } }, T);
@@ -479,7 +484,7 @@ assert.equal(tickAuth.state.pausedReason, "provider auth error; needs human");
 const tickQuota = transition(armed(), { type: "tick", obs: { ...baseObs(), lastError: "insufficient_quota" } }, T);
 assert.equal(tickQuota.state.phase, "backoff");
 assert.equal(tickQuota.state.backoffKind, "quota");
-assert.deepEqual(tickQuota.action, { type: "probe", delayMs: 30 * MIN });
+assert.deepEqual(tickQuota.action, { type: "probe", delayMs: 30 * MIN, jitter: "symmetric" });
 
 // 10. Breaker: BREAKER_K consecutive no-progress nudges, then pause — not nudges forever.
 let s: DrainState = armed();
@@ -690,6 +695,78 @@ assert.deepEqual(
 	assert.equal(jitteredDelayMs(MIN, -5), jitteredDelayMs(MIN, 0));
 	assert.equal(jitteredDelayMs(MIN, 7), jitteredDelayMs(MIN, 1));
 	assert.equal(jitteredDelayMs(MIN, Number.NaN), MIN);
+}
+
+// --- #32 probe seam: reset-time honor, probe text, probe-delay policy --------------------------
+
+// Reset parser: relative windows, ISO (local-parse aware), clock times, and refusals.
+{
+	// Local-noon base so clock/ISO forms resolve deterministically regardless of TZ.
+	const base = new Date();
+	base.setHours(12, 0, 0, 0);
+	const now = base.getTime();
+	const pad = (x: number) => String(x).padStart(2, "0");
+	const isoAt = (offsetMin: number) => {
+		const d = new Date(now + offsetMin * MIN);
+		return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+	};
+	assert.equal(parseResetTimeMs("quota exceeded; earliest reset reset after 5m", now), 5 * MIN, "the real session's quota text shape");
+	assert.equal(parseResetTimeMs("You hit your usage limit. resets in 30 minutes", now), 30 * MIN);
+	assert.equal(parseResetTimeMs("quota; retry after 300 seconds", now), 300_000);
+	assert.equal(parseResetTimeMs("reset at " + isoAt(10), now), 10 * MIN, "ISO-less-offset parses LOCAL");
+	assert.equal(parseResetTimeMs("resets at 12:10", now), 10 * MIN, "clock form, later today");
+	assert.equal(parseResetTimeMs("resets at 12:10:30 PM", now), 10.5 * MIN, "clock with seconds and PM");
+	// Unusable or absent reset times keep the ladder (null), per the contract:
+	assert.equal(parseResetTimeMs("reset after 5000m", now), null, "over the window cap");
+	assert.equal(parseResetTimeMs("resets in 2 hours", now), null, "over the window cap (relative)");
+	assert.equal(parseResetTimeMs("resets at 13:30", now), null, "clock beyond the cap");
+	assert.equal(parseResetTimeMs("reset at " + isoAt(-5), now), 0, "a passed reset clamps to 0 (probe immediately)");
+	assert.equal(parseResetTimeMs("reset after 0m", now), null);
+	assert.equal(parseResetTimeMs("no hint here at all", now), null);
+	assert.equal(parseResetTimeMs("quota exhausted", now), null);
+	// Clamps: a passed ISO reset probes immediately; nothing outruns the sane max.
+	assert.equal(parseResetTimeMs("reset at " + isoAt(-5), now + 6 * MIN), 0, "passed ISO clamps to 0 once hinted recently");
+	assert.ok(MAX_RESET_DELAY_MS <= 60 * MIN, "reset ceiling stays bounded");
+}
+
+// jitterAfterMs: upward-only band [base, base*1.2] for reset-driven probes.
+assert.equal(jitterAfterMs(10 * MIN, 0), 10 * MIN);
+assert.equal(jitterAfterMs(10 * MIN, 0.5), 11 * MIN);
+assert.equal(jitterAfterMs(10 * MIN, 1), 12 * MIN);
+assert.equal(jitterAfterMs(10 * MIN, -5), 10 * MIN, "clamped low");
+assert.equal(jitterAfterMs(10 * MIN, 7), 12 * MIN, "clamped high");
+assert.equal(jitterAfterMs(10 * MIN, Number.NaN), 11 * MIN, "NaN is the midpoint");
+
+// probeDelayForError: reset override wins with after-jitter; plain steps are the
+// ladder base with symmetric jitter (the effect layer applies the randomness).
+{
+	const now = 1_000_000;
+	assert.deepEqual(probeDelayForError("quota; reset after 5m", now, "quota", 0), { delayMs: 5 * MIN, jitter: "after" }, "reset overrides the 30m quota rung");
+	assert.deepEqual(probeDelayForError("", now, "transient", 0), { delayMs: 1 * MIN, jitter: "symmetric" });
+	assert.deepEqual(probeDelayForError("", now, "quota", 3), { delayMs: 180 * MIN, jitter: "symmetric" });
+	assert.deepEqual(probeDelayForError("reset after 5000m", now, "quota", 1), { delayMs: 60 * MIN, jitter: "symmetric" }, "unusable reset falls back to the ladder");
+}
+
+// Probe text is minimal, fixed, and recognized exactly (never carries ticket content).
+assert.ok(isProbeText("drain-watchdog probe: continue the drain flow."));
+assert.ok(!isProbeText("drain-watchdog probe: continue the drain flow.\nWork ticket #32 now."), "a probe with content is not a probe");
+assert.ok(!isProbeText(buildNudgeText({ target: 32, pickable: 2 })), "normal nudges are distinct from probes");
+
+// providerError with a message: the reset honor overrides the ladder at the seam.
+{
+	const now = 5_000_000;
+	const plain = transition(armed(), { type: "providerError", kind: "quota" }, now);
+	assert.deepEqual(plain.action, { type: "probe", delayMs: 30 * MIN, jitter: "symmetric" });
+	const withReset = transition(armed(), { type: "providerError", kind: "quota", message: "quota exceeded; earliest reset reset after 5m" }, now);
+	assert.equal(withReset.state.phase, "backoff");
+	assert.equal(withReset.state.backoffKind, "quota");
+	assert.deepEqual(withReset.action, { delayMs: 5 * MIN, jitter: "after", type: "probe" }, "carried reset time overrides the quota ladder");
+	// An unusable reset falls back to the ladder even when a message is present.
+	const unusable = transition(armed(), { type: "providerError", kind: "quota", message: "reset after 5000m" }, now);
+	assert.deepEqual(unusable.action, { type: "probe", delayMs: 30 * MIN, jitter: "symmetric" });
+	// A message without any reset hint changes nothing.
+	const hinted = transition(armed(), { type: "providerError", kind: "quota", message: "quota exhausted" }, now);
+	assert.deepEqual(hinted.action, { type: "probe", delayMs: 30 * MIN, jitter: "symmetric" });
 }
 
 // --- Handoff exit (flow.html section 5, GitHub tracker) -----------------------------------------
@@ -1344,6 +1421,202 @@ await withNoAmbientSubagent(() =>
 		// retry refuses in the pre-read before any mutation runs.
 		assert(String(retry.content[0].text).includes("nothing to hand off"), "an already-handed-off issue refuses cleanly");
 		assert.equal(h.execCalls.length, 2, "the retry also stopped at the pre-read (no edit, no comment)");
+	}),
+);
+
+
+// --- #32 harness rows: the full backoff loop through the live factory ----------------------
+
+const probeTimers = (timers: FakeTimer[]) => timers.filter((t) => t.kind === "timeout");
+const liveTimers = (timers: FakeTimer[]) => timers.filter((t) => !t.cleared);
+
+/**
+ * Firing marks a timer consumed: the probe callback nulls its handle without
+ * clearTimeout (a fired timer needs no clearing), so `cleared` alone cannot
+ * tell a pending probe from a delivered one. `pending` is the real invariant
+ * for "is a probe still scheduled".
+ */
+const makeFirer = () => {
+	const fired = new Set<FakeTimer>();
+	return {
+		fire: (t: FakeTimer) => {
+			fired.add(t);
+			t.fire();
+		},
+		pending: (timers: FakeTimer[], kind: FakeTimer["kind"]) => timers.filter((t) => t.kind === kind && !t.cleared && !fired.has(t)),
+		allSettled: (timers: FakeTimer[]) => timers.every((t) => t.cleared || fired.has(t)),
+	};
+};
+
+/** Drive one live BACKOFF stretch: error -> probe at the ladder step -> probeOk. */
+await withNoAmbientSubagent(() =>
+	withFakeTimers(async (timers, flush, clock) => {
+		const h = makeHarness(makeFixtureCwd());
+		const f = makeFirer();
+		h.entries.push(armedEntry());
+		h.handlers.session_start({}, h.ctx);
+		// A run ends with a transient provider error.
+		h.handlers.agent_end({ messages: [{ role: "assistant", stopReason: "error", errorMessage: "503 Service Temporarily Unavailable" }] });
+		assert.equal(persistedLatest(h.entries).data.phase, "backoff", "the error enters BACKOFF");
+		assert(h.audits.some((a) => a.type === "transition" && a.data.to === "backoff"), "the BACKOFF entry is audited");
+		assert.equal(f.pending(probeTimers(timers), "timeout").length, 1, "entering BACKOFF schedules exactly one probe timer");
+		// Ladder rung 0 = 1 min, jittered ±20%: firing past the band's upper edge must
+		// have delivered already — the timer carried a delay inside the jitter band.
+		clock.advance(2 * MIN);
+		f.fire(probeTimers(timers).at(-1)!);
+		await flush();
+		assert.equal(h.sent.at(-1)!.customType, "drain-watchdog-probe", "the probe is delivered as its own message type");
+		assert(isProbeText(h.sent.at(-1)!.content), "the probe is the minimal fixed text, not a nudge");
+		assert(h.audits.some((a) => a.type === "probe-delivered"), "the delivery is audited");
+		// The probe run succeeds: one success returns to ARMED and resets the ladder.
+		h.handlers.agent_end({ messages: [{ role: "assistant", stopReason: "toolUse" }] });
+		assert.equal(persistedLatest(h.entries).data.phase, "armed", "one successful probe returns to ARMED");
+		const persistedAfterOk = persistedLatest(h.entries).data;
+		assert.equal(persistedAfterOk.backoffRung, 0, "the ladder is reset");
+		assert.equal(persistedAfterOk.backoffKind, null);
+		// No probe survives the recovery; the tick loop is still live.
+		assert.equal(f.pending(timers, "timeout").length, 0, "no probe timer survives probeOk");
+		assert.equal(f.pending(timers, "interval").length, 1, "the tick loop stays live for the next cycle");
+		await flush();
+	}),
+);
+
+// Escalation: each failed probe climbs the ladder (1 -> 2 -> 5 min, jitter-bounded),
+// no normal nudge fires while BACKOFF holds, and probeOk resets everything.
+await withNoAmbientSubagent(() =>
+	withFakeTimers(async (timers, flush, clock) => {
+		const h = makeHarness(makeFixtureCwd());
+		const f = makeFirer();
+		h.entries.push(armedEntry());
+		h.handlers.session_start({}, h.ctx);
+		const ladderBase = [1, 2, 5].map((m) => m * MIN);
+		h.handlers.agent_end({ messages: [{ role: "assistant", stopReason: "error", errorMessage: "connection refused" }] });
+		for (let rung = 0; rung < 3; rung++) {
+			assert.equal(persistedLatest(h.entries).data.phase, "backoff");
+			assert.equal(persistedLatest(h.entries).data.backoffRung, rung, `the outage sits on rung ${rung}`);
+			// Fire past this rung's upper jitter bound; the delivery then proves the
+			// probe was scheduled at this rung's step, not a later one.
+			clock.advance(ladderBase[rung]! * 1.2 + 60_000);
+			f.fire(probeTimers(timers).at(-1)!);
+			await flush();
+			assert.equal(h.sent.at(-1)!.customType, "drain-watchdog-probe", `rung ${rung} probe delivered`);
+			if (rung < 2) {
+				h.handlers.agent_end({ messages: [{ role: "assistant", stopReason: "error", errorMessage: "connection refused" }] });
+				assert.equal(persistedLatest(h.entries).data.backoffRung, rung + 1, "a failed probe escalates one rung");
+			} else {
+				h.handlers.agent_end({ messages: [{ role: "assistant", stopReason: "toolUse" }] });
+			}
+		}
+		assert.equal(persistedLatest(h.entries).data.phase, "armed", "probeOk after the ladder stretch returns to ARMED");
+		// Across the whole stretch no normal nudge was sent: BACKOFF suppresses them.
+		assert(h.sent.every((s) => s.customType === "drain-watchdog-probe"), "only probes went out during BACKOFF");
+		assert(!h.audits.some((a) => a.type === "nudge"), "no nudge audit during BACKOFF");
+	}),
+);
+
+// Quota reset-time honor: the first probe lands at the carried reset (capped), not
+// the 30-minute quota rung; the probe still recovers to ARMED on one success.
+await withNoAmbientSubagent(() =>
+	withFakeTimers(async (timers, flush, clock) => {
+		const h = makeHarness(makeFixtureCwd());
+		const f = makeFirer();
+		h.entries.push(armedEntry());
+		h.handlers.session_start({}, h.ctx);
+		h.handlers.agent_end({ messages: [{ role: "assistant", stopReason: "error", errorMessage: "quota exceeded; earliest reset reset after 5m" }] });
+		assert.equal(persistedLatest(h.entries).data.backoffKind, "quota", "the quota error opens the quota outage");
+		// Reset-driven delay = 5 min + upward jitter (max 6 min). Fire at 6.5 min: a probe
+		// scheduled on the 30-min quota rung would still be pending — the delivery at
+		// ~5-6 min proves the carried reset override was honored.
+		clock.advance(6.5 * MIN);
+		f.fire(probeTimers(timers).at(-1)!);
+		await flush();
+		assert.equal(h.sent.at(-1)!.customType, "drain-watchdog-probe", "the reset-driven probe fired well before the 30m quota rung");
+		h.handlers.agent_end({ messages: [{ role: "assistant", stopReason: "toolUse" }] });
+		assert.equal(persistedLatest(h.entries).data.phase, "armed", "one success after the reset-driven probe recovers ARMED");
+	}),
+);
+
+// Outage budget: repeated errors past TRANSIENT_OUTAGE_BUDGET_MS pause with notify
+// and audit (the pause path clears every timer, probes included).
+await withNoAmbientSubagent(() =>
+	withFakeTimers(async (timers, flush, clock) => {
+		const h = makeHarness(makeFixtureCwd());
+		const f = makeFirer();
+		h.entries.push(armedEntry());
+		h.handlers.session_start({}, h.ctx);
+		h.handlers.agent_end({ messages: [{ role: "assistant", stopReason: "error", errorMessage: "connection refused" }] });
+		for (let i = 0; i < 12; i++) {
+			clock.advance(60 * MIN);
+			const pending = f.pending(probeTimers(timers), "timeout");
+			if (pending.length > 0) f.fire(pending.at(-1)!);
+			await flush();
+			h.handlers.agent_end({ messages: [{ role: "assistant", stopReason: "error", errorMessage: "connection refused" }] });
+			if (persistedLatest(h.entries).data.phase === "paused") break;
+		}
+		assert.equal(persistedLatest(h.entries).data.phase, "paused", "the outage budget pauses the run");
+		const pauseAudit = h.audits.filter((a) => a.type === "paused").at(-1)!;
+		assert(String(pauseAudit.data.reason).includes("outage"), `the pause names the outage budget (${pauseAudit.data.reason})`);
+		assert(h.notifications.some((n) => n.message.includes("PAUSED")), "the outage pause notifies");
+		assert(timers.every((t2) => t2.cleared || f.pending([t2], t2.kind).length === 0), "the pause clears (or consumes) every timer");
+	}),
+);
+
+// Auth: an auth-class error pauses immediately — no probe, no ladder.
+await withNoAmbientSubagent(() =>
+	withFakeTimers(async (timers, _flush, _clock) => {
+		const h = makeHarness(makeFixtureCwd());
+		const f = makeFirer();
+		h.entries.push(armedEntry());
+		h.handlers.session_start({}, h.ctx);
+		h.handlers.agent_end({ messages: [{ role: "assistant", stopReason: "error", errorMessage: "401 Unauthorized: invalid api key" }] });
+		assert.equal(persistedLatest(h.entries).data.phase, "paused", "auth pauses immediately");
+		assert.equal(persistedLatest(h.entries).data.pausedReason, "provider auth error; needs human");
+		assert.equal(f.pending(probeTimers(timers), "timeout").length, 0, "no probe is scheduled for an auth pause");
+		assert(h.notifications.some((n) => n.message.includes("PAUSED")), "the auth pause notifies");
+	}),
+);
+
+// Unknown-class errors ride the transient ladder AND count toward the breaker:
+// BREAKER_K unknown errors in a row pause naming the unknown breaker.
+await withNoAmbientSubagent(() =>
+	withFakeTimers(async (timers, flush, clock) => {
+		const h = makeHarness(makeFixtureCwd());
+		const f = makeFirer();
+		h.entries.push(armedEntry());
+		h.handlers.session_start({}, h.ctx);
+		for (let i = 0; i < BREAKER_K; i++) {
+			h.handlers.agent_end({ messages: [{ role: "assistant", stopReason: "error", errorMessage: "something went profoundly sideways" }] });
+			if (i < BREAKER_K - 1) {
+				assert.equal(persistedLatest(h.entries).data.phase, "backoff", `unknown error ${i + 1} rides the transient ladder`);
+				assert.equal(persistedLatest(h.entries).data.backoffKind, "transient");
+				clock.advance(31 * MIN);
+				const pending = f.pending(probeTimers(timers), "timeout");
+				if (pending.length > 0) f.fire(pending.at(-1)!);
+				await flush();
+			}
+		}
+		assert.equal(persistedLatest(h.entries).data.phase, "paused", "the Kth unknown error fires the breaker");
+		const pauseAudit = h.audits.filter((a) => a.type === "paused").at(-1)!;
+		assert(String(pauseAudit.data.reason).includes("unknown"), "the pause names the unknown breaker");
+	}),
+);
+
+// BACKOFF suppresses the normal nudge even when ticks run: restore a BACKOFF run
+// (probe timer + tick loop), advance past idle grace + cooldown, fire ticks, and
+// verify only the probe path is alive — no nudge is composed or delivered.
+await withNoAmbientSubagent(() =>
+	withFakeTimers(async (timers, flush, clock) => {
+		const h = makeHarness(makeFixtureCwd());
+		const f = makeFirer();
+		h.entries.push({ type: "custom", customType: "drain-watchdog-state", data: { phase: "backoff", backoffKind: "transient", backoffRung: 0, backoffStartMs: Date.now() } });
+		h.handlers.session_start({}, h.ctx);
+		assert.equal(f.pending(probeTimers(timers), "timeout").length, 1, "restored BACKOFF keeps a pending probe timer");
+		clock.advance(IDLE_GRACE_MS + 10 * MIN);
+		for (const t of liveTimers(timers).filter((t) => t.kind === "interval")) t.fire();
+		await flush();
+		await flush();
+		assert(h.sent.every((s) => s.customType !== "drain-watchdog-nudge"), "BACKOFF suppresses normal nudges even on ticks");
+		assert(!h.audits.some((a) => a.type === "nudge"), "no nudge is recorded during a restored BACKOFF");
 	}),
 );
 
