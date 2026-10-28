@@ -208,6 +208,11 @@ const QUOTA_PATTERNS = [
 	/available balance/i,
 	/out of budget/i,
 	/quota exceeded/i,
+	// Real stack text: "All claude accounts have exhausted their quota (cached quota
+	// state, no upstream attempt; ...)" — without these it classified unknown and
+	// the breaker paused the run mid quota window.
+	/exhausted their quota/i,
+	/cached quota state/i,
 	/billing/i,
 ];
 
@@ -295,10 +300,18 @@ export function isProbeText(content: string): boolean {
  *   "reset at 2026-01-31T14:32" — ISO-ish date-time (offset-less forms parse LOCAL)
  *
  * Returns null when the text carries no usable reset time (caller keeps the
- * ladder step): no hint, a window over MAX_RESET_DELAY_MS, or an instant that
- * already passed (clock skew, provider slack). A reset inside the window
- * clamps to [0, MAX_RESET_DELAY_MS] so a passed reset probes immediately and
- * no reset can out-wait the outage budget that also bounds the run.
+ * ladder step): no hint, a window over MAX_RESET_DELAY_MS (any form), or a
+ * relative window of 0. An absolute instant that already passed (clock skew,
+ * provider slack) is usable and clamps to 0, so it probes immediately. A reset
+ * inside the window is honored as-is.
+ *
+ * MAX_RESET_DELAY_MS ceiling (ponytail: fixed to 30 min; raise toward the 3 h
+ * quota rung when a real provider advertises a longer window): a longer window
+ * is not honored and the ladder step applies instead (extra early probes, never
+ * a probe that out-waits the run). The outage budget stays the long-horizon
+ * bound and pauses loudly.
+ * Clock form: built with local `setHours`, so a DST transition can skew it by
+ * +-1 h; the cap check bounds that harm (delay lands in [0, cap] or null).
  */
 export const MAX_RESET_DELAY_MS = 30 * 60_000;
 export function parseResetTimeMs(message: string, now: number): number | null {
@@ -313,7 +326,9 @@ export function parseResetTimeMs(message: string, now: number): number | null {
 	const iso = ISO_RESET_RE.exec(message);
 	if (iso !== null) {
 		const t = Date.parse(iso[0]!);
-		return Number.isNaN(t) ? null : Math.min(Math.max(t - now, 0), MAX_RESET_DELAY_MS);
+		if (Number.isNaN(t)) return null;
+		const delay = Math.max(t - now, 0);
+		return delay > MAX_RESET_DELAY_MS ? null : delay;
 	}
 	const clock = CLOCK_RESET_RE.exec(message);
 	if (clock === null) return null;

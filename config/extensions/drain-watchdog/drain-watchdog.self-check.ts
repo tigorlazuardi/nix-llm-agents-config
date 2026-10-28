@@ -663,6 +663,12 @@ assert.equal(classifyProviderError("Error: timeout of 30000ms exceeded"), "trans
 assert.equal(classifyProviderError("Request failed: unauthorized (no api key)"), "auth");
 assert.equal(classifyProviderError("Something went profoundly sideways"), "unknown");
 assert.equal(classifyProviderError("model emitted garbage tokens"), "unknown");
+// The real environment quota text (cached-quota stack) is quota, not unknown: it must ride
+// the quota ladder, never the unknown-error breaker.
+const REAL_QUOTA_TEXT = "All claude accounts have exhausted their quota (cached quota state, no upstream attempt; earliest reset reset after 5m) (reset after 5m)";
+assert.equal(classifyProviderError(REAL_QUOTA_TEXT), "quota", "real environment quota text");
+assert.equal(classifyProviderError("served from cached quota state"), "quota");
+assert.equal(classifyProviderError("All accounts have exhausted their quota"), "quota");
 
 // --- Ladders ---------------------------------------------------------------------------------
 
@@ -720,6 +726,8 @@ assert.deepEqual(
 	assert.equal(parseResetTimeMs("reset after 5000m", now), null, "over the window cap");
 	assert.equal(parseResetTimeMs("resets in 2 hours", now), null, "over the window cap (relative)");
 	assert.equal(parseResetTimeMs("resets at 13:30", now), null, "clock beyond the cap");
+	assert.equal(parseResetTimeMs("reset at " + isoAt(300), now), null, "ISO beyond the cap is null like REL/clock");
+	assert.equal(parseResetTimeMs("reset at " + isoAt(30), now), 30 * MIN, "ISO exactly at the cap is honored");
 	assert.equal(parseResetTimeMs("reset at " + isoAt(-5), now), 0, "a passed reset clamps to 0 (probe immediately)");
 	assert.equal(parseResetTimeMs("reset after 0m", now), null);
 	assert.equal(parseResetTimeMs("no hint here at all", now), null);
@@ -767,6 +775,18 @@ assert.ok(!isProbeText(buildNudgeText({ target: 32, pickable: 2 })), "normal nud
 	// A message without any reset hint changes nothing.
 	const hinted = transition(armed(), { type: "providerError", kind: "quota", message: "quota exhausted" }, now);
 	assert.deepEqual(hinted.action, { type: "probe", delayMs: 30 * MIN, jitter: "symmetric" });
+	// The real quota text end to end: classify -> quota backoff probe honoring its 5 min reset
+	// (upward jitter), and quota errors never feed the unknown-error breaker.
+	assert.deepEqual(probeDelayForError(REAL_QUOTA_TEXT, now, "quota", 0), { delayMs: 5 * MIN, jitter: "after" });
+	let real = armed();
+	for (let i = 0; i < BREAKER_K + 2; i++) {
+		const r = transition(real, { type: "providerError", kind: classifyProviderError(REAL_QUOTA_TEXT), message: REAL_QUOTA_TEXT }, now + i * 5 * MIN);
+		assert.equal(r.state.phase, "backoff", `real quota error ${i + 1} stays in backoff`);
+		assert.equal(r.state.backoffKind, "quota");
+		assert.equal(r.state.noProgressStreak, 0, `real quota error ${i + 1} adds no breaker streak`);
+		assert.deepEqual(r.action, { type: "probe", delayMs: 5 * MIN, jitter: "after" }, "reset override beats the quota rung");
+		real = r.state;
+	}
 }
 
 // --- Handoff exit (flow.html section 5, GitHub tracker) -----------------------------------------
@@ -1533,6 +1553,46 @@ await withNoAmbientSubagent(() =>
 		assert.equal(h.sent.at(-1)!.customType, "drain-watchdog-probe", "the reset-driven probe fired well before the 30m quota rung");
 		h.handlers.agent_end({ messages: [{ role: "assistant", stopReason: "toolUse" }] });
 		assert.equal(persistedLatest(h.entries).data.phase, "armed", "one success after the reset-driven probe recovers ARMED");
+	}),
+);
+
+// Real environment quota text: BREAKER_K consecutive failures ride the quota ladder with the
+// carried 5 min reset, never the unknown breaker (the run must survive the quota window).
+await withNoAmbientSubagent(() =>
+	withFakeTimers(async (timers, flush, clock) => {
+		const h = makeHarness(makeFixtureCwd());
+		const f = makeFirer();
+		h.entries.push(armedEntry());
+		h.handlers.session_start({}, h.ctx);
+		for (let i = 0; i < BREAKER_K; i++) {
+			h.handlers.agent_end({ messages: [{ role: "assistant", stopReason: "error", errorMessage: REAL_QUOTA_TEXT }] });
+			const data = persistedLatest(h.entries).data;
+			assert.equal(data.phase, "backoff", `real quota error ${i + 1} stays in backoff`);
+			assert.equal(data.backoffKind, "quota", "classified as quota");
+			assert.equal(data.noProgressStreak, 0, "quota never feeds the unknown breaker");
+			// Reset 5 min + up to 20% jitter: delivered by 6.5 min, far under the 30m+ quota rungs.
+			clock.advance(6.5 * MIN);
+			f.fire(f.pending(probeTimers(timers), "timeout").at(-1)!);
+			await flush();
+			assert.equal(h.sent.at(-1)!.customType, "drain-watchdog-probe", `probe ${i + 1} honored the 5m reset`);
+		}
+		assert.equal(persistedLatest(h.entries).data.phase, "backoff", "the run survives K quota failures");
+	}),
+);
+
+// Single pending probe: a second providerError while already in BACKOFF replaces the probe
+// timer, never accumulates a second one (double probes = duplicate steers).
+await withNoAmbientSubagent(() =>
+	withFakeTimers(async (timers, _flush, _clock) => {
+		const h = makeHarness(makeFixtureCwd());
+		const f = makeFirer();
+		h.entries.push(armedEntry());
+		h.handlers.session_start({}, h.ctx);
+		h.handlers.agent_end({ messages: [{ role: "assistant", stopReason: "error", errorMessage: "connection refused" }] });
+		assert.equal(f.pending(probeTimers(timers), "timeout").length, 1, "first error: one probe timer");
+		h.handlers.agent_end({ messages: [{ role: "assistant", stopReason: "error", errorMessage: "connection refused" }] });
+		assert.equal(persistedLatest(h.entries).data.backoffRung, 1, "second error escalates in place");
+		assert.equal(f.pending(probeTimers(timers), "timeout").length, 1, "BACKOFF re-entry leaves exactly one pending probe timer");
 	}),
 );
 
