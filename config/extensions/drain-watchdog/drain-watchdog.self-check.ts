@@ -68,6 +68,9 @@ import {
 	messageText,
 	parseWatchdogSubcommand,
 	pickTarget,
+	parseTargetInfo,
+	watchdogCompletions,
+	watchdogWidgetLines,
 	targetToolGate,
 	queueFingerprint,
 	readIntEnv,
@@ -911,6 +914,41 @@ assert.deepEqual(targetToolGate(false, true), { ok: true });
 assert.equal(targetToolGate(true, true).ok, false, "child sessions never choose a target");
 assert.equal(targetToolGate(false, false).ok, false, "no pending discovery: the model cannot pick a target on its own");
 
+
+// Operator UI: target kind from gh output (MAP / SPEC / TIKET), widget lines, completion.
+assert.deepEqual(parseTargetInfo(JSON.stringify({ title: "m", labels: [{ name: "wayfinder:map" }], subIssues: { totalCount: 3 } })), { kind: "map", title: "m" });
+assert.deepEqual(parseTargetInfo(JSON.stringify({ title: "s", labels: [{ name: "ready-for-agent" }], subIssues: { totalCount: 8 } })), { kind: "spec", title: "s" });
+assert.deepEqual(parseTargetInfo(JSON.stringify({ title: "t", labels: [], subIssues: { totalCount: 0 } })), { kind: "ticket", title: "t" });
+assert.equal(parseTargetInfo("not json"), null);
+assert.equal(parseTargetInfo(JSON.stringify({ labels: [] })), null, "no title is unparseable");
+
+const baseView = { phase: "armed" as const, prep: null, target: 35, info: { kind: "ticket" as const, title: "end-to-end unattended validation run" }, pickable: 2, inflight: 0, children: 1, nudgeCount: 3, noProgressStreak: 1, idleMs: 42_000, pausedReason: null, backoffKind: null };
+const plain = (lines: string[] | null) => (lines ?? []).join("\n").replace(/\x1b\[[0-9;]*m/g, "");
+const armedWidget = plain(watchdogWidgetLines(baseView));
+assert(armedWidget.includes("ARMED") && armedWidget.includes("TIKET #35") && armedWidget.includes("end-to-end unattended validation run"), "armed widget shows the kind, number and title");
+assert(armedWidget.includes("2 pickable") && armedWidget.includes("1 jalan") && armedWidget.includes("nudge 3/30") && armedWidget.includes("idle 0:42") && armedWidget.includes("breaker 1/4"));
+assert(watchdogWidgetLines(baseView)![0].includes("\x1b[32m"), "armed is green");
+assert(plain(watchdogWidgetLines({ ...baseView, info: { kind: "map", title: "m" } })).includes("MAP #35"));
+assert(plain(watchdogWidgetLines({ ...baseView, info: { kind: "spec", title: "s" } })).includes("SPEC #35"));
+assert(plain(watchdogWidgetLines({ ...baseView, info: null })).includes("#35") && !plain(watchdogWidgetLines({ ...baseView, info: null })).includes("TIKET"), "unknown kind falls back to the bare number");
+const pausedLines = watchdogWidgetLines({ ...baseView, phase: "paused", pausedReason: "no progress for 45m (stall)" })!;
+assert(pausedLines[0].includes("\x1b[31m") && plain(pausedLines).includes("PAUSED") && plain(pausedLines).includes("no progress for 45m (stall)") && plain(pausedLines).includes("/watchdog resume"), "paused is red with reason and next action");
+assert(plain(watchdogWidgetLines({ ...baseView, phase: "backoff", backoffKind: "quota" })).includes("BACKOFF (quota)"));
+assert(plain(watchdogWidgetLines({ ...baseView, phase: "finalizing" })).includes("FINALIZING"));
+assert(plain(watchdogWidgetLines({ ...baseView, phase: "done" })).includes("DONE"));
+assert.equal(watchdogWidgetLines({ ...baseView, phase: "off", prep: null, target: null, info: null }), null, "OFF without PREP shows nothing");
+assert(plain(watchdogWidgetLines({ ...baseView, phase: "off", prep: "discover", target: null, info: null })).includes("memilih target"));
+assert(plain(watchdogWidgetLines({ ...baseView, phase: "off", prep: "proof" })).includes("bukti kesiapan"));
+assert(plain(watchdogWidgetLines({ ...baseView, info: { kind: "ticket", title: "x".repeat(200) } })).split("\n")[1].length < 90, "long titles are truncated");
+
+assert.deepEqual(watchdogCompletions("sta")!.map((c) => c.value), ["status"]);
+assert.deepEqual(watchdogCompletions("")!.map((c) => c.value), ["status", "resume", "off", "on"]);
+assert.deepEqual(watchdogCompletions("o")!.map((c) => c.value), ["off", "on"]);
+assert.deepEqual(watchdogCompletions("RES")!.map((c) => c.value), ["resume"], "completion ignores case");
+assert.equal(watchdogCompletions("zzz"), null);
+assert.equal(watchdogCompletions("on #3"), null, "no completion after the first word");
+assert.equal(watchdogCompletions("#35"), null, "a ref gets no completion");
+
 // drain-queue/drain-inflight blocks extract from the tracker doc format.
 const trackerDoc = [
 	"## Drain queue", "prose refusal rule", "```drain-queue", "set -euo pipefail", "echo 3", "```", "```drain-inflight", "echo 1", "```", "```drain-queue-extra", "echo 0", "```", "not a block", ""].join("\n");
@@ -1095,6 +1133,8 @@ type Harness = {
 	sent: { customType: string; content: string }[];
 	/** pi.sendUserMessage payloads (PREP/discovery instructions). */
 	userMessages: string[];
+	/** Latest ui.setWidget payload for the watchdog key (undefined = cleared). */
+	widget: () => string[] | undefined;
 	execCalls: { command: string; args: string[] }[];
 	setExec: (impl: (command: string, args: string[]) => Promise<{ stdout: string; stderr: string; code: number; killed: boolean }>) => void;
 	/** Queue proof the mocked exec returns for the next bash calls (PREP needs >0
@@ -1117,6 +1157,7 @@ function makeHarness(cwd: string): Harness {
 	const notifications: { message: string; level: string }[] = [];
 	const sent: { customType: string; content: string }[] = [];
 	const userMessages: string[] = [];
+	let widgetLines: string[] | undefined;
 	const entries: unknown[] = [];
 	let queueValue = 0;
 	let execImpl: (command: string, args: string[]) => Promise<{ stdout: string; stderr: string; code: number; killed: boolean }> = async () => ({
@@ -1160,12 +1201,15 @@ function makeHarness(cwd: string): Harness {
 			notify: (message: string, level = "info") => notifications.push({ message, level }),
 			// The PREP -> READY -> arm flow asks once; interactive rows need an answer.
 			confirm: async () => true,
+			setWidget: (_key: string, lines: string[] | undefined) => {
+				widgetLines = lines;
+			},
 		},
 		isIdle: () => true,
 		hasPendingMessages: () => false,
 		sessionManager: { getEntries: () => entries },
 	};
-	return { handlers, audits, notifications, sent, userMessages, execCalls, setExec: (impl) => { execImpl = impl; }, setQueue: (pickable) => { queueValue = pickable; }, tools, ctx, entries };
+	return { handlers, audits, notifications, sent, userMessages, widget: () => widgetLines, execCalls, setExec: (impl) => { execImpl = impl; }, setQueue: (pickable) => { queueValue = pickable; }, tools, ctx, entries };
 }
 
 // A real drain-queue + drain-inflight fixture on disk at <tmp>/docs/agents/issue-tracker.md.
@@ -2198,6 +2242,7 @@ await withNoAmbientSubagent(() =>
 			assert(h.audits.some((a) => a.type === "prep-discover"));
 			assert.equal(h.execCalls.length, 0, "discovery does not run the queue before a target is chosen");
 
+			assert(plain(h.widget() ?? null as any).includes("memilih target"), "the widget shows target selection while discovery is pending");
 			const ok = await h.tools.watchdog_target!.execute("d1", { issue: 38 }, undefined, undefined, h.ctx);
 			assert(!ok.isError, "the pick is accepted while discovery is pending");
 			assert(h.audits.some((a) => a.type === "prep-proof" && a.data.target === 38), "the chosen target gets the queue proof");
@@ -2214,6 +2259,8 @@ await withNoAmbientSubagent(() =>
 			h.handlers["command:watchdog"]("status", h.ctx);
 			assert(h.notifications.some((n) => n.message.includes("phase armed") && n.message.includes("run target #38")), "the discovered target arms through the normal PREP path");
 			assert(h.audits.some((a) => a.type === "kickoff" && a.data.target === 38), "arming kicks the first pass off immediately");
+			const w = plain(h.widget() ?? null as any);
+			assert(w.includes("ARMED") && w.includes("#38"), "the armed widget is on screen after arm");
 			assert.equal(h.sent.filter((m) => m.customType === "drain-watchdog-nudge").length, 1, "exactly one kick-off message is delivered at arm");
 			assert(h.sent[h.sent.length - 1].content.includes("#38"), "the kick-off names the run target");
 			assert.equal(persistedLatest(h.entries).data.nudgeCount, 0, "the kick-off is not a counted nudge");
@@ -2243,6 +2290,7 @@ await withNoAmbientSubagent(() =>
 			h.setQueue(2);
 			await h.handlers["command:watchdog"]("", h.ctx);
 			await h.handlers["command:watchdog"]("off", h.ctx);
+			assert.equal(h.widget(), undefined, "/watchdog off clears the widget");
 			const afterOff = await h.tools.watchdog_target!.execute("r3", { issue: 38 }, undefined, undefined, h.ctx);
 			assert(afterOff.isError, "/watchdog off cancels a pending discovery");
 

@@ -676,6 +676,125 @@ export function buildNudgeText(p: { target: number | null; pickable: number }): 
 export const FINALIZE_NUDGE_TEXT =
 	"drain-watchdog: frontier is empty. Finish the closing steps (final review, integration branch/PR, cleanup) and stop; do not open new work.";
 
+// --- Operator UI (persistent widget + command completion) --------------------
+
+export type TargetKind = "map" | "spec" | "ticket";
+export type TargetInfo = { kind: TargetKind; title: string };
+
+/**
+ * Kind of a run target from `gh issue view <n> --json title,labels,subIssues`
+ * output: a `wayfinder:map` label is a MAP, any other issue with sub-issues is
+ * a SPEC (the drained epic), the rest is a single TICKET. null on anything
+ * unparseable — the widget then shows the bare number.
+ */
+export function parseTargetInfo(stdout: string): TargetInfo | null {
+	let raw: unknown;
+	try {
+		raw = JSON.parse(stdout);
+	} catch {
+		return null;
+	}
+	if (typeof raw !== "object" || raw === null) return null;
+	const o = raw as { title?: unknown; labels?: unknown; subIssues?: unknown };
+	if (typeof o.title !== "string") return null;
+	const labels = Array.isArray(o.labels)
+		? o.labels.map((l) => (typeof l === "object" && l !== null ? (l as { name?: unknown }).name : l)).filter((n): n is string => typeof n === "string")
+		: [];
+	const sub = typeof o.subIssues === "object" && o.subIssues !== null ? (o.subIssues as { totalCount?: unknown }).totalCount : 0;
+	const kind: TargetKind = labels.includes("wayfinder:map") ? "map" : typeof sub === "number" && sub > 0 ? "spec" : "ticket";
+	return { kind, title: o.title };
+}
+
+export type WidgetView = {
+	phase: DrainPhase;
+	/** PREP in flight while the core is still OFF: discovery or READY proof. */
+	prep: "discover" | "proof" | null;
+	target: number | null;
+	info: TargetInfo | null;
+	pickable: number;
+	inflight: number;
+	children: number;
+	nudgeCount: number;
+	noProgressStreak: number;
+	idleMs: number;
+	pausedReason: string | null;
+	backoffKind: "transient" | "quota" | null;
+};
+
+const ANSI = { reset: "\x1b[0m", bold: "\x1b[1m", dim: "\x1b[2m", red: "\x1b[31m", green: "\x1b[32m", yellow: "\x1b[33m", magenta: "\x1b[35m", cyan: "\x1b[36m" } as const;
+const paint = (color: keyof typeof ANSI, text: string): string => `${ANSI[color]}${text}${ANSI.reset}`;
+
+const KIND_LABEL: Record<TargetKind, string> = { map: "MAP", spec: "SPEC", ticket: "TIKET" };
+const KIND_COLOR: Record<TargetKind, keyof typeof ANSI> = { map: "magenta", spec: "cyan", ticket: "yellow" };
+
+function clock(ms: number): string {
+	const total = Math.max(0, Math.floor(ms / 1000));
+	return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}`;
+}
+
+/**
+ * The persistent watchdog widget (string[] above the editor), or null when
+ * there is nothing to show (OFF without a PREP). Green ARMED, yellow
+ * BACKOFF/FINALIZING/PREP, red PAUSED, dim DONE. Pure: the effect layer
+ * supplies the view and the clock.
+ */
+export function watchdogWidgetLines(v: WidgetView): string[] | null {
+	if (v.phase === "off" && v.prep === null) return null;
+	let head: string;
+	let color: keyof typeof ANSI;
+	let hint: string;
+	let body: string;
+	switch (v.phase) {
+		case "armed":
+			[head, color, hint] = ["\u25cf ARMED", "green", "/watchdog status \u00b7 Esc jeda \u00b7 /watchdog off"];
+			break;
+		case "backoff":
+			[head, color, hint] = [`\u25d0 BACKOFF${v.backoffKind === null ? "" : ` (${v.backoffKind})`}`, "yellow", "probe otomatis \u00b7 Esc jeda \u00b7 /watchdog off"];
+			break;
+		case "finalizing":
+			[head, color, hint] = ["\u25d1 FINALIZING", "yellow", "closing steps berjalan \u00b7 Esc jeda"];
+			break;
+		case "paused":
+			[head, color, hint] = ["\u25cb PAUSED", "red", "/watchdog resume \u00b7 /watchdog off"];
+			break;
+		case "done":
+			[head, color, hint] = ["\u2713 DONE", "dim", "/watchdog off untuk membersihkan"];
+			break;
+		default:
+			[head, color, hint] = [v.prep === "discover" ? "\u2026 PREP: memilih target" : "\u2026 PREP: bukti kesiapan", "cyan", "jawab pertanyaan model \u00b7 /watchdog off batal"];
+	}
+	const kind = v.info === null ? null : paint(KIND_COLOR[v.info.kind], paint("bold", KIND_LABEL[v.info.kind]));
+	const title = v.info === null ? "" : `  ${v.info.title.length > 60 ? `${v.info.title.slice(0, 59)}\u2026` : v.info.title}`;
+	const ref = v.target === null ? "(target belum dipilih)" : `${kind === null ? "" : `${kind} `}#${v.target}${title}`;
+	if (v.phase === "paused") body = `${v.pausedReason ?? "alasan tidak tercatat"}`;
+	else if (v.phase === "off" || v.phase === "done") body = `${v.pickable} pickable terakhir`;
+	else body = `${v.pickable} pickable \u00b7 ${v.children} jalan \u00b7 nudge ${v.nudgeCount}/${HARD_CAP} \u00b7 idle ${clock(v.idleMs)} \u00b7 breaker ${v.noProgressStreak}/${BREAKER_K}`;
+	return [
+		`${paint(color, "\u250c")} watchdog ${paint("bold", paint(color, head))} ${paint(color, "\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500")}`,
+		`${paint(color, "\u2502")} ${ref}`,
+		`${paint(color, "\u2502")} ${v.phase === "paused" ? paint("red", body) : body}`,
+		`${paint(color, "\u2514\u2500")} ${paint("dim", hint)}`,
+	];
+}
+
+const WATCHDOG_SUBCOMMANDS: readonly { name: string; description: string }[] = [
+	{ name: "status", description: "Tampilkan fase, target, nudge, dan antrean" },
+	{ name: "resume", description: "Lanjutkan run yang PAUSED" },
+	{ name: "off", description: "Matikan watchdog dan batalkan PREP" },
+	{ name: "on", description: "Mulai PREP (opsional: on #N)" },
+];
+
+/**
+ * Argument completion for `/watchdog`: only the first word completes
+ * (`/watchdog sta` -> `status`); a `#N` ref or anything with a space gets none.
+ */
+export function watchdogCompletions(prefix: string): { value: string; label: string; description: string }[] | null {
+	if (/\s/.test(prefix)) return null;
+	const p = prefix.toLowerCase();
+	const hits = WATCHDOG_SUBCOMMANDS.filter((c) => c.name.startsWith(p)).map((c) => ({ value: c.name, label: c.name, description: c.description }));
+	return hits.length === 0 ? null : hits;
+}
+
 const STATE_ENTRY_TYPE = "drain-watchdog-state";
 
 /** Valid DrainPhase values, for restoring persisted state without trusting it. */
@@ -1189,6 +1308,8 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 	// True from a discovery request (/watchdog without a single #N) until the model
 	// hands the operator's pick back through watchdog_target (or PREP is reset).
 	let discovering = false;
+	// Operator widget: target kind/title loaded once per run (memory only, refetched on restore).
+	let targetInfo: TargetInfo | null = null;
 	let prepPickable = 0;
 	let prepInflight = 0;
 	let readyDeclared = false;
@@ -1234,6 +1355,7 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 		// different run). restoreDrainState ignores the extra key; restoreRunTarget
 		// reads it back.
 		pi.appendEntry(STATE_ENTRY_TYPE, { ...state, runTarget });
+		refreshWidget();
 	};
 
 	const startLoop = () => {
@@ -1357,6 +1479,49 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 		return { ok: true, pickable: parsed.count, inflight, error: "" };
 	};
 
+	const WIDGET_KEY = "drain-watchdog";
+
+	/** Redraws the persistent widget from live state; cheap, idempotent, never throws into callers. */
+	const refreshWidget = () => {
+		try {
+			const ctx = latestCtx;
+			if (closed || ctx === null || !ctx.hasUI) return;
+			const prep: WidgetView["prep"] = prepTarget !== null ? "proof" : discovering ? "discover" : null;
+			const lines = watchdogWidgetLines({
+				phase: state.phase,
+				prep,
+				target: runTarget ?? prepTarget,
+				info: targetInfo,
+				pickable: lastQueue.pickable,
+				inflight: lastQueue.inflight,
+				children: childCount,
+				nudgeCount: state.nudgeCount,
+				noProgressStreak: state.noProgressStreak,
+				idleMs: Date.now() - idleSinceMs,
+				pausedReason: state.pausedReason,
+				backoffKind: state.backoffKind,
+			});
+			ctx.ui.setWidget(WIDGET_KEY, lines === null ? undefined : lines);
+		} catch {
+			// A UI failure must never break a tick, a tool call, or a state transition.
+		}
+	};
+
+	/** One gh call per run: MAP / SPEC / TIKET + title for the widget. Best effort. */
+	const loadTargetInfo = async (target: number | null) => {
+		targetInfo = null;
+		if (target === null || latestCtx === null) return;
+		const ctx = latestCtx;
+		try {
+			const res = await pi.exec("gh", ["issue", "view", String(target), "--json", "title,labels,subIssues"], { cwd: ctx.cwd, timeout: HANDOFF_TIMEOUT_MS });
+			if (closed || runTarget !== target && prepTarget !== target) return;
+			targetInfo = res.code === 0 ? parseTargetInfo(res.stdout) : null;
+		} catch {
+			targetInfo = null;
+		}
+		refreshWidget();
+	};
+
 	const armRun = (target: number | null, pickable: number, inflight: number) => {
 		const t = transition(state, { type: "arm", queueOk: true, pickable }, Date.now());
 		if (t.refusal !== null) {
@@ -1374,6 +1539,7 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 		audit("armed", { target, pickable, inflight });
 		startLoop();
 		notify(`drain-watchdog ARMED${target === null ? "" : ` on #${target}`}: tick every ${Math.round(tickMs / 1000)}s.`, "info");
+		void loadTargetInfo(target);
 		return true;
 	};
 
@@ -1426,6 +1592,7 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 		const ctx = latestCtx;
 		if (ctx === null) return;
 		const now = Date.now();
+		refreshWidget(); // idle clock moves between persists; ponytail: redrawn once per tick, not per second.
 		// Any activity resets the idle clock and skips the tick (flow.html section 2).
 		if (!ctx.isIdle() || ctx.hasPendingMessages() || uiPromptDepth > 0) {
 			idleSinceMs = now;
@@ -1520,6 +1687,8 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 			return `${q.error || refusal} — not armed`;
 		}
 		prepTarget = target;
+		void loadTargetInfo(target);
+		refreshWidget();
 		prepPickable = q.pickable;
 		prepInflight = q.inflight;
 		audit("prep-proof", { target, pickable: q.pickable, inflight: q.inflight });
@@ -1553,6 +1722,8 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 		prepTarget = null;
 		discovering = false;
 		runTarget = null;
+		targetInfo = null;
+		lastQueue = { pickable: 0, inflight: 0 };
 
 		const resolution = pickTarget(ref);
 		if (resolution.status === "discover") {
@@ -1562,6 +1733,7 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 			audit("prep-discover", { ref });
 			notify("drain-watchdog PREP: no single target given — asking the model to find candidates for you to choose from.", "info");
 			pi.sendUserMessage(DISCOVER_INSTRUCTION(ref));
+			refreshWidget();
 			return;
 		}
 		await prepProof(resolution.number, ctx, true);
@@ -1585,7 +1757,10 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 				clearTimers();
 				childCount = 0;
 				probeInFlight = false;
+				targetInfo = null;
+				lastQueue = { pickable: 0, inflight: 0 };
 				notify("drain-watchdog: off");
+				refreshWidget();
 				return;
 			}
 			case "resume": {
@@ -1765,6 +1940,7 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 
 	pi.registerCommand("watchdog", {
 		description: "Unattended drain watchdog (PREP -> READY -> ARMED; also: resume | off | status)",
+		getArgumentCompletions: watchdogCompletions,
 		handler: async (args, ctx) => {
 			latestCtx = ctx;
 			await runWatchdogCommand(args, ctx);
@@ -1793,6 +1969,8 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 		if (state.phase === "armed" || state.phase === "finalizing") {
 			audit("restored", { phase: state.phase });
 			startLoop();
+			void loadTargetInfo(runTarget);
+			refreshWidget();
 			notify(`drain-watchdog: restored live run (${state.phase}) after restart`);
 		} else if (state.phase === "backoff") {
 			audit("restored", { phase: "backoff", kind: state.backoffKind, rung: state.backoffRung });
@@ -1874,12 +2052,14 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 
 	pi.on("agent_settled", async (event, ctx) => {
 		latestCtx = ctx;
+		refreshWidget();
 		if (event.aborted) {
 			// Esc always wins: a live run PAUSEs and stays paused; PREP proof dies.
 			readyDeclared = false;
 			prepTarget = null;
 			discovering = false;
 			apply(transition(state, { type: "abort" }, Date.now()), "abort");
+			refreshWidget();
 			return;
 		}
 		if (readyDeclared && prepTarget !== null) {
@@ -1895,6 +2075,7 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 				`The model declared READY for #${target} (${prepPickable} pickable). Arm the watchdog for an unattended run?`,
 			);
 			prepTarget = null;
+			refreshWidget();
 			if (closed) return; // M1: session_shutdown fired while ui.confirm was pending.
 			if (!go) {
 				audit("arm-declined", { target });
