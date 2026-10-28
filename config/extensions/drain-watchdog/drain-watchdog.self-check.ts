@@ -18,13 +18,14 @@
  * to the copy).
  */
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import type { DrainEvent, DrainState, HandoffKind, ProbeJitter, TickObservation } from "./index.ts";
+import { basename, join } from "node:path";
+import type { DrainEvent, DrainState, ExecutorStateFile, HandoffKind, ProbeJitter, TickObservation } from "./index.ts";
 import {
 	BREAKER_K,
 	DEFAULT_TICK_CONFIG,
+	FINALIZE_NUDGE_TEXT,
 	HARD_CAP,
 	IDLE_GRACE_MS,
 	INITIAL_STATE,
@@ -46,6 +47,10 @@ import {
 	nextLadderDelayMs,
 	parseResetTimeMs,
 	probeDelayForError,
+	executorRepoSlug,
+	executorStateFilePath,
+	executorStateRoot,
+	readClosingSignal,
 	parseLabelList,
 	parseQueueOutput,
 	planHandoffCommands,
@@ -1680,6 +1685,196 @@ await withNoAmbientSubagent(() =>
 	}),
 );
 
+// --- #38 closing-step signal: pure seam -----------------------------------------------------
+
+const stateFile = (content: string | null, path = "/tmp/executor/x/38/state.json"): ExecutorStateFile => ({ path, content });
+
+// closingStepsDone: false parses -> closing steps remain.
+assert.deepEqual(readClosingSignal([stateFile(JSON.stringify({ closingStepsDone: false }))]), { hasClosingSteps: true, anomalies: [] });
+// closingStepsDone: true with a healthy file -> no signal, no anomaly (the
+// executor reports closing finished). A parseable file WITHOUT the boolean violates
+// the #34 contract (the field is always present): no signal but an anomaly — only
+// an explicit false may claim closing work.
+assert.deepEqual(readClosingSignal([stateFile(JSON.stringify({ closingStepsDone: true }))]), { hasClosingSteps: false, anomalies: [] });
+assert.deepEqual(readClosingSignal([stateFile(JSON.stringify({}))]), { hasClosingSteps: false, anomalies: ["/tmp/executor/x/38/state.json: parsed but closingStepsDone is not a boolean"] });
+// No files at all (executor never ran) -> no signal, no anomaly: plain DONE stays plain (AC3).
+assert.deepEqual(readClosingSignal([]), { hasClosingSteps: false, anomalies: [] });
+// Malformed JSON / non-object / non-boolean / unreadable: no signal, but each is an anomaly.
+{
+	const bad = readClosingSignal([stateFile("{not json"), stateFile(JSON.stringify([1, 2])), stateFile(JSON.stringify({ closingStepsDone: "no" })), stateFile(null)]);
+	assert.equal(bad.hasClosingSteps, false, "a malformed file never claims closing work");
+	assert.equal(bad.anomalies.length, 4, "every malformed shape is an anomaly");
+	assert(bad.anomalies.every((a) => a.includes("state.json")), "anomalies name the path");
+}
+// Any target still false wins over one that finished (multi-target dirs).
+{
+	const mixed = readClosingSignal([stateFile(JSON.stringify({ closingStepsDone: true }), "/tmp/executor/x/38/state.json"), stateFile(JSON.stringify({ closingStepsDone: false }), "/tmp/executor/x/40/state.json")]);
+	assert.equal(mixed.hasClosingSteps, true, "one open target keeps the closing trigger");
+	assert.equal(mixed.anomalies.length, 0);
+}
+
+// Repo slug + state path derivation (the /tmp/executor/<repo-slug> contract).
+assert.equal(executorRepoSlug("/home/homeserver/projects/nix-llm-agents-config"), "nix-llm-agents-config");
+assert.equal(executorRepoSlug("/repos/My_App"), "my-app");
+assert.equal(executorRepoSlug("/"), "");
+assert.equal(executorStateRoot("/repos/demo"), "/tmp/executor/demo");
+assert.equal(executorStateFilePath("/repos/demo", 38), "/tmp/executor/demo/38/state.json");
+
+// --- #38 closing-step signal: live loop through the factory ----------------------------------
+
+/** Writes /tmp/executor/<slug>/<target>/state.json — the real path the effect
+ *  layer scans. The fixture plays the executor, so it applies the same
+ *  documented <repo-slug> rule the prompt states and executorRepoSlug implements
+ *  (lowercased basename, non-alphanumerics collapsed to one dash).
+ *  Returns a cleanup that removes the repo's whole /tmp/executor/<slug> root. */
+function makeExecutorFixture(cwd: string, targets: { dir: string; state: object | string | null }[]): () => void {
+	const slug = executorRepoSlug(cwd);
+	const root = join("/tmp", "executor", slug);
+	rmSync(root, { recursive: true, force: true });
+	for (const t of targets) {
+		const dir = join(root, t.dir);
+		mkdirSync(dir, { recursive: true });
+		if (t.state !== null) writeFileSync(join(dir, "state.json"), typeof t.state === "string" ? t.state : JSON.stringify(t.state));
+	}
+	return () => rmSync(root, { recursive: true, force: true });
+}
+
+// AC1/AC2/AC3 through the live loop: one ARMED run, empty frontier, idle past
+// the grace gate, one tick each. The executor fixture is at the real
+// /tmp/executor/<slug>/<target>/state.json the effect layer scans.
+await withNoAmbientSubagent(() =>
+	withFakeTimers(async (timers, flush, clock) => {
+		const cwd = makeFixtureCwd();
+		const cleanup = makeExecutorFixture(cwd, [{ dir: "38", state: { closingStepsDone: false } }]);
+		try {
+			const h = makeHarness(cwd);
+			h.entries.push(armedEntry());
+			h.handlers.session_start({}, h.ctx);
+			clock.advance(IDLE_GRACE_MS + 1000);
+			const tickTimer = timers.find((t) => t.kind === "interval" && !t.cleared)!;
+			tickTimer.fire();
+			await flush();
+			await flush();
+			assert.equal(h.sent.length, 1, "an empty frontier with closing steps left sends exactly one FINALIZING nudge");
+			assert.equal(h.sent[0]!.customType, "drain-watchdog-nudge");
+			assert.equal(h.sent[0]!.content, FINALIZE_NUDGE_TEXT, "the nudge is the FINALIZING closing text, not a plain nudge");
+			assert(h.audits.some((a) => a.type === "finalize-nudge"), "the finalize nudge is audited (AC1)");
+			assert.equal(persistedLatest(h.entries).data.phase, "finalizing");
+
+			// AC2 (completion): the executor finishes (closingStepsDone: true); the next
+			// idle tick reaches DONE from FINALIZING, with the done audit + notify.
+			writeFileSync(executorStateFilePath(cwd, 38), JSON.stringify({ closingStepsDone: true }));
+			clock.advance(4 * MIN + 1000);
+			tickTimer.fire();
+			await flush();
+			await flush();
+			assert.equal(persistedLatest(h.entries).data.phase, "done", "closingStepsDone true completes the run as DONE (AC2)");
+			assert(h.audits.some((a) => a.type === "done"), "the DONE is audited (the final report entry)");
+			assert(h.notifications.some((n) => n.message.includes("DONE")), "DONE notifies");
+
+			// AC1 second half + AC2 second half: idle AGAIN in FINALIZING without
+			// completion pauses visibly, exactly once, with no second nudge.
+			const cwd2 = makeFixtureCwd();
+			const cleanup2 = makeExecutorFixture(cwd2, [{ dir: "38", state: { closingStepsDone: false } }]);
+			try {
+				const h2 = makeHarness(cwd2);
+				h2.entries.push(armedEntry());
+				h2.handlers.session_start({}, h2.ctx);
+				clock.advance(IDLE_GRACE_MS + 1000);
+				const tick2 = timers.filter((t) => t.kind === "interval" && !t.cleared).at(-1)!;
+				tick2.fire();
+				await flush();
+				await flush();
+				assert.equal(persistedLatest(h2.entries).data.phase, "finalizing");
+				assert.equal(h2.sent.filter((s) => s.content === FINALIZE_NUDGE_TEXT).length, 1, "exactly one FINALIZING nudge");
+				// The file never flips to true; after the cooldown the next idle tick pauses.
+				clock.advance(4 * MIN + 1000);
+				tick2.fire();
+				await flush();
+				await flush();
+				assert.equal(persistedLatest(h2.entries).data.phase, "paused", "idle again in FINALIZING without completion pauses (AC2)");
+				const pauseAudit = h2.audits.filter((a) => a.type === "paused").at(-1)!;
+				assert(String(pauseAudit.data.reason).includes("finalization"), "the pause names finalization not confirmed");
+				assert(h2.notifications.some((n) => n.message.includes("PAUSED")), "the pause notifies");
+				assert.equal(h2.sent.filter((s) => s.content === FINALIZE_NUDGE_TEXT).length, 1, "never a second FINALIZING nudge");
+			} finally {
+				cleanup2();
+			}
+
+			// AC3: no executor state at all — the same tick goes straight to DONE.
+			const cwd3 = makeFixtureCwd();
+			try {
+				const h3 = makeHarness(cwd3);
+				h3.entries.push(armedEntry());
+				h3.handlers.session_start({}, h3.ctx);
+				clock.advance(IDLE_GRACE_MS + 1000);
+				const tick3 = timers.filter((t) => t.kind === "interval" && !t.cleared).at(-1)!;
+				tick3.fire();
+				await flush();
+				await flush();
+				assert.equal(persistedLatest(h3.entries).data.phase, "done", "an empty frontier with no closing steps goes straight to DONE (AC3)");
+				assert(!h3.audits.some((a) => a.type === "finalize-nudge"), "no FINALIZING nudge without a closing signal");
+			} finally {
+				rmSync(cwd3, { recursive: true, force: true });
+			}
+		} finally {
+			cleanup();
+		}
+	}),
+);
+
+// Malformed executor state: the tick treats it as "no closing steps" (DONE, never
+// a pause) and writes the closing-signal-anomaly audit naming the path.
+await withNoAmbientSubagent(() =>
+	withFakeTimers(async (timers, flush, clock) => {
+		const cwd = makeFixtureCwd();
+		const cleanup = makeExecutorFixture(cwd, [{ dir: "38", state: "{not json" }]);
+		try {
+			const h = makeHarness(cwd);
+			h.entries.push(armedEntry());
+			h.handlers.session_start({}, h.ctx);
+			clock.advance(IDLE_GRACE_MS + 1000);
+			const tickTimer = timers.find((t) => t.kind === "interval" && !t.cleared)!;
+			tickTimer.fire();
+			await flush();
+			await flush();
+			assert.equal(persistedLatest(h.entries).data.phase, "done", "a malformed state file never blocks the run (ponytail fail-safe)");
+			const anomaly = h.audits.find((a) => a.type === "closing-signal-anomaly");
+			assert(anomaly !== undefined, "the anomaly is audited");
+			assert(String(anomaly!.data.paths).includes("state.json"), "the anomaly names the file");
+		} finally {
+			cleanup();
+		}
+	}),
+);
+
+// Multi-target dirs: one target still closing keeps the FINALIZING trigger even
+// when another already finished.
+await withNoAmbientSubagent(() =>
+	withFakeTimers(async (timers, flush, clock) => {
+		const cwd = makeFixtureCwd();
+		const cleanup = makeExecutorFixture(cwd, [
+			{ dir: "38", state: { closingStepsDone: true } },
+			{ dir: "40", state: { closingStepsDone: false } },
+		]);
+		try {
+			const h = makeHarness(cwd);
+			h.entries.push(armedEntry());
+			h.handlers.session_start({}, h.ctx);
+			clock.advance(IDLE_GRACE_MS + 1000);
+			const tickTimer = timers.find((t) => t.kind === "interval" && !t.cleared)!;
+			tickTimer.fire();
+			await flush();
+			await flush();
+			assert.equal(persistedLatest(h.entries).data.phase, "finalizing", "one open target keeps the trigger (multi-target scan)");
+			assert.equal(h.sent.filter((s) => s.content === FINALIZE_NUDGE_TEXT).length, 1);
+		} finally {
+			cleanup();
+		}
+	}),
+);
+
+// --- Factory (#30): child sessions register nothing, main sessions do -------------
 // --- Factory (#30): child sessions register nothing, main sessions do -------------
 
 // Minimal pi-surface replica: the child factory must neither listen nor command.

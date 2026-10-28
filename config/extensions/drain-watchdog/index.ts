@@ -777,9 +777,11 @@ export type ClosingSignal = { hasClosingSteps: boolean; anomalies: string[] };
  *    closing steps" (a DONE, not a pause), but as an audited anomaly — a half
  *    -written or corrupt executor state must be visible in the audit trail, and
  *    an unparseable file must never block an unattended run.
- *  - closingStepsDone: true or absent with the file healthy -> no signal (the
- *    executor reports closing finished; absent = the #34-contract field was
- *    never written, and only "explicitly false" may claim closing work).
+ *  - closingStepsDone: true with a healthy file -> no signal (the executor
+ *    reports closing finished). A parseable file without a boolean
+ *    closingStepsDone violates the #34 state.json contract (the field is
+ *    always present): no signal, but an audited anomaly — only an explicit
+ *    false may claim closing work.
  *
  *  ponytail: malformed/unreadable state files are treated as "no closing
  *  steps" + anomaly (DONE with an audit trail), the safer of the two options
