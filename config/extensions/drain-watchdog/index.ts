@@ -147,7 +147,7 @@ export type DrainTransition = {
 
 // ponytail: worst-case nudge latency after idle = IDLE_GRACE_MS + TICK_MS (the idle gate is only
 // evaluated on a tick); fixed to 60s + 15s; add a one-shot idleSince+grace timer if a tick this
-// frequent ever costs too much (each post-grace tick runs the drain-queue command).
+// frequent ever costs too much (each post-grace tick runs the queue query).
 export const IDLE_GRACE_MS = 60_000;
 export const TICK_MS = 15_000;
 export const STALL_LIMIT_MS = 45 * 60_000;
@@ -183,25 +183,77 @@ export const INITIAL_STATE: DrainState = {
 
 // --- Queue command output parsing ---------------------------------------------
 
-export type QueueParse = { ok: true; count: number } | { ok: false; count: null };
+export type QueueCounts = { ok: true; pickable: number; inflight: number } | { ok: false };
+
+/** One GraphQL call: the target, its sub-issues (2 levels: map -> spec -> ticket) and each
+ *  one's blockers. An open blocker outside the tree (a SPLIT child is top-level, not a
+ *  sub-issue) is counted too, so a SPLIT_WAITING origin never reads as an empty frontier. */
+export const QUEUE_QUERY = `query($owner:String!,$name:String!,$n:Int!){
+viewer{login}
+repository(owner:$owner,name:$name){issue(number:$n){...I
+subIssues(first:100){pageInfo{hasNextPage} nodes{...I subIssues(first:100){pageInfo{hasNextPage} nodes{...I}}}}}}}
+fragment B on Issue{number state labels(first:30){nodes{name}} assignees(first:10){nodes{login}}}
+fragment I on Issue{...B blockedBy(first:50){pageInfo{hasNextPage} nodes{...B}}}`;
+
+type GqlIssue = {
+	number?: number;
+	state?: string;
+	labels?: { nodes?: { name?: string }[] };
+	assignees?: { nodes?: { login?: string }[] };
+	blockedBy?: { pageInfo?: { hasNextPage?: boolean }; nodes?: GqlIssue[] };
+	subIssues?: { pageInfo?: { hasNextPage?: boolean }; nodes?: GqlIssue[] };
+};
 
 /**
- * Accept exactly one non-negative integer on stdout (exit 0). Anything else —
- * non-zero exit, empty output, garbage, multiple numbers — refuses. Refusal is
- * never "done": the caller pauses or fails to arm.
+ * Pickable = open, ready-for-agent, unassigned, no exit label, no open blocker.
+ * Inflight = open, ready-for-agent, assigned to the viewer. Anything unparseable,
+ * or a page that may be truncated, refuses: refusal is never "done".
  */
-export function parseQueueOutput(stdout: string, exitCode: number): QueueParse {
-	if (exitCode !== 0) return { ok: false, count: null };
-	const trimmed = stdout.trim();
-	if (!/^\d+$/.test(trimmed)) return { ok: false, count: null };
-	return { ok: true, count: Number.parseInt(trimmed, 10) };
+export function parseQueueGraph(stdout: string, exitCode: number): QueueCounts {
+	if (exitCode !== 0) return { ok: false };
+	try {
+		const data = (JSON.parse(stdout) as { data?: { viewer?: { login?: string }; repository?: { issue?: GqlIssue | null } } }).data;
+		const root = data?.repository?.issue;
+		const viewer = data?.viewer?.login;
+		if (!root || typeof root.number !== "number" || !viewer) return { ok: false };
+		const all = new Map<number, GqlIssue>();
+		let truncated = false;
+		const add = (i: GqlIssue) => {
+			// First sight wins only for blockers; the tree walk below always overwrites with full data.
+			if (typeof i.number === "number" && !all.has(i.number)) all.set(i.number, i);
+		};
+		const walk = (i: GqlIssue) => {
+			if (typeof i.number === "number") all.set(i.number, i);
+			if (i.blockedBy?.pageInfo?.hasNextPage) truncated = true;
+			for (const b of i.blockedBy?.nodes ?? []) add(b);
+			if (i.subIssues?.pageInfo?.hasNextPage) truncated = true;
+			for (const c of i.subIssues?.nodes ?? []) walk(c);
+		};
+		walk(root);
+		if (truncated) return { ok: false };
+		const exit = new Set(["needs-info", "ready-for-human", "wontfix"]);
+		let pickable = 0;
+		let inflight = 0;
+		for (const i of all.values()) {
+			const labels = new Set((i.labels?.nodes ?? []).map((l) => l.name));
+			if (i.state !== "OPEN" || !labels.has("ready-for-agent")) continue;
+			const who = (i.assignees?.nodes ?? []).map((a) => a.login);
+			if (who.includes(viewer)) inflight++;
+			if (who.length > 0 || [...exit].some((l) => labels.has(l))) continue;
+			if ((i.blockedBy?.nodes ?? []).some((b) => b.state === "OPEN")) continue;
+			pickable++;
+		}
+		return { ok: true, pickable, inflight };
+	} catch {
+		return { ok: false };
+	}
 }
 
 // --- Arm gating ---------------------------------------------------------------
 
 /** Refusal reason for arming, or null when the run may arm. */
 export function armRefusal(pickable: number, queueOk: boolean): string | null {
-	if (!queueOk) return "drain-queue command failed; refusing to arm";
+	if (!queueOk) return "queue query failed; refusing to arm";
 	if (pickable <= 0) return "no pickable work (pickable = 0); refusing to arm";
 	return null;
 }
@@ -435,7 +487,7 @@ const HANDOFF_LABEL: Record<HandoffKind, string> = {
 };
 
 /**
- * Label a handed-off ticket gets so it leaves the `drain-queue` result (no
+ * Label a handed-off ticket gets so it leaves the pickable queue (no
  * "dead but still queued" ticket). Fails closed: an unknown kind throws rather
  * than yielding a label that would leave the ticket queued.
  */
@@ -600,17 +652,6 @@ export function targetToolGate(childSession: boolean, discovering: boolean): Too
 	if (childSession) return { ok: false, error: "watchdog_target is main-session only; child sessions cannot invoke it" };
 	if (!discovering) return { ok: false, error: "watchdog_target ignored: no target selection is pending; the operator starts one with /watchdog" };
 	return { ok: true };
-}
-
-/**
- * First fenced block with the exact info string; null when missing. The whole
- * block body is the executable queue command (docs/agents/issue-tracker.md).
- */
-export function extractFencedBlock(markdown: string, infoString: string): string | null {
-	const escaped = infoString.replace(/[.*+?^${}()[\]\\]/g, "\\$&");
-	const re = new RegExp(String.raw`(?:^|\n)\`\`\`${escaped}[ \t]*\r?\n([\s\S]*?)\r?\n\`\`\`[ \t]*(?:\r?\n|$)`);
-	const m = re.exec(markdown);
-	return m === null ? null : m[1].replace(/\s+$/, "");
 }
 
 /** Joined text of a message's text content parts; accepts loose shapes. */
@@ -1281,16 +1322,12 @@ export function transition(state: DrainState, event: DrainEvent, now: number, co
 const AUDIT_ENTRY_TYPE = "drain-watchdog-audit";
 const NUDGE_MESSAGE_TYPE = "drain-watchdog-nudge";
 const PROBE_MESSAGE_TYPE = "drain-watchdog-probe";
-const QUEUE_DOCS_RELPATH = "docs/agents/issue-tracker.md";
-/** Queue block execution budget: the block walks every pickable issue with one
- *  `gh api` call each; a healthy repo finishes well under a minute. */
-const QUEUE_TIMEOUT_MS = 300_000;
 /** Single handoff gh call budget: one gh invocation, well under a minute. */
 const HANDOFF_TIMEOUT_MS = 60_000;
 
 const PREP_INSTRUCTION = (target: number, pickable: number): string =>
 	[
-		`drain-watchdog PREP for #${target}: the drain-queue block reported ${pickable} pickable ticket(s).`,
+		`drain-watchdog PREP for #${target}: the queue query reported ${pickable} pickable ticket(s).`,
 		"Prove readiness now: run the project's check command (nix flake check here; it is long, so give it a generous timeout and report the result).",
 		"If it is green and the drained scope covers the queue, end a turn whose last line is exactly:",
 		"READY",
@@ -1477,50 +1514,23 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 
 	type QueueResult = { ok: boolean; pickable: number; inflight: number; error: string };
 
-	// L5: this runs `bash -c` on the fenced drain-queue/drain-inflight blocks read live
-	// from <ctx.cwd>'s issue-tracker doc, with the full inherited env (gh credentials
-	// included). That is accepted here because the content is repo-controlled (not
-	// user/model text) and /watchdog arm is an explicit operator action — but
-	// session_start also re-runs this unattended on every restored ARMED/BACKOFF/
-	// finalizing run, from whatever the doc contains at that moment, with no
-	// re-confirmation. ponytail: accepted risk under a trusted-repo assumption; a repo
-	// whose docs/agents/issue-tracker.md is not trusted should not enable this extension.
-
-	const runQueueCommand = async (ctx: ExtensionContext): Promise<QueueResult> => {
+	const runQueueCommand = async (ctx: ExtensionContext, target: number | null): Promise<QueueResult> => {
 		const fail = (error: string): QueueResult => ({ ok: false, pickable: 0, inflight: 0, error });
-		let markdown: string;
-		try {
-			markdown = readFileSync(join(ctx.cwd, QUEUE_DOCS_RELPATH), "utf8");
-		} catch {
-			return fail(`${QUEUE_DOCS_RELPATH} is not readable`);
-		}
-		const queueBlock = extractFencedBlock(markdown, "drain-queue");
-		if (queueBlock === null || queueBlock.trim() === "") return fail(`no drain-queue block in ${QUEUE_DOCS_RELPATH}`);
+		if (target === null) return fail("queue query needs a run target");
 		let res: ExecResult;
 		try {
-			res = await pi.exec("bash", ["-c", queueBlock], { cwd: ctx.cwd, timeout: QUEUE_TIMEOUT_MS });
+			res = await pi.exec(
+				"gh",
+				["api", "graphql", "-F", "owner={owner}", "-F", "name={repo}", "-F", `n=${target}`, "-f", `query=${QUEUE_QUERY}`],
+				{ cwd: ctx.cwd, timeout: HANDOFF_TIMEOUT_MS },
+			);
 		} catch (e) {
-			// H1/H2: pi.exec is the real API (ctx.exec does not exist); a spawn-level throw
-			// (not just a non-zero exit, which parseQueueOutput already handles) must also refuse.
-			return fail(`drain-queue command threw: ${String(e)}`);
+			// pi.exec is the real API; a spawn-level throw must refuse like a non-zero exit.
+			return fail(`queue query threw: ${String(e)}`);
 		}
-		const parsed = parseQueueOutput(res.stdout, res.code);
-		if (!parsed.ok) return fail(`drain-queue command failed (exit ${res.code}); refusing`);
-		// drain-inflight is optional by contract; a missing/failing block is counted
-		// as 0 (ponytail: a ticket misread inflight as 0 only matters for DONE, which
-		// also requires childCount === 0).
-		let inflight = 0;
-		const inflightBlock = extractFencedBlock(markdown, "drain-inflight");
-		if (inflightBlock !== null) {
-			try {
-				const res2 = await pi.exec("bash", ["-c", inflightBlock], { cwd: ctx.cwd, timeout: QUEUE_TIMEOUT_MS });
-				const parsed2 = parseQueueOutput(res2.stdout, res2.code);
-				if (parsed2.ok) inflight = parsed2.count;
-			} catch {
-				// Optional block: a throwing command counts as 0, same as a failing one.
-			}
-		}
-		return { ok: true, pickable: parsed.count, inflight, error: "" };
+		const parsed = parseQueueGraph(res.stdout, res.code);
+		if (!parsed.ok) return fail(`queue query for #${target} failed (exit ${res.code}); refusing`);
+		return { ok: true, pickable: parsed.pickable, inflight: parsed.inflight, error: "" };
 	};
 
 	const WIDGET_KEY = "drain-watchdog";
@@ -1654,7 +1664,7 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 		tickInFlight = true;
 		try {
 			const previousQueue = { ...lastQueue };
-			const q = await runQueueCommand(ctx);
+			const q = await runQueueCommand(ctx, runTarget);
 			if (closed) return; // M1: shutdown landed while the queue command was running.
 			const closingSignal = readExecutorClosingSignal(ctx);
 			const observedAt = Date.now();
@@ -1724,7 +1734,7 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 	/** Queue proof for a chosen target, then the READY instruction (shared by the
 	 *  explicit-ref path and the watchdog_target hand-back). */
 	const prepProof = async (target: number, ctx: ExtensionContext, sendInstruction: boolean): Promise<string | null> => {
-		const q = await runQueueCommand(ctx);
+		const q = await runQueueCommand(ctx, target);
 		if (closed) return "session is shutting down"; // M1: session_shutdown fired while the queue command was running.
 		const refusal = armRefusal(q.pickable, q.ok);
 		if (refusal !== null) {
@@ -1902,8 +1912,8 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 		name: "watchdog_handoff",
 		label: "Watchdog Handoff",
 		description:
-			"Remove a drain-queue ticket by the tracker's exit path: swaps ready-for-agent for the kind's exit label, posts the reason as a comment, and records watchdog progress. Main session only. Kinds: needs-info (ambiguous/missing spec), human (needs a human decision/action, ESCALATE, or low-tolerance work: auth, secrets, migrations, public API, money, data deletion), wontfix (will not be done).",
-		promptSnippet: "Exit a drain-queue ticket to its tracker exit label with an audited reason comment (handoff counts as watchdog progress)",
+			"Remove a queued ticket by the tracker's exit path: swaps ready-for-agent for the kind's exit label, posts the reason as a comment, and records watchdog progress. Main session only. Kinds: needs-info (ambiguous/missing spec), human (needs a human decision/action, ESCALATE, or low-tolerance work: auth, secrets, migrations, public API, money, data deletion), wontfix (will not be done).",
+		promptSnippet: "Exit a queued ticket to its tracker exit label with an audited reason comment (handoff counts as watchdog progress)",
 		promptGuidelines: [
 			"Use watchdog_handoff instead of raw gh edits so label and reason comment stay consistent; hand low-tolerance work (auth/authz, secrets/credentials, DB migrations, public API contracts, money/billing, data deletion, irreversible operations) through kind human BEFORE claiming the ticket.",
 		],
@@ -1939,7 +1949,7 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 	 * model. Accepted -> the same DONE action as the tick path, no idle wait.
 	 */
 	const runDone = async (toolCtx: ExtensionToolContext): Promise<{ text: string; ok: boolean }> => {
-		const q = await runQueueCommand(toolCtx);
+		const q = await runQueueCommand(toolCtx, runTarget);
 		if (closed) return { text: "watchdog_done ignored: session is shutting down", ok: false };
 		const closing = readExecutorClosingSignal(toolCtx);
 		const obs: DoneObservation = { queueOk: q.ok, pickable: q.pickable, inflight: q.inflight, childCount, hasClosingSteps: closing.hasClosingSteps };

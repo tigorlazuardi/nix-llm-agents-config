@@ -1387,8 +1387,7 @@ in
         tsc --noEmit --strict --skipLibCheck --allowImportingTsExtensions \
           --target es2022 --module esnext --moduleResolution bundler \
           drain-watchdog/index.ts drain-watchdog/drain-watchdog.self-check.ts
-        DRAIN_QUEUE_FIXTURE=${./docs/agents/issue-tracker.md} \
-          node --experimental-strip-types drain-watchdog/drain-watchdog.self-check.ts
+        node --experimental-strip-types drain-watchdog/drain-watchdog.self-check.ts
 
         export HOME="$TMPDIR/home"
         export PI_CODING_AGENT_DIR="$HOME/.pi/agent"

@@ -24,45 +24,13 @@ External PRs are **not** a request or triage surface. Skills must triage GitHub 
 
 ## Drain queue
 
-Harness tools run this repo's queue by executing the commands in the fenced blocks below.
-A command prints exactly one non-negative integer — the count for its queue — and exits 0
-whenever its query succeeded, including a count of 0. Every fetch carries an explicit
-`--limit 500`; a result that hits the ceiling may be truncated, so the command exits 1
-instead of reporting a count it cannot vouch for (covered by the refusal rule below).
+The drain-watchdog infers the queue from the run target's tree; nothing to configure. One GraphQL
+query reads the target, its sub-issues (map, spec, ticket) and each blocker.
 
-- `drain-queue`: count of pickable issues — open, labeled `ready-for-agent`, no assignee, and no
-  open native blockers (`blocked_by` from `.issue_dependencies_summary`; `needs-info`,
-  `ready-for-human`, and `wontfix` never qualify). The command enforces the exclusions itself:
-  any fetched issue that also carries one of those labels, or that has an assignee, is dropped
-  before counting.
-- `drain-inflight`: count of open `ready-for-agent` issues assigned to @me (claimed or in progress).
+- Pickable: open, `ready-for-agent`, no assignee, none of `needs-info` / `ready-for-human` /
+  `wontfix`, no open native blocker.
+- In flight: open, `ready-for-agent`, assigned to the viewer (@me).
+- A top-level SPLIT child shows up as an open blocker of its origin, so the origin never reads as done.
 
-Refusal rule: a missing block, non-zero exit, or non-numeric output means refuse to start or
+Refusal rule: a failed query, unparseable output, or a truncated page means refuse to start or
 pause the run — it is never interpreted as "done" or as an empty queue.
-
-```drain-queue
-set -euo pipefail
-# A fetch capped at the limit may be truncated; refusing beats printing a plausible wrong count.
-# ponytail: fixed to a 500-item fetch ceiling; switch to `gh --paginate` (count server-side) when a queue can legitimately reach 500.
-if [ "$(gh issue list --state open --label ready-for-agent --limit 500 --json number --jq 'length')" -eq 500 ]; then
-  exit 1
-fi
-open_ready="$(gh issue list --state open --label ready-for-agent --limit 500 --json number,labels,assignees --jq '[.[] | select((.assignees | length) == 0 and (([.labels[].name] | index("needs-info") // index("ready-for-human") // index("wontfix")) == null)) | .number] | .[]')"
-count=0
-for number in $open_ready; do
-  blocked="$(gh api "repos/{owner}/{repo}/issues/$number" --jq '.issue_dependencies_summary.blocked_by')"
-  # A non-numeric answer means the query broke; aborting beats silently counting the issue as unblocked.
-  case "$blocked" in ''|*[!0-9]*) exit 1 ;; esac
-  if [ "$blocked" -eq 0 ]; then count=$((count + 1)); fi
-done
-echo "$count"
-```
-
-```drain-inflight
-set -euo pipefail
-count="$(gh issue list --state open --label ready-for-agent --assignee @me --limit 500 --json number --jq 'length')"
-# Same fetch ceiling as drain-queue: a count that hits the limit may be truncated, so refuse.
-# ponytail: fixed to 500; switch to `gh --paginate` when the queue can legitimately reach 500.
-if [ "$count" -eq 500 ]; then exit 1; fi
-echo "$count"
-```

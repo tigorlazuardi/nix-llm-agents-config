@@ -54,13 +54,13 @@ import {
 	executorStateRoot,
 	readClosingSignal,
 	parseLabelList,
-	parseQueueOutput,
+	parseQueueGraph,
+	QUEUE_QUERY,
 	planHandoffCommands,
 	shouldSplit,
 	transition,
 
 	buildNudgeText,
-	extractFencedBlock,
 	extractLastError,
 	isProbeText,
 	extractIssueNumbers,
@@ -119,7 +119,7 @@ assert.equal(armOK.state.noProgressStreak, 0);
 
 // Arm refusal: pickable 0 and failed queue command both refuse; refusal never arms.
 assert.equal(armRefusal(0, true), "no pickable work (pickable = 0); refusing to arm");
-assert.equal(armRefusal(0, false), "drain-queue command failed; refusing to arm");
+assert.equal(armRefusal(0, false), "queue query failed; refusing to arm");
 assert.equal(armRefusal(7, true), null);
 const refusedZero = transition(INITIAL_STATE, { type: "arm", queueOk: true, pickable: 0 }, 1000);
 assert.equal(refusedZero.state.phase, "off");
@@ -620,23 +620,43 @@ assert.equal(JSON.stringify(snapshot), before);
 	for (const ev of events) assert.equal(transition(done.state, ev, T).state.phase, "done", `done survives ${ev.type}`);
 }
 
-// --- parseQueueOutput ---------------------------------------------------------------------
+// --- parseQueueGraph ---------------------------------------------------------------------
 
-assert.deepEqual(parseQueueOutput("3\n", 0), { ok: true, count: 3 });
-assert.deepEqual(parseQueueOutput("0", 0), { ok: true, count: 0 });
-assert.deepEqual(parseQueueOutput("  12 \n", 0), { ok: true, count: 12 });
-
-// Refusal rule (docs/agents/issue-tracker.md): non-zero exit, empty, or garbage output
-// refuses — it is never "done" or an empty queue.
-assert.equal(parseQueueOutput("3\n", 1).ok, false);
-assert.equal(parseQueueOutput("", 1).ok, false);
-assert.equal(parseQueueOutput("", 0).ok, false);
-assert.equal(parseQueueOutput("garbage", 0).ok, false);
-assert.equal(parseQueueOutput("3\n4\n", 0).ok, false);
-assert.equal(parseQueueOutput("3 4", 0).ok, false);
-assert.equal(parseQueueOutput("-1", 0).ok, false);
-assert.equal(parseQueueOutput("12.5", 0).ok, false);
-assert.equal(parseQueueOutput("3\n", 2).count, null);
+const gi = (number: number, o: { state?: string; labels?: string[]; assignees?: string[]; blockedBy?: any[]; subs?: any[]; more?: boolean } = {}) => ({
+	number,
+	state: o.state ?? "OPEN",
+	labels: { nodes: (o.labels ?? ["ready-for-agent"]).map((name) => ({ name })) },
+	assignees: { nodes: (o.assignees ?? []).map((login) => ({ login })) },
+	blockedBy: { pageInfo: { hasNextPage: o.more ?? false }, nodes: o.blockedBy ?? [] },
+	subIssues: { pageInfo: { hasNextPage: false }, nodes: o.subs ?? [] },
+});
+const gql = (root: any) => JSON.stringify({ data: { viewer: { login: "me" }, repository: { issue: root } } });
+assert(QUEUE_QUERY.includes("subIssues") && QUEUE_QUERY.includes("blockedBy"));
+// Spec -> tickets: one pickable, one claimed by the viewer, one assigned elsewhere, one with an exit label,
+// one blocked by an open ticket, one closed.
+const tree = gi(1, {
+	labels: [],
+	subs: [
+		gi(2),
+		gi(3, { assignees: ["me"] }),
+		gi(4, { assignees: ["other"] }),
+		gi(5, { labels: ["ready-for-agent", "ready-for-human"] }),
+		gi(6, { blockedBy: [gi(2)] }),
+		gi(7, { state: "CLOSED" }),
+		gi(8, { blockedBy: [gi(7, { state: "CLOSED" })] }),
+	],
+});
+assert.deepEqual(parseQueueGraph(gql(tree), 0), { ok: true, pickable: 2, inflight: 1 });
+// A single ticket target is evaluated itself.
+assert.deepEqual(parseQueueGraph(gql(gi(9)), 0), { ok: true, pickable: 1, inflight: 0 });
+// A top-level blocker (SPLIT child) outside the tree is counted once it is open and ready.
+assert.deepEqual(parseQueueGraph(gql(gi(1, { labels: [], subs: [gi(2, { blockedBy: [gi(50)] })] })), 0), { ok: true, pickable: 1, inflight: 0 });
+// Refusals: non-zero exit, garbage, missing issue, truncated page.
+assert.equal(parseQueueGraph(gql(tree), 1).ok, false);
+assert.equal(parseQueueGraph("", 0).ok, false);
+assert.equal(parseQueueGraph("garbage", 0).ok, false);
+assert.equal(parseQueueGraph(gql(null), 0).ok, false);
+assert.equal(parseQueueGraph(gql(gi(1, { subs: [gi(2, { more: true })] })), 0).ok, false);
 
 // --- classifyProviderError -------------------------------------------------------------------
 
@@ -978,23 +998,6 @@ assert.equal(watchdogCompletions("zzz"), null);
 assert.equal(watchdogCompletions("on #3"), null, "no completion after the first word");
 assert.equal(watchdogCompletions("#35"), null, "a ref gets no completion");
 
-// drain-queue/drain-inflight blocks extract from the tracker doc format.
-const trackerDoc = [
-	"## Drain queue", "prose refusal rule", "```drain-queue", "set -euo pipefail", "echo 3", "```", "```drain-inflight", "echo 1", "```", "```drain-queue-extra", "echo 0", "```", "not a block", ""].join("\n");
-assert.equal(extractFencedBlock(trackerDoc, "drain-queue"), "set -euo pipefail\necho 3");
-assert.equal(extractFencedBlock(trackerDoc, "drain-inflight"), "echo 1");
-assert.equal(extractFencedBlock(trackerDoc, "drain-queue-x"), null, "info string must match exactly");
-assert.equal(extractFencedBlock("no blocks at all", "drain-queue"), null);
-if (process.env.DRAIN_QUEUE_FIXTURE) {
-	// Real repo fixture: checks.nix passes the live docs/agents/issue-tracker.md.
-	const doc = readFileSync(process.env.DRAIN_QUEUE_FIXTURE, "utf8");
-	const queueBlock = extractFencedBlock(doc, "drain-queue");
-	assert(queueBlock !== null, "docs/agents/issue-tracker.md lost its drain-queue block");
-	assert(queueBlock.includes("gh"), "drain-queue block must drive gh");
-	// drain-inflight is optional by contract; only its presence is checked here.
-	assert(extractFencedBlock(doc, "drain-inflight") !== null, "docs/agents/issue-tracker.md lost its drain-inflight block");
-}
-
 // Message text extraction and the READY gate.
 assert.equal(messageText({ content: [{ type: "text", text: "a" }, { type: "thinking", text: "b" }, { type: "text", text: "c" }] }), "a\nc");
 assert.equal(messageText({ content: "READY" }), "READY");
@@ -1177,7 +1180,7 @@ type Harness = {
 	setExec: (impl: (command: string, args: string[]) => Promise<{ stdout: string; stderr: string; code: number; killed: boolean }>) => void;
 	/** Queue proof the mocked exec returns for the next bash calls (PREP needs >0
 	 *  pickable to arm; ticks need 0 for an empty frontier). */
-	setQueue: (pickable: number) => void;
+	setQueue: (pickable: number, inflight?: number) => void;
 	/** Registered model tools by name (watchdog_handoff, watchdog_stop). */
 	tools: Record<string, { execute: (id: string, params: any, signal: any, update: any, ctx: any) => Promise<any> }>;
 	ctx: any;
@@ -1186,8 +1189,7 @@ type Harness = {
 	entries: unknown[];
 };
 
-/** A fresh factory instance wired to capturing mocks, plus a real drain-queue fixture on
- * disk (`pi.exec` is mocked, but `runQueueCommand` reads the markdown file for real). */
+/** A fresh factory instance wired to capturing mocks; `pi.exec` answers the queue GraphQL query. */
 function makeHarness(cwd: string): Harness {
 	const handlers: Record<string, (...args: any[]) => unknown> = {};
 	const tools: Harness["tools"] = {};
@@ -1198,8 +1200,16 @@ function makeHarness(cwd: string): Harness {
 	let widgetLines: string[] | undefined;
 	const entries: unknown[] = [];
 	let queueValue = 0;
-	let execImpl: (command: string, args: string[]) => Promise<{ stdout: string; stderr: string; code: number; killed: boolean }> = async () => ({
-		stdout: `${queueValue}\n`,
+	let inflightValue = 0;
+	const graph = () => {
+		const subs = [
+			...Array.from({ length: queueValue }, (_, i) => gi(100 + i)),
+			...Array.from({ length: inflightValue }, (_, i) => gi(200 + i, { assignees: ["me"] })),
+		];
+		return gql(gi(38, { labels: [], subs }));
+	};
+	let execImpl: (command: string, args: string[]) => Promise<{ stdout: string; stderr: string; code: number; killed: boolean }> = async (_command, args) => ({
+		stdout: args[1] === "graphql" ? graph() : `${queueValue}\n`,
 		stderr: "",
 		code: 0,
 		killed: false,
@@ -1227,6 +1237,8 @@ function makeHarness(cwd: string): Harness {
 			userMessages.push(content);
 		},
 		exec: async (command: string, args: string[]) => {
+			// The widget's best-effort target lookup is not part of any contract under test.
+			if (args.includes("title,labels,subIssues")) return { stdout: "", stderr: "", code: 1, killed: false };
 			execCalls.push({ command, args });
 			return execImpl(command, args);
 		},
@@ -1247,25 +1259,17 @@ function makeHarness(cwd: string): Harness {
 		hasPendingMessages: () => false,
 		sessionManager: { getEntries: () => entries },
 	};
-	return { handlers, audits, notifications, sent, userMessages, widget: () => widgetLines, execCalls, setExec: (impl) => { execImpl = impl; }, setQueue: (pickable) => { queueValue = pickable; }, tools, ctx, entries };
+	return { handlers, audits, notifications, sent, userMessages, widget: () => widgetLines, execCalls, setExec: (impl) => { execImpl = impl; }, setQueue: (pickable, inflight = 0) => { queueValue = pickable; inflightValue = inflight; }, tools, ctx, entries };
 }
 
-// A real drain-queue + drain-inflight fixture on disk at <tmp>/docs/agents/issue-tracker.md.
-// A second fenced block is what the res2/dead-code bug above needed to trigger:
-// runQueueCommand threw a ReferenceError on every real queue read while
-// docs/agents/issue-tracker.md (which carries both blocks) was armed, a regression the
-// pure-core self-check rows above could never see.
 function makeFixtureCwd(): string {
-	const cwd = mkdtempSync(join(tmpdir(), "dw-harness-"));
-	mkdirSync(join(cwd, "docs", "agents"), { recursive: true });
-	writeFileSync(join(cwd, "docs", "agents", "issue-tracker.md"), "```drain-queue\necho 0\n```\n```drain-inflight\necho 0\n```\n");
-	return cwd;
+	return mkdtempSync(join(tmpdir(), "dw-harness-"));
 }
 
 const armedEntry = (tweaks: Record<string, unknown> = {}) => ({
 	type: "custom",
 	customType: "drain-watchdog-state",
-	data: { phase: "armed", ...tweaks },
+	data: { phase: "armed", runTarget: 38, ...tweaks },
 });
 
 // H3 (regression guard): a restored BACKOFF run keeps its probe timer alive. startLoop()
@@ -1288,8 +1292,7 @@ await withNoAmbientSubagent(() =>
 // M5(b): session_start restoring an ARMED run starts only the tick interval (no probe:
 // that is BACKOFF-only), and a tick that observes idle+pickable-work delivers a nudge
 // through the real pi.sendMessage/appendEntry surface — including reading the real
-// on-disk drain-queue AND drain-inflight blocks (the dead-code `res2` bug above only
-// ever showed up on this exact path).
+// queue query through pi.exec.
 await withNoAmbientSubagent(() =>
 	withFakeTimers(async (timers, flush, clock) => {
 		const h = makeHarness(makeFixtureCwd());
@@ -1298,7 +1301,7 @@ await withNoAmbientSubagent(() =>
 		const live = timers.filter((t) => !t.cleared);
 		assert.equal(live.filter((t) => t.kind === "interval").length, 1, "restoring ARMED starts the tick interval");
 		assert.equal(live.filter((t) => t.kind === "timeout").length, 0, "restoring ARMED schedules no probe (BACKOFF-only)");
-		h.setExec(async (_cmd, args) => ({ stdout: args[1]?.includes("drain-inflight") ? "1\n" : "2\n", stderr: "", code: 0, killed: false }));
+		h.setQueue(2, 1);
 		clock.advance(IDLE_GRACE_MS + 1000); // past the idle-grace gate so the tick actually evaluates
 		const tickTimer = timers.find((t) => t.kind === "interval" && !t.cleared)!;
 		tickTimer.fire();
@@ -1307,7 +1310,7 @@ await withNoAmbientSubagent(() =>
 		assert.equal(h.sent.length, 1, "an idle armed tick with pickable work delivers exactly one nudge");
 		assert.equal(h.sent[0]!.customType, "drain-watchdog-nudge");
 		assert(h.audits.some((a) => a.type === "nudge"), "the nudge is audited");
-		assert.equal(h.execCalls.length, 2, "both the drain-queue and drain-inflight blocks ran (res2/dead-code regression guard)");
+		assert.equal(h.execCalls.filter((c) => c.args[1] === "graphql").length, 1, "one queue query per tick");
 	}),
 );
 
@@ -1322,7 +1325,7 @@ await withNoAmbientSubagent(() =>
 		h.handlers.session_start({}, h.ctx);
 		const tickTimer = timers.find((t) => t.kind === "interval" && !t.cleared)!;
 		assert.equal(tickTimer.delay, TICK_MS, "the armed tick interval defaults to TICK_MS");
-		h.setExec(async (_cmd, args) => ({ stdout: args[1]?.includes("drain-inflight") ? "1\n" : "2\n", stderr: "", code: 0, killed: false }));
+		h.setQueue(2, 1);
 		// Tick-by-tick, like the real interval: silent until the grace has elapsed.
 		let elapsed = 0;
 		while (elapsed + TICK_MS < IDLE_GRACE_MS) {
@@ -1331,7 +1334,7 @@ await withNoAmbientSubagent(() =>
 			tickTimer.fire();
 			await flush();
 			assert.equal(h.sent.length, 0, `no nudge before the idle grace (idle ${elapsed}ms)`);
-			assert.equal(h.execCalls.length, 0, "no queue command runs before the idle grace");
+			assert.equal(h.execCalls.filter((c) => c.args[1] === "graphql").length, 0, "no queue command runs before the idle grace");
 		}
 		clock.advance(IDLE_GRACE_MS - elapsed - 1);
 		tickTimer.fire();
@@ -1353,7 +1356,7 @@ await withNoAmbientSubagent(() =>
 		h.entries.push(armedEntry());
 		h.handlers.session_start({}, h.ctx);
 		h.setExec(async () => {
-			throw new Error("boom: drain-queue command threw");
+			throw new Error("boom: queue query threw");
 		});
 		clock.advance(IDLE_GRACE_MS + 1000); // past the idle-grace gate so the tick actually evaluates
 		const tickTimer = timers.find((t) => t.kind === "interval" && !t.cleared)!;
@@ -2004,29 +2007,19 @@ await withNoAmbientSubagent(() =>
 	}),
 );
 
-// Multi-target dirs: one target still closing keeps the FINALIZING trigger even
-// when another already finished.
+// A restored run without a target cannot be counted from the tracker: fail closed (PAUSED),
+// never DONE and never a nudge.
 await withNoAmbientSubagent(() =>
 	withFakeTimers(async (timers, flush, clock) => {
-		const cwd = makeFixtureCwd();
-		const cleanup = makeExecutorFixture(cwd, [
-			{ dir: "38", state: { closingStepsDone: true } },
-			{ dir: "40", state: { closingStepsDone: false } },
-		]);
-		try {
-			const h = makeHarness(cwd);
-			h.entries.push(armedEntry());
-			h.handlers.session_start({}, h.ctx);
-			clock.advance(IDLE_GRACE_MS + 1000);
-			const tickTimer = timers.find((t) => t.kind === "interval" && !t.cleared)!;
-			tickTimer.fire();
-			await flush();
-			await flush();
-			assert.equal(persistedLatest(h.entries).data.phase, "finalizing", "one open target keeps the trigger (multi-target scan)");
-			assert.equal(h.sent.filter((s) => s.content === FINALIZE_NUDGE_TEXT).length, 1);
-		} finally {
-			cleanup();
-		}
+		const h = makeHarness(makeFixtureCwd());
+		h.entries.push(armedEntry({ runTarget: null }));
+		h.handlers.session_start({}, h.ctx);
+		clock.advance(IDLE_GRACE_MS + 1000);
+		timers.find((t) => t.kind === "interval" && !t.cleared)!.fire();
+		await flush();
+		await flush();
+		assert.equal(persistedLatest(h.entries).data.phase, "paused", "no target: the run pauses");
+		assert.equal(h.sent.length, 0);
 	}),
 );
 
