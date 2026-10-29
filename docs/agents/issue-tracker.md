@@ -24,13 +24,17 @@ External PRs are **not** a request or triage surface. Skills must triage GitHub 
 
 ## Drain queue
 
-The drain-watchdog infers the queue from the run target's tree; nothing to configure. One GraphQL
-query reads the target, its sub-issues (map, spec, ticket) and each blocker.
+The drain-watchdog is tracker-agnostic: it never reads the tracker. The model finds the run target
+and its ticket tree and declares it with `watchdog_target` (`{ id, blockedBy?, state? }`, ids are
+opaque strings). The watchdog holds the tree in its persisted run state.
 
-- Pickable: open, `ready-for-agent`, no assignee, none of `needs-info` / `ready-for-human` /
-  `wontfix`, no open native blocker.
-- In flight: open, `ready-for-agent`, assigned to the viewer (@me).
-- A top-level SPLIT child shows up as an open blocker of its origin, so the origin never reads as done.
+- Pickable: state `open` and every `blockedBy` id known and `done`. An unknown blocker is not done.
+- `watchdog_complete(id)` marks done; `watchdog_handoff(id, reason)` marks limbo (human review, never
+  pickable, its dependents stay blocked); `watchdog_sync(tickets)` upserts by id (new SPLIT children,
+  reopened or cancelled tickets; nothing is deleted).
+- Limbo and blocked-by-limbo tickets do not block DONE; `watchdog_done` returns the done / limbo /
+  blocked-by-limbo report.
+- The tools never write to the tracker: the model moves ticket status there itself.
 
-Refusal rule: a failed query, unparseable output, or a truncated page means refuse to start or
-pause the run — it is never interpreted as "done" or as an empty queue.
+Refusal rule: an empty tree means refuse to arm, pause the run, or refuse `watchdog_done` - it is
+never interpreted as "done".
