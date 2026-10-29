@@ -21,7 +21,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
-import type { DrainEvent, DrainState, ExecutorStateFile, HandoffKind, ProbeJitter, TickObservation } from "./index.ts";
+import type { DrainEvent, DrainState, ExecutorStateFile, ProbeJitter, Ticket, TickObservation } from "./index.ts";
 import {
 	BREAKER_K,
 	DEFAULT_TICK_CONFIG,
@@ -36,12 +36,20 @@ import {
 	STANDARDS_REVIEW_BUDGET_MS,
 	SPLIT_DEPTH_CAP,
 	TRANSIENT_OUTAGE_BUDGET_MS,
+	SYNC_REMINDER,
 	armRefusal,
+	completeTicket,
+	doneReport,
+	handoffTicket,
+	parseTicketInputs,
+	pickableIds,
+	restoreTickets,
+	targetDirName,
+	ticketCounts,
+	upsertTickets,
 	classifyProviderError,
 	watchdogToolGate,
 	doneRefusal,
-	handoffExit,
-	handoffResultText,
 	isChildSession,
 	jitterAfterMs,
 	jitteredDelayMs,
@@ -53,28 +61,20 @@ import {
 	executorStateFilePath,
 	executorStateRoot,
 	readClosingSignal,
-	parseLabelList,
-	parseQueueGraph,
-	QUEUE_QUERY,
-	planHandoffCommands,
 	shouldSplit,
 	transition,
 
 	buildNudgeText,
 	extractLastError,
 	isProbeText,
-	extractIssueNumbers,
 	isReadyDeclaration,
 	isSubagentCompletionNotice,
 	isSubagentSpawnTool,
 	messageText,
 	parseWatchdogSubcommand,
-	pickTarget,
-	parseTargetInfo,
 	watchdogCompletions,
 	watchdogWidgetLines,
 	targetToolGate,
-	queueFingerprint,
 	readIntEnv,
 	restoreDrainState,
 	restoreRunTarget,
@@ -102,7 +102,6 @@ const baseObs = (): TickObservation => ({
 	allIdleForMs: 10 * MIN,
 	queueOk: true,
 	pickable: 2,
-	inflight: 0,
 	progressAgeMs: 0,
 	lastError: null,
 	leftoverBlocked: false,
@@ -119,7 +118,7 @@ assert.equal(armOK.state.noProgressStreak, 0);
 
 // Arm refusal: pickable 0 and failed queue command both refuse; refusal never arms.
 assert.equal(armRefusal(0, true), "no pickable work (pickable = 0); refusing to arm");
-assert.equal(armRefusal(0, false), "queue query failed; refusing to arm");
+assert.equal(armRefusal(0, false), "no tickets declared; refusing to arm");
 assert.equal(armRefusal(7, true), null);
 const refusedZero = transition(INITIAL_STATE, { type: "arm", queueOk: true, pickable: 0 }, 1000);
 assert.equal(refusedZero.state.phase, "off");
@@ -315,7 +314,7 @@ assert.equal(transition({ ...armed(), phase: "finalizing" }, { type: "llmStop", 
 // llmStop from PAUSED/OFF/DONE stays a no-op (EVENT_PHASES matrix covers it; spot-check).
 assert.equal(transition(pausedStateFor(), { type: "llmStop", reason: "x" }, 40_005).state.phase, "paused");
 
-const doneClear = { queueOk: true, pickable: 0, inflight: 0, childCount: 0, hasClosingSteps: false };
+const doneClear = { queueOk: true, pickable: 0, childCount: 0, hasClosingSteps: false };
 const finisher = transition({ ...armed(), phase: "finalizing" }, { type: "llmDone", obs: doneClear }, 41_000);
 assert.equal(finisher.state.phase, "done");
 assert.deepEqual(finisher.action, { type: "done", leftovers: false }, "the promise path emits the same DONE action as the tick path");
@@ -327,7 +326,6 @@ assert.deepEqual(finisher.action, { type: "done", leftovers: false }, "the promi
 	assert.deepEqual(ok.action, { type: "done", leftovers: false });
 	for (const bad of [
 		{ ...doneClear, pickable: 1 },
-		{ ...doneClear, inflight: 1 },
 		{ ...doneClear, childCount: 1 },
 		{ ...doneClear, hasClosingSteps: true },
 		{ ...doneClear, queueOk: false },
@@ -416,7 +414,7 @@ const queueFail = transition(armed(), { type: "tick", obs: { ...baseObs(), queue
 assert.equal(queueFail.state.phase, "paused");
 assert.equal(queueFail.action.type, "pause");
 
-// 5. Frontier 0 + inflight 0 + children 0 → DONE (report leftovers, do not nudge).
+// 5. Frontier 0 + children 0 → DONE (report leftovers, do not nudge).
 const done = transition(armed(), { type: "tick", obs: { ...baseObs(), pickable: 0 } }, T);
 assert.equal(done.state.phase, "done");
 assert.deepEqual(done.action, { type: "done", leftovers: false });
@@ -493,9 +491,9 @@ const stillStalledLater = transition(stalled.state, { type: "tick", obs: { ...ba
 assert.deepEqual(stillStalledLater.action, { type: "stallNotify" }, "a fresh stallNotify fires once the cooldown window elapses");
 assert.equal(stillStalledLater.state.lastStallNotifyAt, T + STALL_LIMIT_MS);
 
-// 8. Children running with frontier 0 is NOT done; in-flight work keeps the run alive.
+// 8. Children running with frontier 0 is NOT done; running children keep the run alive.
 assert.deepEqual(
-	transition(armed(), { type: "tick", obs: { ...baseObs(), pickable: 0, inflight: 1, childCount: 1 } }, T)
+	transition(armed(), { type: "tick", obs: { ...baseObs(), pickable: 0, childCount: 1 } }, T)
 		.action,
 	{ type: "wait" },
 );
@@ -579,7 +577,7 @@ assert.equal(JSON.stringify(snapshot), before);
 		{ type: "providerError", kind: "unknown" },
 		{ type: "probeOk" },
 		{ type: "llmStop" },
-		{ type: "llmDone", obs: { queueOk: true, pickable: 0, inflight: 0, childCount: 0, hasClosingSteps: false } },
+		{ type: "llmDone", obs: { queueOk: true, pickable: 0, childCount: 0, hasClosingSteps: false } },
 		{ type: "progress" },
 	];
 	// Phases allowed to act per event; everything else must be a pure no-op.
@@ -620,43 +618,70 @@ assert.equal(JSON.stringify(snapshot), before);
 	for (const ev of events) assert.equal(transition(done.state, ev, T).state.phase, "done", `done survives ${ev.type}`);
 }
 
-// --- parseQueueGraph ---------------------------------------------------------------------
+// --- Ticket tree (pure) --------------------------------------------------------------------
 
-const gi = (number: number, o: { state?: string; labels?: string[]; assignees?: string[]; blockedBy?: any[]; subs?: any[]; more?: boolean } = {}) => ({
-	number,
-	state: o.state ?? "OPEN",
-	labels: { nodes: (o.labels ?? ["ready-for-agent"]).map((name) => ({ name })) },
-	assignees: { nodes: (o.assignees ?? []).map((login) => ({ login })) },
-	blockedBy: { pageInfo: { hasNextPage: o.more ?? false }, nodes: o.blockedBy ?? [] },
-	subIssues: { pageInfo: { hasNextPage: false }, nodes: o.subs ?? [] },
-});
-const gql = (root: any) => JSON.stringify({ data: { viewer: { login: "me" }, repository: { issue: root } } });
-assert(QUEUE_QUERY.includes("subIssues") && QUEUE_QUERY.includes("blockedBy"));
-// Spec -> tickets: one pickable, one claimed by the viewer, one assigned elsewhere, one with an exit label,
-// one blocked by an open ticket, one closed.
-const tree = gi(1, {
-	labels: [],
-	subs: [
-		gi(2),
-		gi(3, { assignees: ["me"] }),
-		gi(4, { assignees: ["other"] }),
-		gi(5, { labels: ["ready-for-agent", "ready-for-human"] }),
-		gi(6, { blockedBy: [gi(2)] }),
-		gi(7, { state: "CLOSED" }),
-		gi(8, { blockedBy: [gi(7, { state: "CLOSED" })] }),
-	],
-});
-assert.deepEqual(parseQueueGraph(gql(tree), 0), { ok: true, pickable: 2, inflight: 1 });
-// A single ticket target is evaluated itself.
-assert.deepEqual(parseQueueGraph(gql(gi(9)), 0), { ok: true, pickable: 1, inflight: 0 });
-// A top-level blocker (SPLIT child) outside the tree is counted once it is open and ready.
-assert.deepEqual(parseQueueGraph(gql(gi(1, { labels: [], subs: [gi(2, { blockedBy: [gi(50)] })] })), 0), { ok: true, pickable: 1, inflight: 0 });
-// Refusals: non-zero exit, garbage, missing issue, truncated page.
-assert.equal(parseQueueGraph(gql(tree), 1).ok, false);
-assert.equal(parseQueueGraph("", 0).ok, false);
-assert.equal(parseQueueGraph("garbage", 0).ok, false);
-assert.equal(parseQueueGraph(gql(null), 0).ok, false);
-assert.equal(parseQueueGraph(gql(gi(1, { subs: [gi(2, { more: true })] })), 0).ok, false);
+const tk = (id: string, state: Ticket["state"] = "open", blockedBy: string[] = [], reason?: string): Ticket => (reason === undefined ? { id, state, blockedBy } : { id, state, blockedBy, reason });
+{
+	// Pickable: open and every blocker known + done; unknown blocker fails closed; limbo never pickable.
+	const tree = [tk("A"), tk("B", "open", ["A"]), tk("C", "done"), tk("D", "open", ["C"]), tk("E", "open", ["ghost"]), tk("F", "limbo", [], "needs a human"), tk("G", "open", ["F"])];
+	assert.deepEqual(pickableIds(tree), ["A", "D"], "B waits on open A, E has an unknown blocker, F is limbo, G is blocked by limbo");
+	assert.deepEqual(ticketCounts(tree), { done: 1, limbo: 1, leftover: ["B", "E", "G"] });
+	assert.deepEqual(pickableIds([]), []);
+	assert.deepEqual(pickableIds([tk("X", "open", ["Y"]), tk("Y", "open", ["X"])]), [], "a blocker cycle never becomes pickable");
+
+	// Input validation fails closed.
+	assert.equal(parseTicketInputs([]).ok, false, "empty tree");
+	assert.equal(parseTicketInputs("x").ok, false);
+	assert.equal(parseTicketInputs([{ id: "" }]).ok, false);
+	assert.equal(parseTicketInputs([{ id: "A" }, { id: "A" }]).ok, false, "duplicate id");
+	assert.equal(parseTicketInputs([{ id: "A", state: "wip" }]).ok, false, "bad state");
+	assert.equal(parseTicketInputs([{ id: "A", blockedBy: [1] }]).ok, false, "bad blocker");
+	assert.equal(parseTicketInputs([{ id: "A", reason: 5 }]).ok, false);
+	assert.equal(parseTicketInputs([{ id: "KRIPT-222", blockedBy: ["KRIPT-221"] }]).ok, true);
+
+	// Sync: upsert by id, unsent fields stay, any transition, new => open, no deletion.
+	const base = [tk("A"), tk("B", "done"), tk("C", "open", ["A"])];
+	const sync = upsertTickets(base, [{ id: "A", state: "limbo", reason: "cancelled in source" }, { id: "B", state: "open" }, { id: "N1" }, { id: "C" }]);
+	assert.equal(sync.summary, "3 changed: 1 open->limbo, 1 done->open, 1 new");
+	assert.deepEqual(sync.tickets.map((t) => [t.id, t.state]), [["A", "limbo"], ["B", "open"], ["C", "open"], ["N1", "open"]]);
+	assert.deepEqual(sync.tickets.find((t) => t.id === "C"), tk("C", "open", ["A"]), "an unsent field keeps its stored value");
+	assert.deepEqual(sync.closed, ["A"], "only a ticket that went limbo/done is flagged for stopping a live child");
+	assert.equal(sync.tickets.length, 4, "nothing is deleted");
+	assert.equal(upsertTickets(base, [{ id: "A" }]).changed, 0, "a no-op sync changes nothing");
+	assert.deepEqual(base.map((t) => t.state), ["open", "done", "open"], "upsert does not mutate its input");
+	assert.deepEqual(upsertTickets(base, [{ id: "C", blockedBy: ["B"] }]).tickets.find((t) => t.id === "C"), tk("C", "open", ["B"]), "blockers can be replaced");
+
+	// Complete / handoff.
+	assert.equal(completeTicket(base, "ghost").ok, false, "unknown id fails closed");
+	const completed = completeTicket(base, "A");
+	assert(completed.ok && completed.tickets.find((t) => t.id === "A")!.state === "done");
+	const handed = handoffTicket(base, "A", "  ambiguous spec ");
+	assert(handed.ok && handed.tickets.find((t) => t.id === "A")!.state === "limbo" && handed.tickets.find((t) => t.id === "A")!.reason === "ambiguous spec");
+	assert.equal(handoffTicket(base, "A", "  ").ok, false, "a reason is required");
+	assert.equal(handoffTicket(base, "ghost", "x").ok, false);
+	assert(handed.ok && pickableIds(handed.tickets).length === 0, "dependents of limbo stay blocked: C waits on limbo A");
+
+	// Done report.
+	assert(handed.ok);
+	const report = doneReport(handed.tickets);
+	assert(report.startsWith("DONE: 1 done, 1 limbo, 1 blocked-by-limbo."), report);
+	assert(report.includes("Limbo (needs human review): A — ambiguous spec") && report.includes("Not worked because blocked by limbo: C"));
+	assert.equal(doneReport([tk("A", "done")]), "DONE: 1 done, 0 limbo, 0 blocked-by-limbo.", "a clean run has no extra lines");
+
+	// Restore shape checks: malformed persisted trees degrade to empty (fail closed).
+	assert.deepEqual(restoreTickets([tk("A", "limbo", ["B"], "r")]), [tk("A", "limbo", ["B"], "r")]);
+	assert.deepEqual(restoreTickets([{ id: "A", state: "bogus", blockedBy: [] }]), []);
+	assert.deepEqual(restoreTickets("x"), []);
+	assert.deepEqual(restoreDrainState([{ type: "custom", customType: "drain-watchdog-state", data: { phase: "armed", tickets: [tk("A")] } }])!.tickets, [tk("A")], "restoreDrainState keeps a valid tree");
+	assert.deepEqual(restoreDrainState([{ type: "custom", customType: "drain-watchdog-state", data: { phase: "armed", tickets: [{ id: 1 }] } }])!.tickets, [], "a malformed tree is dropped, not half-applied");
+
+	// Target dir names: opaque ids never escape /tmp/executor/<slug>.
+	assert.equal(targetDirName("#38"), "38");
+	assert.equal(targetDirName("KRIPT-222"), "KRIPT-222");
+	assert.equal(targetDirName("../../etc"), "etc");
+	assert.equal(targetDirName("///"), null);
+	assert.equal(executorStateFilePath("/repos/demo", "#38"), "/tmp/executor/demo/38/state.json");
+}
 
 // --- classifyProviderError -------------------------------------------------------------------
 
@@ -808,7 +833,7 @@ assert.equal(jitterAfterMs(10 * MIN, Number.NaN), 11 * MIN, "NaN is the midpoint
 // Probe text is minimal, fixed, and recognized exactly (never carries ticket content).
 assert.ok(isProbeText("drain-watchdog probe: continue the drain flow."));
 assert.ok(!isProbeText("drain-watchdog probe: continue the drain flow.\nWork ticket #32 now."), "a probe with content is not a probe");
-assert.ok(!isProbeText(buildNudgeText({ target: 32, pickable: 2 })), "normal nudges are distinct from probes");
+assert.ok(!isProbeText(buildNudgeText({ target: "#32", pickable: 2 })), "normal nudges are distinct from probes");
 
 // providerError with a message: the reset honor overrides the ladder at the seam.
 {
@@ -839,58 +864,23 @@ assert.ok(!isProbeText(buildNudgeText({ target: 32, pickable: 2 })), "normal nud
 	}
 }
 
-// --- Handoff exit (flow.html section 5, GitHub tracker) -----------------------------------------
+// --- Tool gate (#31) ---------------------------------------------------------------------------
 
-assert.deepEqual(handoffExit("needs-info"), { label: "needs-info" });
-assert.deepEqual(handoffExit("human"), { label: "ready-for-human" });
-assert.deepEqual(handoffExit("wontfix"), { label: "wontfix" });
-// Fail closed: an unknown kind throws; it never yields a label that leaves the ticket queued.
-assert.throws(() => handoffExit("ready-for-humans" as HandoffKind));
-assert.throws(() => handoffExit("toString" as HandoffKind));
-
-// --- #31 tool seams: gate, label parse, gh argv plan, result text --------------------------
-
-// Gate: a child can never invoke either tool, from any phase; a live run passes.
-for (const phase of ["off", "armed", "backoff", "paused", "done", "finalizing"] as const) {
-	assert.deepEqual(watchdogToolGate("handoff", true, phase), { ok: false, error: "watchdog_handoff is main-session only; child sessions cannot invoke it" }, `child blocked at ${phase}`);
-	assert.deepEqual(watchdogToolGate("stop", true, phase), { ok: false, error: "watchdog_stop is main-session only; child sessions cannot invoke it" }, `child blocked at ${phase}`);
+// Gate: a child can never invoke any ticket/stop/done tool, from any phase; a live run passes.
+for (const kind of ["complete", "handoff", "sync", "stop", "done"] as const) {
+	for (const phase of ["off", "armed", "backoff", "paused", "done", "finalizing"] as const) {
+		assert.deepEqual(watchdogToolGate(kind, true, phase), { ok: false, error: `watchdog_${kind} is main-session only; child sessions cannot invoke it` }, `child blocked: ${kind} at ${phase}`);
+	}
+	// No active run (off/done): an error result, never a silent success.
+	assert.equal(watchdogToolGate(kind, false, "off").ok, false);
+	assert.equal(watchdogToolGate(kind, false, "done").ok, false);
+	assert.deepEqual(watchdogToolGate(kind, false, "armed"), { ok: true });
 }
-assert.deepEqual(watchdogToolGate("handoff", false, "armed"), { ok: true });
 assert.deepEqual(watchdogToolGate("stop", false, "backoff"), { ok: true });
 assert.deepEqual(watchdogToolGate("stop", false, "paused"), { ok: true });
 assert.deepEqual(watchdogToolGate("stop", false, "finalizing"), { ok: true });
-// No active run (off/done): an error result, never a silent success — a silent
-// watchdog_handoff would look recorded when nothing happened.
-assert.equal(watchdogToolGate("handoff", false, "off").ok, false);
-assert.equal(watchdogToolGate("handoff", false, "done").ok, false);
-assert.equal(watchdogToolGate("stop", false, "off").ok, false);
-assert.equal(watchdogToolGate("stop", false, "done").ok, false);
-assert.deepEqual(watchdogToolGate("done", false, "armed"), { ok: true });
-assert.equal(watchdogToolGate("done", true, "armed").ok, false, "children never complete the run");
-assert.equal(watchdogToolGate("done", false, "off").ok, false);
 // The off/done error names the situation and the way out.
-assert(String(watchdogToolGate("stop", false, "done").ok === false && JSON.stringify(watchdogToolGate("stop", false, "done")).includes("no active watchdog run")));
-
-// gh argv plan: exact label swap (remove first), then the reason comment.
-const plan = planHandoffCommands(42, "human");
-assert.equal(plan.label, "ready-for-human");
-assert.deepEqual(plan.argvs[0], { command: "gh", args: ["issue", "view", "42", "--json", "labels", "--jq", ".labels[].name"] });
-assert.deepEqual(plan.argvs[1], { command: "gh", args: ["issue", "edit", "42", "--remove-label", "ready-for-agent", "--add-label", "ready-for-human"] });
-assert.deepEqual(plan.argvs[2]!.command, "gh");
-assert.deepEqual(plan.argvs[2]!.args.slice(0, 4), ["issue", "comment", "42", "--body"]);
-assert(plan.argvs[2]!.args[4]!.startsWith("drain-watchdog handoff (human): "));
-assert.deepEqual(planHandoffCommands(7, "needs-info").label, "needs-info");
-assert.deepEqual(planHandoffCommands(7, "wontfix").label, "wontfix");
-
-// Label parse: one name per line (--jq '.labels[].name'), duplicates collapse,
-// blank lines ignored, surrounding whitespace trimmed.
-assert.deepEqual(parseLabelList("ready-for-agent\nbug\n"), ["bug", "ready-for-agent"]);
-assert.deepEqual(parseLabelList("ready-for-agent\nready-for-agent\n"), ["ready-for-agent"]);
-assert.deepEqual(parseLabelList("  wontfix  \n\n"), ["wontfix"]);
-assert.deepEqual(parseLabelList(""), []);
-
-// Result text is one line naming issue and label.
-assert.equal(handoffResultText(42, "ready-for-human"), "Handed off #42 (label ready-for-human); recorded as progress for the watchdog.");
+assert(JSON.stringify(watchdogToolGate("stop", false, "done")).includes("no active watchdog run"));
 
 // --- SPLIT predicate --------------------------------------------------------------------------
 
@@ -940,33 +930,15 @@ assert.deepEqual(parseWatchdogSubcommand("resume"), { sub: "resume", ref: null }
 assert.deepEqual(parseWatchdogSubcommand("off"), { sub: "off", ref: null });
 assert.deepEqual(parseWatchdogSubcommand("status"), { sub: "status", ref: null });
 
-// Session-context issue mentions are distinct and ascending.
-assert.deepEqual(extractIssueNumbers("fix #29 and then close #30, ref #29"), [29, 30]);
-assert.deepEqual(extractIssueNumbers("no refs here, q30 x#12abc34"), []);
-
-// Target resolution: only an explicit single #N resolves; everything else is
-// model-driven discovery (the extension never scans or guesses a target).
-assert.deepEqual(pickTarget("#30"), { status: "resolved", number: 30 });
-assert.deepEqual(pickTarget("run #30 please"), { status: "resolved", number: 30 });
-assert.deepEqual(pickTarget(null), { status: "discover" });
-assert.deepEqual(pickTarget("#9 #30"), { status: "discover" }, "two numbers is ambiguous, not a pick");
-assert.deepEqual(pickTarget("the watchdog map"), { status: "discover" });
-assert.deepEqual(pickTarget(""), { status: "discover" });
-
+// `/watchdog` always starts model-driven discovery (the extension never reads a tracker).
 // watchdog_target gate: main session only, and only while discovery is pending.
 assert.deepEqual(targetToolGate(false, true), { ok: true });
 assert.equal(targetToolGate(true, true).ok, false, "child sessions never choose a target");
 assert.equal(targetToolGate(false, false).ok, false, "no pending discovery: the model cannot pick a target on its own");
 
 
-// Operator UI: target kind from gh output (MAP / SPEC / TIKET), widget lines, completion.
-assert.deepEqual(parseTargetInfo(JSON.stringify({ title: "m", labels: [{ name: "wayfinder:map" }], subIssues: { totalCount: 3 } })), { kind: "map", title: "m" });
-assert.deepEqual(parseTargetInfo(JSON.stringify({ title: "s", labels: [{ name: "ready-for-agent" }], subIssues: { totalCount: 8 } })), { kind: "spec", title: "s" });
-assert.deepEqual(parseTargetInfo(JSON.stringify({ title: "t", labels: [], subIssues: { totalCount: 0 } })), { kind: "ticket", title: "t" });
-assert.equal(parseTargetInfo("not json"), null);
-assert.equal(parseTargetInfo(JSON.stringify({ labels: [] })), null, "no title is unparseable");
-
-const baseView = { phase: "armed" as const, prep: null, target: 35, info: { kind: "ticket" as const, title: "end-to-end unattended validation run" }, pickable: 2, inflight: 0, children: 1, nudgeCount: 3, noProgressStreak: 1, idleMs: 42_000, pausedReason: null, backoffKind: null };
+// Operator UI: widget lines, completion.
+const baseView = { phase: "armed" as const, prep: null, target: "#35", info: { kind: "ticket" as const, title: "end-to-end unattended validation run" }, pickable: 2, children: 1, nudgeCount: 3, noProgressStreak: 1, idleMs: 42_000, pausedReason: null, backoffKind: null };
 const plain = (lines: string[] | null) => (lines ?? []).join("\n").replace(/\x1b\[[0-9;]*m/g, "");
 const armedWidget = plain(watchdogWidgetLines(baseView));
 assert(armedWidget.includes("ARMED") && armedWidget.includes("TIKET #35") && armedWidget.includes("end-to-end unattended validation run"), "armed widget shows the kind, number and title");
@@ -1033,13 +1005,13 @@ assert.equal(isSubagentCompletionNotice("subagent_status"), false, "mid-run stat
 assert.equal(isSubagentCompletionNotice("subagent_ping"), false);
 assert.equal(isSubagentCompletionNotice(undefined), false);
 
-// Queue fingerprint / nudge text.
-assert.notEqual(queueFingerprint({ pickable: 2, inflight: 0 }), queueFingerprint({ pickable: 3, inflight: 0 }));
-assert.notEqual(queueFingerprint({ pickable: 2, inflight: 0 }), queueFingerprint({ pickable: 2, inflight: 1 }));
-const nudge = buildNudgeText({ target: 30, pickable: 2 });
-assert(nudge.includes("#30"), "nudge names the run target");
+// Nudge text.
+const nudge = buildNudgeText({ target: "KRIPT-30", pickable: 2 });
+assert(nudge.includes("KRIPT-30"), "nudge names the run target");
 assert(nudge.includes("Do not ask the user"), "nudge forbids user questions");
-assert(nudge.includes("ready-for-human"), "nudge points at the handoff exit");
+assert(nudge.includes("watchdog_handoff") && nudge.includes("watchdog_complete"), "nudge points at the ticket tools");
+assert(nudge.includes(SYNC_REMINDER), "nudge carries the keep-in-sync reminder");
+assert(!nudge.includes("ready-for-human"), "nudge no longer names tracker labels");
 assert(nudge.includes("in parallel") && nudge.includes("integration/<slug>"), "nudge pushes parallel worktrees on the integration branch");
 assert(buildNudgeText({ target: null, pickable: 1 }).includes("the accepted tickets"));
 
@@ -1178,10 +1150,7 @@ type Harness = {
 	widget: () => string[] | undefined;
 	execCalls: { command: string; args: string[] }[];
 	setExec: (impl: (command: string, args: string[]) => Promise<{ stdout: string; stderr: string; code: number; killed: boolean }>) => void;
-	/** Queue proof the mocked exec returns for the next bash calls (PREP needs >0
-	 *  pickable to arm; ticks need 0 for an empty frontier). */
-	setQueue: (pickable: number, inflight?: number) => void;
-	/** Registered model tools by name (watchdog_handoff, watchdog_stop). */
+	/** Registered model tools by name (watchdog_target/complete/handoff/sync/done/stop). */
 	tools: Record<string, { execute: (id: string, params: any, signal: any, update: any, ctx: any) => Promise<any> }>;
 	ctx: any;
 	/** The live state-entry list the default sessionManager serves; pre-seed
@@ -1189,7 +1158,7 @@ type Harness = {
 	entries: unknown[];
 };
 
-/** A fresh factory instance wired to capturing mocks; `pi.exec` answers the queue GraphQL query. */
+/** A fresh factory instance wired to capturing mocks; `pi.exec` records every call (the extension must make none for the queue). */
 function makeHarness(cwd: string): Harness {
 	const handlers: Record<string, (...args: any[]) => unknown> = {};
 	const tools: Harness["tools"] = {};
@@ -1199,17 +1168,8 @@ function makeHarness(cwd: string): Harness {
 	const userMessages: string[] = [];
 	let widgetLines: string[] | undefined;
 	const entries: unknown[] = [];
-	let queueValue = 0;
-	let inflightValue = 0;
-	const graph = () => {
-		const subs = [
-			...Array.from({ length: queueValue }, (_, i) => gi(100 + i)),
-			...Array.from({ length: inflightValue }, (_, i) => gi(200 + i, { assignees: ["me"] })),
-		];
-		return gql(gi(38, { labels: [], subs }));
-	};
-	let execImpl: (command: string, args: string[]) => Promise<{ stdout: string; stderr: string; code: number; killed: boolean }> = async (_command, args) => ({
-		stdout: args[1] === "graphql" ? graph() : `${queueValue}\n`,
+	let execImpl: (command: string, args: string[]) => Promise<{ stdout: string; stderr: string; code: number; killed: boolean }> = async () => ({
+		stdout: "",
 		stderr: "",
 		code: 0,
 		killed: false,
@@ -1237,8 +1197,6 @@ function makeHarness(cwd: string): Harness {
 			userMessages.push(content);
 		},
 		exec: async (command: string, args: string[]) => {
-			// The widget's best-effort target lookup is not part of any contract under test.
-			if (args.includes("title,labels,subIssues")) return { stdout: "", stderr: "", code: 1, killed: false };
 			execCalls.push({ command, args });
 			return execImpl(command, args);
 		},
@@ -1259,7 +1217,7 @@ function makeHarness(cwd: string): Harness {
 		hasPendingMessages: () => false,
 		sessionManager: { getEntries: () => entries },
 	};
-	return { handlers, audits, notifications, sent, userMessages, widget: () => widgetLines, execCalls, setExec: (impl) => { execImpl = impl; }, setQueue: (pickable, inflight = 0) => { queueValue = pickable; inflightValue = inflight; }, tools, ctx, entries };
+	return { handlers, audits, notifications, sent, userMessages, widget: () => widgetLines, execCalls, setExec: (impl) => { execImpl = impl; }, tools, ctx, entries };
 }
 
 function makeFixtureCwd(): string {
@@ -1269,8 +1227,13 @@ function makeFixtureCwd(): string {
 const armedEntry = (tweaks: Record<string, unknown> = {}) => ({
 	type: "custom",
 	customType: "drain-watchdog-state",
-	data: { phase: "armed", runTarget: 38, ...tweaks },
+	data: { phase: "armed", runTarget: "#38", tickets: [{ id: "T1", state: "open", blockedBy: [] }, { id: "T2", state: "open", blockedBy: [] }], ...tweaks },
 });
+
+// Latest persisted watchdog state entry from a harness run (typed loosely: the
+// harness stores plain records).
+const persistedLatest = (entries: unknown[]) =>
+	entries.filter((e: any) => e.customType === "drain-watchdog-state").at(-1) as { data: Record<string, any> };
 
 // H3 (regression guard): a restored BACKOFF run keeps its probe timer alive. startLoop()
 // used to call clearTimers() (tick timer AND probe timer). session_start restores BACKOFF
@@ -1291,8 +1254,8 @@ await withNoAmbientSubagent(() =>
 
 // M5(b): session_start restoring an ARMED run starts only the tick interval (no probe:
 // that is BACKOFF-only), and a tick that observes idle+pickable-work delivers a nudge
-// through the real pi.sendMessage/appendEntry surface — including reading the real
-// queue query through pi.exec.
+// through the real pi.sendMessage/appendEntry surface, reading the persisted ticket
+// tree (no tracker call).
 await withNoAmbientSubagent(() =>
 	withFakeTimers(async (timers, flush, clock) => {
 		const h = makeHarness(makeFixtureCwd());
@@ -1301,7 +1264,6 @@ await withNoAmbientSubagent(() =>
 		const live = timers.filter((t) => !t.cleared);
 		assert.equal(live.filter((t) => t.kind === "interval").length, 1, "restoring ARMED starts the tick interval");
 		assert.equal(live.filter((t) => t.kind === "timeout").length, 0, "restoring ARMED schedules no probe (BACKOFF-only)");
-		h.setQueue(2, 1);
 		clock.advance(IDLE_GRACE_MS + 1000); // past the idle-grace gate so the tick actually evaluates
 		const tickTimer = timers.find((t) => t.kind === "interval" && !t.cleared)!;
 		tickTimer.fire();
@@ -1310,7 +1272,8 @@ await withNoAmbientSubagent(() =>
 		assert.equal(h.sent.length, 1, "an idle armed tick with pickable work delivers exactly one nudge");
 		assert.equal(h.sent[0]!.customType, "drain-watchdog-nudge");
 		assert(h.audits.some((a) => a.type === "nudge"), "the nudge is audited");
-		assert.equal(h.execCalls.filter((c) => c.args[1] === "graphql").length, 1, "one queue query per tick");
+		assert.equal(h.execCalls.length, 0, "the queue is the ticket tree: a tick makes no tracker/gh call");
+		assert(h.sent[0]!.content.includes("2 pickable"), "the nudge reports the ticket-tree pickable count");
 	}),
 );
 
@@ -1325,7 +1288,6 @@ await withNoAmbientSubagent(() =>
 		h.handlers.session_start({}, h.ctx);
 		const tickTimer = timers.find((t) => t.kind === "interval" && !t.cleared)!;
 		assert.equal(tickTimer.delay, TICK_MS, "the armed tick interval defaults to TICK_MS");
-		h.setQueue(2, 1);
 		// Tick-by-tick, like the real interval: silent until the grace has elapsed.
 		let elapsed = 0;
 		while (elapsed + TICK_MS < IDLE_GRACE_MS) {
@@ -1334,7 +1296,6 @@ await withNoAmbientSubagent(() =>
 			tickTimer.fire();
 			await flush();
 			assert.equal(h.sent.length, 0, `no nudge before the idle grace (idle ${elapsed}ms)`);
-			assert.equal(h.execCalls.filter((c) => c.args[1] === "graphql").length, 0, "no queue command runs before the idle grace");
 		}
 		clock.advance(IDLE_GRACE_MS - elapsed - 1);
 		tickTimer.fire();
@@ -1348,26 +1309,24 @@ await withNoAmbientSubagent(() =>
 	}),
 );
 
-// M5(b): a tick whose queue command fails (exec throws) pauses — fail-closed, never a
-// nudge, never DONE — and the pause is both audited and notified with the failure reason.
+// A tick on a run with no declared tickets pauses — fail-closed, never a nudge, never
+// DONE — and the pause is both audited and notified.
 await withNoAmbientSubagent(() =>
 	withFakeTimers(async (timers, flush, clock) => {
 		const h = makeHarness(makeFixtureCwd());
-		h.entries.push(armedEntry());
+		h.entries.push(armedEntry({ tickets: [] }));
 		h.handlers.session_start({}, h.ctx);
-		h.setExec(async () => {
-			throw new Error("boom: queue query threw");
-		});
 		clock.advance(IDLE_GRACE_MS + 1000); // past the idle-grace gate so the tick actually evaluates
 		const tickTimer = timers.find((t) => t.kind === "interval" && !t.cleared)!;
 		tickTimer.fire();
 		await flush();
 		await flush();
-		assert.equal(h.sent.length, 0, "a failed queue command never nudges");
+		assert.equal(h.sent.length, 0, "an empty ticket tree never nudges");
 		const pauseAudit = h.audits.find((a) => a.type === "paused");
-		assert(pauseAudit !== undefined, "a failed queue command is audited as paused, not silently ignored");
-		assert(String(pauseAudit!.data.reason).includes("queue"), "the pause reason names the queue failure");
+		assert(pauseAudit !== undefined, "an empty ticket tree is audited as paused, not silently ignored");
+		assert(String(pauseAudit!.data.reason).includes("no tickets"), "the pause reason names the missing tickets");
 		assert(h.notifications.some((n) => n.message.includes("PAUSED")), "the pause is also surfaced to the UI");
+		assert.equal(persistedLatest(h.entries).data.phase, "paused");
 	}),
 );
 
@@ -1403,59 +1362,66 @@ await withNoAmbientSubagent(() =>
 
 // --- #31: watchdog_handoff / watchdog_stop model tools (harness) ------------------------
 
-// A handoff gh session: the issue view returns a pickable issue (ready-for-agent
-// only), both mutations succeed. The comment call echoes back the final body
-// argv so the assertion sees exactly what gh would post.
-const ghHandoffImpl = () => async (_command: string, args: string[]) => {
-	if (args[1] === "view") return { stdout: "ready-for-agent\n", stderr: "", code: 0, killed: false };
-	if (args[1] === "edit") return { stdout: "", stderr: "", code: 0, killed: false };
-	if (args[1] === "comment") return { stdout: `posted: ${args[4]}`, stderr: "", code: 0, killed: false };
-	return { stdout: "", stderr: "unexpected gh call", code: 99, killed: false };
-};
-
-// Latest persisted watchdog state entry from a harness run (typed loosely: the
-// harness stores plain records).
-const persistedLatest = (entries: unknown[]) =>
-	entries.filter((e: any) => e.customType === "drain-watchdog-state").at(-1) as { data: Record<string, unknown> };
-
-// Happy path: AC1 — label swap, reason comment, progress event (breaker stays
-// cold), persisted state, audit entry, model-facing result text.
+// Happy path: watchdog_handoff puts a ticket in limbo (no gh), counts as progress (breaker
+// stays cold), persists, audits, and the reply reminds the model to sync the tracker.
 await withNoAmbientSubagent(() =>
 	withFakeTimers(async (timers, flush, clock) => {
 		const h = makeHarness(makeFixtureCwd());
 		h.entries.push(armedEntry({ noProgressStreak: 2, nextAllowedAt: 999_999_999_999 }));
 		h.handlers.session_start({}, h.ctx);
-		h.setExec(ghHandoffImpl());
-		clock.advance(IDLE_GRACE_MS + 1000); // a real tick would nudge; nothing fires while the tool runs
+		clock.advance(IDLE_GRACE_MS + 1000);
 		const before = timers.filter((t) => !t.cleared).length;
-		const res = await h.tools.watchdog_handoff!.execute("t1", { issue: 42, kind: "human", reason: "needs an operator decision on the migration order" }, undefined, undefined, h.ctx);
+		const res = await h.tools.watchdog_handoff!.execute("t1", { id: "T1", reason: "needs an operator decision on the migration order" }, undefined, undefined, h.ctx);
 		await flush();
-		// Exact gh argv, in order: view (pre-read), edit (label swap), comment (reason).
-		assert.deepEqual(h.execCalls.map((c) => [c.command, ...c.args]), [
-			["gh", "issue", "view", "42", "--json", "labels", "--jq", ".labels[].name"],
-			["gh", "issue", "edit", "42", "--remove-label", "ready-for-agent", "--add-label", "ready-for-human"],
-			["gh", "issue", "comment", "42", "--body", "drain-watchdog handoff (human): needs an operator decision on the migration order"],
-		]);
+		assert.equal(h.execCalls.length, 0, "no gh / tracker call: the extension only edits its own ticket tree");
 		assert(!res.isError, "the happy-path handoff is a success result");
-		assert.equal(res.content[0].text, "Handed off #42 (label ready-for-human); recorded as progress for the watchdog.");
+		assert(res.content[0].text.includes("limbo") && res.content[0].text.includes("Pickable now: T2") && res.content[0].text.includes(SYNC_REMINDER), res.content[0].text);
 		const handoffAudit = h.audits.find((a) => a.type === "handoff");
 		assert(handoffAudit !== undefined, "the handoff is audited");
-		assert.equal(handoffAudit!.data.issue, 42);
-		assert.equal(handoffAudit!.data.kind, "human");
-		assert.equal(handoffAudit!.data.label, "ready-for-human");
+		assert.equal(handoffAudit!.data.id, "T1");
 		assert.equal(handoffAudit!.data.reason, "needs an operator decision on the migration order");
-		// Progress reached the core: the warm start had streak 2 and a far-future
-		// cooldown; the handoff reset both (breaker cold, ladder free) and the run
-		// stayed armed. (Progress keeps the phase, so there is deliberately no
-		// transition audit — the persisted state is the observable.)
 		assert.equal(h.audits.find((a) => a.type === "transition"), undefined, "progress keeps the phase: no transition audit");
 		const nowAtHandoff = Date.now(); // the fake clock is frozen during execute
 		const persisted = persistedLatest(h.entries);
 		assert.equal(persisted.data.phase, "armed");
 		assert.equal(persisted.data.noProgressStreak, 0, "handoff is progress: the breaker streak stays cold");
 		assert.equal(persisted.data.nextAllowedAt, nowAtHandoff, "handoff is progress: the nudge cooldown resets");
-		// No timers were created or killed by the tool path.
+		assert.deepEqual(persisted.data.tickets.map((t: Ticket) => [t.id, t.state]), [["T1", "limbo"], ["T2", "open"]], "the tree persists with the run");
+		assert.equal(persisted.data.tickets[0].reason, "needs an operator decision on the migration order");
 		assert.equal(timers.filter((t) => !t.cleared).length, before, "the handoff tool path starts no timer");
+		// Failure paths: unknown id and empty reason change nothing.
+		const bad = await h.tools.watchdog_handoff!.execute("t1b", { id: "ghost", reason: "x" }, undefined, undefined, h.ctx);
+		assert.equal(bad.isError, true, "unknown ticket id fails closed");
+		const noReason = await h.tools.watchdog_handoff!.execute("t1c", { id: "T2", reason: "  " }, undefined, undefined, h.ctx);
+		assert.equal(noReason.isError, true, "empty reason is refused");
+		assert.equal(persistedLatest(h.entries).data.tickets[1].state, "open");
+	}),
+);
+
+// watchdog_complete + watchdog_sync through the live factory: progress, persist, audit,
+// pickable summary, and the stop-a-live-child note when a ticket closes.
+await withNoAmbientSubagent(() =>
+	withFakeTimers(async () => {
+		const h = makeHarness(makeFixtureCwd());
+		h.entries.push(armedEntry({ tickets: [tk("A"), tk("B", "open", ["A"])] }));
+		h.handlers.session_start({}, h.ctx);
+		const done = await h.tools.watchdog_complete!.execute("c1", { id: "A" }, undefined, undefined, h.ctx);
+		assert(!done.isError && done.content[0].text.includes("Pickable now: B") && done.content[0].text.includes(SYNC_REMINDER), done.content[0].text);
+		assert.equal(persistedLatest(h.entries).data.tickets[0].state, "done");
+		assert((await h.tools.watchdog_complete!.execute("c2", { id: "ghost" }, undefined, undefined, h.ctx)).isError, "unknown id fails closed");
+		// Source changed unexpectedly: B cancelled (limbo), N new (SPLIT child), A reopened.
+		const sync = await h.tools.watchdog_sync!.execute("s1", { tickets: [{ id: "B", state: "limbo", reason: "cancelled in source" }, { id: "N" }, { id: "A", state: "open" }] }, undefined, undefined, h.ctx);
+		assert(!sync.isError, sync.content[0].text);
+		const text = String(sync.content[0].text);
+		assert(text.includes("3 changed: 1 open->limbo, 1 new, 1 done->open") && text.includes("Pickable now: N, A") === false, text);
+		assert(text.includes("Pickable now: A, N") && text.includes("stop any live child") && text.includes(SYNC_REMINDER), text);
+		assert(h.audits.some((a) => a.type === "sync"), "sync is audited");
+		assert.deepEqual(persistedLatest(h.entries).data.tickets.map((t: Ticket) => [t.id, t.state]), [["A", "open"], ["B", "limbo"], ["N", "open"]]);
+		assert((await h.tools.watchdog_sync!.execute("s2", { tickets: [{ id: "A", state: "bogus" }] }, undefined, undefined, h.ctx)).isError, "malformed sync is refused");
+		assert((await h.tools.watchdog_sync!.execute("s3", { tickets: [] }, undefined, undefined, h.ctx)).isError, "empty sync is refused");
+		const noop = await h.tools.watchdog_sync!.execute("s4", { tickets: [{ id: "A" }] }, undefined, undefined, h.ctx);
+		assert(!noop.isError && String(noop.content[0].text).startsWith("watchdog_sync: 0 changed"), "a no-op sync is reported as such");
+		assert.equal(h.execCalls.length, 0, "no tracker call anywhere");
 	}),
 );
 
@@ -1467,23 +1433,25 @@ await withNoAmbientSubagent(() =>
 		const h = makeHarness(makeFixtureCwd());
 		h.entries.push(armedEntry());
 		h.handlers.session_start({}, h.ctx);
-		h.setExec(async () => {
-			throw new Error("gh must not be called from a child-gated tool");
-		});
 		process.env.PI_SUBAGENT_ID = "child-caller";
 		try {
 			const stop = await h.tools.watchdog_stop!.execute("t2", { reason: "environment broke" }, undefined, undefined, h.ctx);
 			assert.equal(stop.isError, true, "a child cannot invoke watchdog_stop");
 			assert(String(stop.content[0].text).includes("main-session only"));
-			const handoff = await h.tools.watchdog_handoff!.execute("t3", { issue: 42, kind: "wontfix", reason: "x" }, undefined, undefined, h.ctx);
+			const handoff = await h.tools.watchdog_handoff!.execute("t3", { id: "T1", reason: "x" }, undefined, undefined, h.ctx);
 			assert.equal(handoff.isError, true, "a child cannot invoke watchdog_handoff");
 			assert(String(handoff.content[0].text).includes("main-session only"));
+			for (const [name, params] of [["watchdog_complete", { id: "T1" }], ["watchdog_sync", { tickets: [{ id: "T1" }] }], ["watchdog_done", {}]] as const) {
+				const res = await h.tools[name]!.execute("t3x", params, undefined, undefined, h.ctx);
+				assert.equal(res.isError, true, `a child cannot invoke ${name}`);
+			}
 		} finally {
 			delete process.env.PI_SUBAGENT_ID;
 		}
 		// Nothing ran, nothing changed.
 		assert.equal(h.execCalls.length, 0, "a child-gated call never reaches gh");
-		assert.equal(h.audits.find((a) => a.type === "handoff" || a.type === "paused"), undefined, "a child-gated call changes nothing");
+		assert.equal(h.audits.find((a) => a.type === "handoff" || a.type === "paused" || a.type === "sync" || a.type === "complete"), undefined, "a child-gated call changes nothing");
+		assert.equal(h.entries.filter((e: any) => e.customType === "drain-watchdog-state").length, 1, "a child-gated call persists nothing beyond the restored entry");
 	}),
 );
 
@@ -1516,21 +1484,22 @@ await withNoAmbientSubagent(() =>
 );
 
 // watchdog_done: a verified promise. Refused while tickets remain (nothing changes),
-// accepted at once on an empty queue (DONE, timers stopped, audited, no idle wait).
+// accepted at once with nothing pickable (DONE, timers stopped, audited, no idle wait).
 await withNoAmbientSubagent(() =>
 	withFakeTimers(async (timers) => {
 		const h = makeHarness(makeFixtureCwd());
 		h.entries.push(armedEntry());
 		h.handlers.session_start({}, h.ctx);
-		h.setQueue(2);
 		const early = await h.tools.watchdog_done!.execute("d1", {}, undefined, undefined, h.ctx);
 		assert.equal(early.isError, true, "premature promise is refused");
 		assert(String(early.content[0].text).includes("2 pickable"), "the refusal names what remains");
 		assert.equal(persistedLatest(h.entries)?.data?.phase ?? "armed", "armed", "a refused promise leaves the run armed");
 		assert(h.audits.some((a) => a.type === "done-refused"));
-		h.setQueue(0);
+		await h.tools.watchdog_complete!.execute("d1a", { id: "T1" }, undefined, undefined, h.ctx);
+		await h.tools.watchdog_handoff!.execute("d1b", { id: "T2", reason: "needs a human" }, undefined, undefined, h.ctx);
 		const res = await h.tools.watchdog_done!.execute("d2", {}, undefined, undefined, h.ctx);
-		assert(!res.isError, "empty queue: the promise is accepted");
+		assert(!res.isError, "nothing pickable (done + limbo only): the promise is accepted");
+		assert(String(res.content[0].text).includes("DONE: 1 done, 1 limbo") && String(res.content[0].text).includes("T2 — needs a human"), "the accepted result carries the done/limbo report");
 		assert.equal(persistedLatest(h.entries).data.phase, "done");
 		assert(h.audits.some((a) => a.type === "done"), "DONE is audited");
 		assert(h.notifications.some((n) => n.message.includes("DONE")));
@@ -1552,62 +1521,6 @@ await withNoAmbientSubagent(() =>
 		assert.equal(h.audits.find((a) => a.type === "paused" || a.type === "transition"), undefined, "no state change when there is no run");
 	}),
 );
-
-// Failure path (AC-order honesty): a comment failure after the label swap is a
-// HANDOFF PARTIAL error result — gh got the swap, the watchdog recorded nothing.
-await withNoAmbientSubagent(() =>
-	withFakeTimers(async (_timers, flush) => {
-		const h = makeHarness(makeFixtureCwd());
-		h.entries.push(armedEntry());
-		h.handlers.session_start({}, h.ctx);
-		h.setExec(async (_command, args) => {
-			if (args[1] === "view") return { stdout: "ready-for-agent\n", stderr: "", code: 0, killed: false };
-			if (args[1] === "edit") return { stdout: "", stderr: "", code: 0, killed: false };
-			return { stdout: "", stderr: "gh: permission denied for comments", code: 4, killed: false };
-		});
-		const res = await h.tools.watchdog_handoff!.execute("t6", { issue: 9, kind: "needs-info", reason: "spec is ambiguous" }, undefined, undefined, h.ctx);
-		await flush();
-		assert.equal(res.isError, true, "a failed comment fails the tool result");
-		assert(String(res.content[0].text).includes("HANDOFF PARTIAL"), "the partial state is reported explicitly");
-		assert(String(res.content[0].text).includes("permission denied"), "the specific error is in the result");
-		// State consistency: no progress/persist/audit from a failed handoff.
-		assert.equal(h.audits.find((a) => a.type === "handoff"), undefined, "a failed handoff writes no handoff audit");
-		const persisted = persistedLatest(h.entries);
-		assert.equal(persisted.data.phase, "armed", "the run state is untouched by a failed handoff");
-	}),
-);
-
-// A label-swap failure (pre-read or edit) fails before any mutation and changes nothing.
-await withNoAmbientSubagent(() =>
-	withFakeTimers(async () => {
-		const h = makeHarness(makeFixtureCwd());
-		h.entries.push(armedEntry());
-		h.handlers.session_start({}, h.ctx);
-		h.setExec(async (_command, args) => {
-			if (args[1] === "view") return { stdout: "", stderr: "gh: issue not found", code: 1, killed: false };
-			return { stdout: "", stderr: "must not run", code: 0, killed: false };
-		});
-		const res = await h.tools.watchdog_handoff!.execute("t7", { issue: 404, kind: "human", reason: "x" }, undefined, undefined, h.ctx);
-		assert.equal(res.isError, true);
-		assert(String(res.content[0].text).includes("gh issue view 404"), "the failing gh step is named");
-		assert.equal(h.execCalls.length, 1, "nothing runs after the failed pre-read");
-		assert.equal(h.audits.find((a) => a.type === "handoff"), undefined);
-
-		// Idempotent retry: the exit label already applied (and ready-for-agent gone)
-		// refuses before touching the ticket again.
-		h.setExec(async (_command, args) => {
-			if (args[1] === "view") return { stdout: "ready-for-human\n", stderr: "", code: 0, killed: false };
-			return { stdout: "", stderr: "", code: 0, killed: false };
-		});
-		const retry = await h.tools.watchdog_handoff!.execute("t8", { issue: 404, kind: "human", reason: "x" }, undefined, undefined, h.ctx);
-		assert.equal(retry.isError, true);
-		// The ticket is already out of the queue (no ready-for-agent left), so the
-		// retry refuses in the pre-read before any mutation runs.
-		assert(String(retry.content[0].text).includes("nothing to hand off"), "an already-handed-off issue refuses cleanly");
-		assert.equal(h.execCalls.length, 2, "the retry also stopped at the pre-read (no edit, no comment)");
-	}),
-);
-
 
 // --- #32 harness rows: the full backoff loop through the live factory ----------------------
 
@@ -1877,7 +1790,9 @@ assert.equal(executorRepoSlug("/home/homeserver/projects/nix-llm-agents-config")
 assert.equal(executorRepoSlug("/repos/My_App"), "my-app");
 assert.equal(executorRepoSlug("/"), "");
 assert.equal(executorStateRoot("/repos/demo"), "/tmp/executor/demo");
-assert.equal(executorStateFilePath("/repos/demo", 38), "/tmp/executor/demo/38/state.json");
+assert.equal(executorStateFilePath("/repos/demo", "#38"), "/tmp/executor/demo/38/state.json");
+
+const drainedTickets = [tk("T1", "done"), tk("T2", "done")];
 
 // --- #38 closing-step signal: live loop through the factory ----------------------------------
 
@@ -1907,7 +1822,7 @@ await withNoAmbientSubagent(() =>
 		const cleanup = makeExecutorFixture(cwd, [{ dir: "38", state: { closingStepsDone: false } }]);
 		try {
 			const h = makeHarness(cwd);
-			h.entries.push(armedEntry());
+			h.entries.push(armedEntry({ tickets: drainedTickets }));
 			h.handlers.session_start({}, h.ctx);
 			clock.advance(IDLE_GRACE_MS + 1000);
 			const tickTimer = timers.find((t) => t.kind === "interval" && !t.cleared)!;
@@ -1922,7 +1837,7 @@ await withNoAmbientSubagent(() =>
 
 			// AC2 (completion): the executor finishes (closingStepsDone: true); the next
 			// idle tick reaches DONE from FINALIZING, with the done audit + notify.
-			writeFileSync(executorStateFilePath(cwd, 38), JSON.stringify({ closingStepsDone: true }));
+			writeFileSync(executorStateFilePath(cwd, "#38"), JSON.stringify({ closingStepsDone: true }));
 			clock.advance(4 * MIN + 1000);
 			tickTimer.fire();
 			await flush();
@@ -1937,7 +1852,7 @@ await withNoAmbientSubagent(() =>
 			const cleanup2 = makeExecutorFixture(cwd2, [{ dir: "38", state: { closingStepsDone: false } }]);
 			try {
 				const h2 = makeHarness(cwd2);
-				h2.entries.push(armedEntry());
+				h2.entries.push(armedEntry({ tickets: drainedTickets }));
 				h2.handlers.session_start({}, h2.ctx);
 				clock.advance(IDLE_GRACE_MS + 1000);
 				const tick2 = timers.filter((t) => t.kind === "interval" && !t.cleared).at(-1)!;
@@ -1964,7 +1879,7 @@ await withNoAmbientSubagent(() =>
 			const cwd3 = makeFixtureCwd();
 			try {
 				const h3 = makeHarness(cwd3);
-				h3.entries.push(armedEntry());
+				h3.entries.push(armedEntry({ tickets: drainedTickets }));
 				h3.handlers.session_start({}, h3.ctx);
 				clock.advance(IDLE_GRACE_MS + 1000);
 				const tick3 = timers.filter((t) => t.kind === "interval" && !t.cleared).at(-1)!;
@@ -1990,7 +1905,7 @@ await withNoAmbientSubagent(() =>
 		const cleanup = makeExecutorFixture(cwd, [{ dir: "38", state: "{not json" }]);
 		try {
 			const h = makeHarness(cwd);
-			h.entries.push(armedEntry());
+			h.entries.push(armedEntry({ tickets: drainedTickets }));
 			h.handlers.session_start({}, h.ctx);
 			clock.advance(IDLE_GRACE_MS + 1000);
 			const tickTimer = timers.find((t) => t.kind === "interval" && !t.cleared)!;
@@ -2007,8 +1922,8 @@ await withNoAmbientSubagent(() =>
 	}),
 );
 
-// A restored run without a target cannot be counted from the tracker: fail closed (PAUSED),
-// never DONE and never a nudge.
+// A restored run with no persisted target still drains from its ticket tree (the target
+// only selects the executor state file; it never gates the tree).
 await withNoAmbientSubagent(() =>
 	withFakeTimers(async (timers, flush, clock) => {
 		const h = makeHarness(makeFixtureCwd());
@@ -2018,8 +1933,8 @@ await withNoAmbientSubagent(() =>
 		timers.find((t) => t.kind === "interval" && !t.cleared)!.fire();
 		await flush();
 		await flush();
-		assert.equal(persistedLatest(h.entries).data.phase, "paused", "no target: the run pauses");
-		assert.equal(h.sent.length, 0);
+		assert.equal(persistedLatest(h.entries).data.phase, "armed", "pickable tickets keep the run armed");
+		assert.equal(h.sent.length, 1, "and the tick nudges from the tree");
 	}),
 );
 
@@ -2036,22 +1951,23 @@ assert.deepEqual(readClosingSignal([{ path: "/tmp/executor/x/38/state.json", con
 assert.equal(readClosingSignal([{ path: "/tmp/executor/x/40/state.json", content: null, missing: true }, { path: "/tmp/executor/x/38/state.json", content: JSON.stringify({ closingStepsDone: false }) }]).hasClosingSteps, true);
 
 // C (pure): the restored run target rides on the persisted state entry.
-assert.equal(restoreRunTarget([armedEntry({ runTarget: 38 })]), 38, "a restored run keeps its target");
-assert.equal(restoreRunTarget([armedEntry({ runTarget: 38 }), armedEntry({ runTarget: 40 })]), 40, "latest entry wins");
-assert.equal(restoreRunTarget([armedEntry({ runTarget: "38" })]), null, "a non-numeric target degrades to the scan path");
-assert.equal(restoreRunTarget([armedEntry({ runTarget: 0 })]), null, "0 is not a target");
+assert.equal(restoreRunTarget([armedEntry({ runTarget: "#38" })]), "#38", "a restored run keeps its target");
+assert.equal(restoreRunTarget([armedEntry({ runTarget: "#38" }), armedEntry({ runTarget: "#40" })]), "#40", "latest entry wins");
+assert.equal(restoreRunTarget([armedEntry({ runTarget: 38 })]), null, "a non-string target degrades to the scan path");
+assert.equal(restoreRunTarget([armedEntry({ runTarget: "///" })]), null, "an unusable id is not a target");
 assert.equal(restoreRunTarget([]), null);
 assert.equal(restoreRunTarget([{ type: "message", role: "user" }]), null);
 
-/** Runs one PREP -> READY -> confirm cycle on an existing harness through the
- *  real production path. The queue proof reads pickable 2 (armable); everything
- *  after the arm reads 0 (empty frontier, plain DONE). */
+/** Runs one PREP -> watchdog_target -> READY -> confirm cycle on an existing harness
+ *  through the real production path, then completes both tickets (empty frontier). */
 async function prepAgain(h: Harness, ref: string) {
-	h.setQueue(2);
-	await h.handlers["command:watchdog"](ref, h.ctx);
-	h.handlers.message_end({ message: { role: "assistant", content: [{ type: "text", text: "queue proof done\nREADY" }] } }, h.ctx);
+	await h.handlers["command:watchdog"]("", h.ctx);
+	await h.tools.watchdog_target!.execute("p1", { issue: ref, tickets: [{ id: "T1" }, { id: "T2", blockedBy: ["T1"] }] }, undefined, undefined, h.ctx);
+	h.handlers.message_end({ message: { role: "assistant", content: [{ type: "text", text: "proof done\nREADY" }] } }, h.ctx);
 	await h.handlers.agent_settled({ aborted: false, messages: [] }, h.ctx);
-	h.setQueue(0);
+	// Drain the tree so the frontier is empty (plain DONE / FINALIZING paths).
+	await h.tools.watchdog_complete!.execute("p2", { id: "T1" }, undefined, undefined, h.ctx);
+	await h.tools.watchdog_complete!.execute("p3", { id: "T2" }, undefined, undefined, h.ctx);
 }
 
 /** Arms through the real production path: /watchdog #38 -> PREP (queue proof) ->
@@ -2080,7 +1996,7 @@ await withNoAmbientSubagent(() =>
 			const h = await armThroughPrep(cwd);
 			assert(h.audits.some((a) => a.type === "prep-proof"), "PREP ran through the real command path");
 			assert(h.audits.some((a) => a.type === "armed"), "READY + confirm armed the run (production path, runTarget set)");
-			assert.equal(restoreRunTarget(h.entries), 38, "the armed run persists its target with the state entry (L1)");
+			assert.equal(restoreRunTarget(h.entries), "#38", "the armed run persists its target with the state entry (L1)");
 			clock.advance(IDLE_GRACE_MS + 1000);
 			const tickTimer = timers.find((t) => t.kind === "interval" && !t.cleared)!;
 			tickTimer.fire();
@@ -2129,9 +2045,9 @@ await withNoAmbientSubagent(() =>
 		const cleanup = makeExecutorFixture(cwd, [{ dir: "40", state: { closingStepsDone: false } }]);
 		try {
 			const h = makeHarness(cwd);
-			h.entries.push(armedEntry({ runTarget: 38 }));
+			h.entries.push(armedEntry({ runTarget: "#38", tickets: drainedTickets }));
 			h.handlers.session_start({}, h.ctx);
-			assert.equal(restoreRunTarget(h.entries), 38, "session_start restored the target");
+			assert.equal(restoreRunTarget(h.entries), "#38", "session_start restored the target");
 			clock.advance(IDLE_GRACE_MS + 1000);
 			const tickTimer = timers.find((t) => t.kind === "interval" && !t.cleared)!;
 			tickTimer.fire();
@@ -2167,9 +2083,9 @@ await withNoAmbientSubagent(() =>
 			await h.handlers["command:watchdog"]("#40", h.ctx);
 			assert(h.notifications.some((n) => n.message.includes("run already active")), "a second /watchdog during FINALIZING is refused as active");
 			assert.equal(h.audits.filter((a) => a.type === "armed").length, armedBefore, "the refused command never arms #40");
-			assert(!h.audits.some((a) => a.type === "prep-proof" && (a.data as { target?: unknown }).target === 40), "no PREP started for #40");
+			assert(!h.audits.some((a) => a.type === "prep-proof" && (a.data as { target?: unknown }).target === "#40"), "no PREP started for #40");
 			assert.equal(persistedLatest(h.entries).data.phase, "finalizing", "the closing run is untouched (no silent reset)");
-			assert.equal(persistedLatest(h.entries).data.runTarget, 38, "the run target is unchanged");
+			assert.equal(persistedLatest(h.entries).data.runTarget, "#38", "the run target is unchanged");
 			assert.equal(liveTickTimers(timers), liveTimersBefore, "the tick timer is still live");
 			// And the untouched run still reaches its own outcome.
 			clock.advance(4 * MIN + 1000);
@@ -2194,13 +2110,13 @@ await withNoAmbientSubagent(() =>
 		const cwd = makeFixtureCwd();
 		try {
 			const h = await armThroughPrep(cwd); // no executor state: plain run
-			assert.equal(restoreRunTarget(h.entries), 38, "the armed run persists its target");
+			assert.equal(restoreRunTarget(h.entries), "#38", "the armed run persists its target");
 			// off must clear a LIVE run's target, not leave it on the status line.
 			await h.handlers["command:watchdog"]("off", h.ctx);
 			h.handlers["command:watchdog"]("status", h.ctx);
 			assert(!h.notifications.at(-1)!.message.includes("run target"), "off clears a live run target (status proves it)");
 			await prepAgain(h, "#38");
-			assert.equal(restoreRunTarget(h.entries), 38, "the re-armed run persists its target");
+			assert.equal(restoreRunTarget(h.entries), "#38", "the re-armed run persists its target");
 			clock.advance(IDLE_GRACE_MS + 1000);
 			let tickTimer = timers.filter((t) => t.kind === "interval" && !t.cleared).at(-1)!;
 			tickTimer.fire();
@@ -2214,8 +2130,8 @@ await withNoAmbientSubagent(() =>
 				assert(!h.notifications.at(-1)!.message.includes("run target"), "DONE clears the run target (status proves it)");
 				await prepAgain(h, "#40");
 				const armed40 = h.audits.filter((a) => a.type === "armed").at(-1)!;
-				assert.equal(armed40.data.target, 40, "the new run arms #40");
-				assert.equal(restoreRunTarget(h.entries), 40, "the new run persists its own target");
+				assert.equal(armed40.data.target, "#40", "the new run arms #40");
+				assert.equal(restoreRunTarget(h.entries), "#40", "the new run persists its own target");
 				clock.advance(IDLE_GRACE_MS + 1000);
 				tickTimer = timers.filter((t) => t.kind === "interval" && !t.cleared).at(-1)!;
 				tickTimer.fire();
@@ -2300,7 +2216,7 @@ delete process.env.PI_SUBAGENT_ID;
 const mainPi = makeMockPi() as any;
 watchdogExtension(mainPi as any);
 assert(mainPi.commands.includes("watchdog"), "main factory registers /watchdog");
-assert.deepEqual(mainPi.tools.sort(), ["watchdog_done", "watchdog_handoff", "watchdog_stop", "watchdog_target"], "main factory registers exactly the drain tools (#31) and watchdog_target");
+assert.deepEqual(mainPi.tools.sort(), ["watchdog_complete", "watchdog_done", "watchdog_handoff", "watchdog_stop", "watchdog_sync", "watchdog_target"], "main factory registers exactly the ticket-tree tools");
 assert(mainPi.events.includes("session_start"), "main factory restores state");
 assert(mainPi.events.includes("agent_settled"), "main factory handles Esc and the READY confirm");
 assert(mainPi.events.includes("agent_end"), "main factory reports provider errors");
@@ -2309,87 +2225,88 @@ assert(!mainPi.events.includes("tick"), "no timer surfaces: ticks are setInterva
 if (ambientSubagentId === undefined) delete process.env.PI_SUBAGENT_ID;
 else process.env.PI_SUBAGENT_ID = ambientSubagentId;
 
-// Discovery (live): /watchdog without a single #N asks the MODEL to find
-// candidates (no scan, no ui.select/ui.input to the operator); the operator's
-// pick returns through watchdog_target, which runs the queue proof and starts
-// the READY step. The tool is refused outside a pending discovery.
+// Discovery (live): /watchdog asks the MODEL to find the target and its ticket tree (no
+// scan, no tracker call, no ui.select/ui.input); the operator's pick returns through
+// watchdog_target, which proves the tree and starts the READY step. The tool is refused
+// outside a pending discovery.
+const tree38 = [{ id: "KRIPT-1" }, { id: "KRIPT-2", blockedBy: ["KRIPT-1"] }];
 await withNoAmbientSubagent(() =>
 	withFakeTimers(async () => {
 		const cwd = makeFixtureCwd();
 		try {
 			const h = makeHarness(cwd);
 			h.handlers.session_start({}, h.ctx);
-			h.setQueue(2);
 
-			const early = await h.tools.watchdog_target!.execute("d0", { issue: 38 }, undefined, undefined, h.ctx);
+			const early = await h.tools.watchdog_target!.execute("d0", { issue: "KRIPT-222", tickets: tree38 }, undefined, undefined, h.ctx);
 			assert(early.isError, "watchdog_target is refused when no discovery is pending");
-			assert.equal(h.execCalls.length, 0, "a refused pick runs no queue proof");
 
 			await h.handlers["command:watchdog"]("", h.ctx);
 			assert.equal(h.userMessages.length, 1, "discovery sends exactly one instruction to the model");
 			assert(h.userMessages[0].includes("watchdog_target"), "the model is told how to hand the pick back");
 			assert(h.userMessages[0].includes("ask_user_question"), "the model, not the extension, asks the operator");
+			assert(h.userMessages[0].includes(SYNC_REMINDER), "the discovery text carries the keep-in-sync reminder");
 			assert(!h.userMessages[0].includes("READY"), "no READY step before a target exists");
 			assert(h.audits.some((a) => a.type === "prep-discover"));
-			assert.equal(h.execCalls.length, 0, "discovery does not run the queue before a target is chosen");
+			assert.equal(h.execCalls.length, 0, "the extension never calls a tracker");
 
 			assert(plain(h.widget() ?? null as any).includes("memilih target"), "the widget shows target selection while discovery is pending");
-			const ok = await h.tools.watchdog_target!.execute("d1", { issue: 38 }, undefined, undefined, h.ctx);
+			const bad = await h.tools.watchdog_target!.execute("d0b", { issue: "KRIPT-222", tickets: [{ id: "A", state: "wip" }] }, undefined, undefined, h.ctx);
+			assert(bad.isError, "a malformed tree is refused");
+			// A refused pick consumed the discovery? No: validation errors keep it pending.
+			const ok = await h.tools.watchdog_target!.execute("d1", { issue: "KRIPT-222", tickets: tree38 }, undefined, undefined, h.ctx);
 			assert(!ok.isError, "the pick is accepted while discovery is pending");
-			assert(h.audits.some((a) => a.type === "prep-proof" && a.data.target === 38), "the chosen target gets the queue proof");
+			assert(h.audits.some((a) => a.type === "prep-proof" && a.data.target === "KRIPT-222"), "the chosen target gets the ticket-tree proof");
 			// The tool runs mid-turn: sendUserMessage would throw "Agent is already
 			// processing", so the READY instruction rides the tool result instead.
 			assert.equal(h.userMessages.length, 1, "the tool path sends no user message");
-			assert(ok.content[0].text.includes("#38") && ok.content[0].text.includes("READY"), "the READY instruction is the tool result");
+			assert(ok.content[0].text.includes("KRIPT-222") && ok.content[0].text.includes("READY"), "the READY instruction is the tool result");
 
-			const again = await h.tools.watchdog_target!.execute("d2", { issue: 40 }, undefined, undefined, h.ctx);
+			const again = await h.tools.watchdog_target!.execute("d2", { issue: "KRIPT-300", tickets: tree38 }, undefined, undefined, h.ctx);
 			assert(again.isError, "one pick per discovery request");
 
 			h.handlers.message_end({ message: { role: "assistant", content: [{ type: "text", text: "proof done\nREADY" }] } }, h.ctx);
 			await h.handlers.agent_settled({ aborted: false, messages: [] }, h.ctx);
 			h.handlers["command:watchdog"]("status", h.ctx);
-			assert(h.notifications.some((n) => n.message.includes("phase armed") && n.message.includes("run target #38")), "the discovered target arms through the normal PREP path");
-			assert(h.audits.some((a) => a.type === "kickoff" && a.data.target === 38), "arming kicks the first pass off immediately");
+			assert(h.notifications.some((n) => n.message.includes("phase armed") && n.message.includes("run target KRIPT-222")), "the discovered target arms through the normal PREP path");
+			assert(h.audits.some((a) => a.type === "kickoff" && a.data.target === "KRIPT-222"), "arming kicks the first pass off immediately");
 			const w = plain(h.widget() ?? null as any);
-			assert(w.includes("ARMED") && w.includes("#38"), "the armed widget is on screen after arm");
+			assert(w.includes("ARMED") && w.includes("KRIPT-222"), "the armed widget is on screen after arm");
 			assert.equal(h.sent.filter((m) => m.customType === "drain-watchdog-nudge").length, 1, "exactly one kick-off message is delivered at arm");
-			assert(h.sent[h.sent.length - 1].content.includes("#38"), "the kick-off names the run target");
+			assert(h.sent[h.sent.length - 1].content.includes("KRIPT-222"), "the kick-off names the run target");
 			assert.equal(persistedLatest(h.entries).data.nudgeCount, 0, "the kick-off is not a counted nudge");
+			assert.deepEqual(persistedLatest(h.entries).data.tickets.map((t: Ticket) => t.id), ["KRIPT-1", "KRIPT-2"], "the declared tree arms with the run");
 		} finally {
 			rmSync(cwd, { recursive: true, force: true });
 		}
 	}),
 );
 
-// Discovery (live): a refused queue proof (nothing pickable) fails the pick
-// visibly and the tool does not stay armed for a retry; and /watchdog off
-// cancels a pending discovery.
+// Discovery (live): a refused proof (nothing pickable) fails the pick visibly and the tool
+// does not stay armed for a retry; and /watchdog off cancels a pending discovery.
 await withNoAmbientSubagent(() =>
 	withFakeTimers(async () => {
 		const cwd = makeFixtureCwd();
 		try {
 			const h = makeHarness(cwd);
 			h.handlers.session_start({}, h.ctx);
-			h.setQueue(0);
 			await h.handlers["command:watchdog"]("", h.ctx);
-			const refused = await h.tools.watchdog_target!.execute("r1", { issue: 38 }, undefined, undefined, h.ctx);
-			assert(refused.isError, "an empty queue refuses the pick");
+			const refused = await h.tools.watchdog_target!.execute("r1", { issue: "KRIPT-1", tickets: [{ id: "A", state: "done" }] }, undefined, undefined, h.ctx);
+			assert(refused.isError, "a tree with nothing pickable refuses the pick");
 			assert(h.audits.some((a) => a.type === "prep-refused"));
-			const retry = await h.tools.watchdog_target!.execute("r2", { issue: 38 }, undefined, undefined, h.ctx);
+			const retry = await h.tools.watchdog_target!.execute("r2", { issue: "KRIPT-1", tickets: tree38 }, undefined, undefined, h.ctx);
 			assert(retry.isError, "a refused pick needs a fresh /watchdog");
 
-			h.setQueue(2);
 			await h.handlers["command:watchdog"]("", h.ctx);
 			await h.handlers["command:watchdog"]("off", h.ctx);
 			assert.equal(h.widget(), undefined, "/watchdog off clears the widget");
-			const afterOff = await h.tools.watchdog_target!.execute("r3", { issue: 38 }, undefined, undefined, h.ctx);
+			const afterOff = await h.tools.watchdog_target!.execute("r3", { issue: "KRIPT-1", tickets: tree38 }, undefined, undefined, h.ctx);
 			assert(afterOff.isError, "/watchdog off cancels a pending discovery");
 
-			// An explicit single #N never involves the model's discovery.
+			// An explicit ref only seeds the discovery text; the model still hands back the tree.
 			const before = h.userMessages.length;
 			await h.handlers["command:watchdog"]("#38", h.ctx);
 			assert.equal(h.userMessages.length, before + 1);
-			assert(h.userMessages[before].includes("#38") && h.userMessages[before].includes("READY"), "an explicit ref goes straight to the READY step");
+			assert(h.userMessages[before].includes("#38") && h.userMessages[before].includes("watchdog_target"), "an explicit ref is passed to the model's discovery");
 		} finally {
 			rmSync(cwd, { recursive: true, force: true });
 		}
