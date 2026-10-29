@@ -891,6 +891,8 @@ in
     assert pkgs.lib.hasInfix "genuinely cannot finish without it" toTicketsSkillMd;
     assert pkgs.lib.hasInfix "never layer-only" toTicketsSkillMd;
     assert pkgs.lib.hasInfix "route it ready-for-human at slicing time" toTicketsSkillMd;
+    assert pkgs.lib.hasInfix "MUST carry the ready-for-agent marker" toTicketsSkillMd;
+    assert pkgs.lib.hasInfix "gh issue create --label ready-for-agent" toTicketsSkillMd;
     # wayfinder and to-spec carry the integration-branch patch.
     assert pkgs.lib.hasInfix "git push origin integration/<slug>:integration/<slug>" (
       builtins.readFile (default.config.programs.pi-coding-agent.skills.wayfinder + "/SKILL.md")
