@@ -14,7 +14,8 @@ const GROUP_MARKERS: Record<Group, readonly string[]> = {
   artifact: ["artifact-preview"],
   memory: ["pi-blackhole"],
 };
-const ALWAYS_ACTIVE = new Set(["bash", "bash_bg", "ask_user_question", "rename_herdr_tab", "todo", "load_tools"]);
+// web_search/fetch_content/get_search_content (pi-web-access) stay eager: basic web lookup every turn.
+const ALWAYS_ACTIVE = new Set(["bash", "bash_bg", "ask_user_question", "rename_herdr_tab", "todo", "load_tools", "web_search", "fetch_content", "get_search_content"]);
 // Permanently hidden every session — NOT deferrable via load_tools. Models mistake
 // agent_bg for a subagent/delegation tool and misfire it; background pi -p work goes
 // through the subagents group instead.
@@ -43,9 +44,9 @@ export default function (pi: ExtensionAPI) {
   pi.registerTool({
     name: "load_tools",
     label: "Load Tools",
-    description: "Enable an installed tool group for this session. Groups: browser, subagents, research/web/MCP, Herdr/elevation, journal, artifact hosting, memory/recall.",
+    description: "Enable an installed tool group for this session. Groups: browser, subagents, research/MCP/source_check, Herdr/elevation, journal, artifact hosting, memory/recall.",
     promptSnippet: "Enable deferred tool groups when needed",
-    promptGuidelines: ["Use load_tools before browser automation; /supervise or delegation; web/current-source/MCP research; explicit Herdr or elevated work; journal access; artifact preview; or memory recall search."],
+    promptGuidelines: ["Use load_tools before browser automation; /supervise or delegation; MCP/source_check research; explicit Herdr or elevated work; journal access; artifact preview; or memory recall search. web_search and fetch_content are always available."],
     parameters: Type.Object({
       group: StringEnum(GROUP_NAMES),
     }),

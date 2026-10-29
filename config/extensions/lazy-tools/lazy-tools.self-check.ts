@@ -2,11 +2,11 @@ import assert from "node:assert/strict";
 import lazyTools from "./index.ts";
 
 type Group = "browser" | "subagents" | "research" | "herdr" | "sudo" | "journal" | "artifact" | "memory";
-const core = ["read", "bash", "bash_bg", "agent_bg", "jobs", "monitor", "ask_user_question", "rename_herdr_tab", "todo", "agent_send", "list_peers"];
+const core = ["read", "bash", "bash_bg", "agent_bg", "jobs", "monitor", "ask_user_question", "rename_herdr_tab", "todo", "agent_send", "list_peers", "web_search", "fetch_content", "get_search_content"];
 const grouped: Record<Group, string[]> = {
   browser: ["browser_open"],
   subagents: ["subagent", "subagent_interrupt", "subagents_list", "subagent_resume"],
-  research: ["web_search", "mcp", "mcpScript"],
+  research: ["source_check", "mcp", "mcpScript"],
   herdr: ["herdr_layout"],
   sudo: ["sudo_run"],
   journal: ["dev_journal"],
@@ -25,6 +25,9 @@ const paths: Record<string, string> = {
   subagents_list: "/nix/store/pi-herdr-subagents/pi-extension/subagents/index.ts",
   subagent_resume: "/nix/store/pi-herdr-subagents/pi-extension/subagents/index.ts",
   web_search: "/nix/store/pi-web-access/index.ts",
+  fetch_content: "/nix/store/pi-web-access/index.ts",
+  get_search_content: "/nix/store/pi-web-access/index.ts",
+  source_check: "/nix/store/pi-web-access/index.ts",
   mcp: "/nix/store/pi-mcp-adapter/index.ts",
   mcpScript: "/nix/store/pi-mcp-adapter/index.ts",
   herdr_layout: "/nix/store/pi-herdr/index.ts",
@@ -94,7 +97,7 @@ assert(!fresh.toolCall({ toolName: "browser_open" })?.block);
 assert(!fresh.toolCall({ toolName: "bash" })?.block);
 
 // --- Reload: transcript-restored tools stay active but gated until load_tools.
-const reloaded = harness([...core.filter((name) => name !== "agent_bg"), "browser_open", "web_search", "load_tools"]);
+const reloaded = harness([...core.filter((name) => name !== "agent_bg"), "browser_open", "source_check", "load_tools"]);
 reloaded.sessionStart({ reason: "reload" });
 assert(reloaded.active.includes("browser_open"));
 assert(reloaded.active.includes("load_tools"));
@@ -105,7 +108,12 @@ assert.match(blockedBrowser?.reason ?? "", /browser/);
 await reloaded.loader.execute("x", { group: "browser" });
 assert(!reloaded.toolCall({ toolName: "browser_open" })?.block);
 // Other groups stay gated after loading only one group.
-assert.equal(reloaded.toolCall({ toolName: "web_search" })?.block, true);
+assert.equal(reloaded.toolCall({ toolName: "source_check" })?.block, true);
+// Web lookup tools are never gated.
+for (const name of ["web_search", "fetch_content", "get_search_content"]) {
+  assert(fresh.active.includes(name));
+  assert(!reloaded.toolCall({ toolName: name })?.block);
+}
 
 // --- Resume: same gating contract as reload.
 const resumed = harness([...core.filter((name) => name !== "agent_bg"), "browser_open", "load_tools"]);
