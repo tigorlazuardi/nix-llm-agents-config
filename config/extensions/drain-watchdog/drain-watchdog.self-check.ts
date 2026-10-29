@@ -2,20 +2,18 @@
  * Self-check for the drain-watchdog pure core. Run:
  *   node --experimental-strip-types drain-watchdog/drain-watchdog.self-check.ts
  *
- * Asserts every acceptance criterion of issue #29:
- * state transitions (incl. Esc-always-wins and child no-op), queue output
- * parsing (valid/0/garbage/non-zero — never "done"), provider error
- * classification, backoff ladder sequences and jitter bounds, the handoff
- * label mapping, the SPLIT predicate, and the arm refusal condition. Also
- * covers #30's live-loop helpers (env parsing, /watchdog argument grammar,
- * target resolution, queue block extraction, READY/error detection, state
- * restore), #31's watchdog_handoff/watchdog_stop tool seams (gate rules, label
- * parsing, gh argv plan, result text) and the tools' harness-driven behavior
- * (happy path with captured argv, child/phase gating, llmStop pause+resume,
- * exec-failure consistency), plus the factory's child-vs-main registration
- * split. Imports index.ts, which imports @earendil-works/pi-ai and typebox:
- * run with both resolvable (checks.nix symlinks them into a node_modules next
- * to the copy).
+ * Covers state transitions (incl. Esc-always-wins and child no-op), provider
+ * error classification, backoff ladder sequences and jitter bounds, the SPLIT
+ * predicate, the arm refusal condition, and the live-loop helpers (env parsing,
+ * /watchdog argument grammar, READY/error detection, state restore). The ticket
+ * tree is covered as pickable / limbo / leftover with fail-closed unknown
+ * blockers, sync upsert, watchdog_complete / watchdog_handoff / watchdog_stop
+ * seams and their harness-driven behavior (child/phase gating, llmStop
+ * pause+resume), the done report, restore of a persisted tree, and the
+ * assertion that no queue command is executed. Also the factory's
+ * child-vs-main registration split. Imports index.ts, which imports
+ * @earendil-works/pi-ai and typebox: run with both resolvable (checks.nix
+ * symlinks them into a node_modules next to the copy).
  */
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -43,7 +41,6 @@ import {
 	handoffTicket,
 	parseTicketInputs,
 	pickableIds,
-	restoreTickets,
 	targetDirName,
 	ticketCounts,
 	upsertTickets,
@@ -104,7 +101,6 @@ const baseObs = (): TickObservation => ({
 	pickable: 2,
 	progressAgeMs: 0,
 	lastError: null,
-	leftoverBlocked: false,
 	hasClosingSteps: false,
 });
 
@@ -317,13 +313,13 @@ assert.equal(transition(pausedStateFor(), { type: "llmStop", reason: "x" }, 40_0
 const doneClear = { queueOk: true, pickable: 0, childCount: 0, hasClosingSteps: false };
 const finisher = transition({ ...armed(), phase: "finalizing" }, { type: "llmDone", obs: doneClear }, 41_000);
 assert.equal(finisher.state.phase, "done");
-assert.deepEqual(finisher.action, { type: "done", leftovers: false }, "the promise path emits the same DONE action as the tick path");
+assert.deepEqual(finisher.action, { type: "done" }, "the promise path emits the same DONE action as the tick path");
 // watchdog_done (llmDone) is a verified promise: ARMED accepts it too, but only when
 // the live observation shows nothing left. The model's claim alone never completes.
 {
 	const ok = transition(armOK.state, { type: "llmDone", obs: doneClear }, 42_000);
 	assert.equal(ok.state.phase, "done", "empty queue: ARMED completes at once, no idle wait");
-	assert.deepEqual(ok.action, { type: "done", leftovers: false });
+	assert.deepEqual(ok.action, { type: "done" });
 	for (const bad of [
 		{ ...doneClear, pickable: 1 },
 		{ ...doneClear, childCount: 1 },
@@ -414,17 +410,10 @@ const queueFail = transition(armed(), { type: "tick", obs: { ...baseObs(), queue
 assert.equal(queueFail.state.phase, "paused");
 assert.equal(queueFail.action.type, "pause");
 
-// 5. Frontier 0 + children 0 → DONE (report leftovers, do not nudge).
+// 5. Frontier 0 + children 0 → DONE (do not nudge).
 const done = transition(armed(), { type: "tick", obs: { ...baseObs(), pickable: 0 } }, T);
 assert.equal(done.state.phase, "done");
-assert.deepEqual(done.action, { type: "done", leftovers: false });
-const doneLeftover = transition(
-	armed(),
-	{ type: "tick", obs: { ...baseObs(), pickable: 0, leftoverBlocked: true } },
-	T,
-);
-assert.equal(doneLeftover.state.phase, "done");
-assert.deepEqual(doneLeftover.action, { type: "done", leftovers: true });
+assert.deepEqual(done.action, { type: "done" });
 
 // 6. FINALIZING: pickable 0 + closing steps → one finalize nudge.
 const fin = transition(armed(), { type: "tick", obs: { ...baseObs(), pickable: 0, hasClosingSteps: true } }, T);
@@ -665,13 +654,13 @@ const tk = (id: string, state: Ticket["state"] = "open", blockedBy: string[] = [
 	assert(handed.ok);
 	const report = doneReport(handed.tickets);
 	assert(report.startsWith("DONE: 1 done, 1 limbo, 1 blocked-by-limbo."), report);
-	assert(report.includes("Limbo (needs human review): A — ambiguous spec") && report.includes("Not worked because blocked by limbo: C"));
+	assert(report.includes("Limbo (needs human review): A — ambiguous spec") && report.includes("Not worked (blocked by limbo, unknown or cyclic blockers): C"));
 	assert.equal(doneReport([tk("A", "done")]), "DONE: 1 done, 0 limbo, 0 blocked-by-limbo.", "a clean run has no extra lines");
 
 	// Restore shape checks: malformed persisted trees degrade to empty (fail closed).
-	assert.deepEqual(restoreTickets([tk("A", "limbo", ["B"], "r")]), [tk("A", "limbo", ["B"], "r")]);
-	assert.deepEqual(restoreTickets([{ id: "A", state: "bogus", blockedBy: [] }]), []);
-	assert.deepEqual(restoreTickets("x"), []);
+	assert.deepEqual(restoreDrainState([{ type: "custom", customType: "drain-watchdog-state", data: { phase: "armed", tickets: [tk("A", "limbo", ["B"], "r")] } }])!.tickets, [tk("A", "limbo", ["B"], "r")]);
+	assert.deepEqual(restoreDrainState([{ type: "custom", customType: "drain-watchdog-state", data: { phase: "armed", tickets: [{ id: "A", state: "bogus", blockedBy: [] }] } }])!.tickets, []);
+	assert.deepEqual(restoreDrainState([{ type: "custom", customType: "drain-watchdog-state", data: { phase: "armed", tickets: "x" } }])!.tickets, []);
 	assert.deepEqual(restoreDrainState([{ type: "custom", customType: "drain-watchdog-state", data: { phase: "armed", tickets: [tk("A")] } }])!.tickets, [tk("A")], "restoreDrainState keeps a valid tree");
 	assert.deepEqual(restoreDrainState([{ type: "custom", customType: "drain-watchdog-state", data: { phase: "armed", tickets: [{ id: 1 }] } }])!.tickets, [], "a malformed tree is dropped, not half-applied");
 
@@ -938,15 +927,12 @@ assert.equal(targetToolGate(false, false).ok, false, "no pending discovery: the 
 
 
 // Operator UI: widget lines, completion.
-const baseView = { phase: "armed" as const, prep: null, target: "#35", info: { kind: "ticket" as const, title: "end-to-end unattended validation run" }, pickable: 2, children: 1, nudgeCount: 3, noProgressStreak: 1, idleMs: 42_000, pausedReason: null, backoffKind: null };
+const baseView = { phase: "armed" as const, prep: null, target: "#35", pickable: 2, children: 1, nudgeCount: 3, noProgressStreak: 1, idleMs: 42_000, pausedReason: null, backoffKind: null };
 const plain = (lines: string[] | null) => (lines ?? []).join("\n").replace(/\x1b\[[0-9;]*m/g, "");
 const armedWidget = plain(watchdogWidgetLines(baseView));
-assert(armedWidget.includes("ARMED") && armedWidget.includes("TIKET #35") && armedWidget.includes("end-to-end unattended validation run"), "armed widget shows the kind, number and title");
+assert(armedWidget.includes("ARMED") && armedWidget.includes("#35"), "armed widget shows the target");
 assert(armedWidget.includes("2 pickable") && armedWidget.includes("1 jalan") && armedWidget.includes("nudge 3/30") && armedWidget.includes("idle 0:42") && armedWidget.includes("breaker 1/4"));
 assert(watchdogWidgetLines(baseView)![0].includes("\x1b[32m"), "armed is green");
-assert(plain(watchdogWidgetLines({ ...baseView, info: { kind: "map", title: "m" } })).includes("MAP #35"));
-assert(plain(watchdogWidgetLines({ ...baseView, info: { kind: "spec", title: "s" } })).includes("SPEC #35"));
-assert(plain(watchdogWidgetLines({ ...baseView, info: null })).includes("#35") && !plain(watchdogWidgetLines({ ...baseView, info: null })).includes("TIKET"), "unknown kind falls back to the bare number");
 // Countdown to the next nudge: mm:ss, minutes keep counting past 60 (3 h = 180:00).
 assert(plain(watchdogWidgetLines({ ...baseView, nudgeInMs: 138_000 })).includes("nudge dalam 2:18"));
 assert(plain(watchdogWidgetLines({ ...baseView, nudgeInMs: 3 * 3_600_000 })).includes("nudge dalam 180:00"), "hours are minutes: 3 h = 180:00");
@@ -957,10 +943,9 @@ assert(pausedLines[0].includes("\x1b[31m") && plain(pausedLines).includes("PAUSE
 assert(plain(watchdogWidgetLines({ ...baseView, phase: "backoff", backoffKind: "quota" })).includes("BACKOFF (quota)"));
 assert(plain(watchdogWidgetLines({ ...baseView, phase: "finalizing" })).includes("FINALIZING"));
 assert(plain(watchdogWidgetLines({ ...baseView, phase: "done" })).includes("DONE"));
-assert.equal(watchdogWidgetLines({ ...baseView, phase: "off", prep: null, target: null, info: null }), null, "OFF without PREP shows nothing");
-assert(plain(watchdogWidgetLines({ ...baseView, phase: "off", prep: "discover", target: null, info: null })).includes("memilih target"));
+assert.equal(watchdogWidgetLines({ ...baseView, phase: "off", prep: null, target: null }), null, "OFF without PREP shows nothing");
+assert(plain(watchdogWidgetLines({ ...baseView, phase: "off", prep: "discover", target: null })).includes("memilih target"));
 assert(plain(watchdogWidgetLines({ ...baseView, phase: "off", prep: "proof" })).includes("bukti kesiapan"));
-assert(plain(watchdogWidgetLines({ ...baseView, info: { kind: "ticket", title: "x".repeat(200) } })).split("\n")[1].length < 90, "long titles are truncated");
 
 assert.deepEqual(watchdogCompletions("sta")!.map((c) => c.value), ["status"]);
 assert.deepEqual(watchdogCompletions("")!.map((c) => c.value), ["status", "resume", "off", "on"]);

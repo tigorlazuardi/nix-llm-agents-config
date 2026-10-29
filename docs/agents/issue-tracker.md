@@ -25,7 +25,7 @@ External PRs are **not** a request or triage surface. Skills must triage GitHub 
 ## Drain queue
 
 The drain-watchdog is tracker-agnostic: it never reads the tracker. The model finds the run target
-and its ticket tree and declares it with `watchdog_target` (`{ id, blockedBy?, state? }`, ids are
+and its ticket tree and declares it with `watchdog_target` (`{ id, blockedBy?, state?, reason? }`, ids are
 opaque strings). The watchdog holds the tree in its persisted run state.
 
 - Pickable: state `open` and every `blockedBy` id known and `done`. An unknown blocker is not done.

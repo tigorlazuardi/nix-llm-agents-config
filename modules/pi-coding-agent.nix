@@ -611,7 +611,7 @@ in
   };
 
   options.programs.pi-coding-agent.watchdog = {
-    enable = lib.mkEnableOption "the unattended drain-queue live loop via the drain-watchdog extension (/watchdog)";
+    enable = lib.mkEnableOption "the unattended drain live loop via the drain-watchdog extension (/watchdog)";
 
     tickMs = lib.mkOption {
       type = lib.types.int;

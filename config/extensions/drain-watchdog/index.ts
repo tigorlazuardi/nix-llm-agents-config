@@ -95,8 +95,6 @@ export type TickObservation = {
 	progressAgeMs: number;
 	/** Error message from the last ended run, if it ended in error. */
 	lastError: string | null;
-	/** Remaining ready work is blocked only by non-agent tickets. */
-	leftoverBlocked: boolean;
 	/** The flow has closing steps (code-review, PR, cleanup) still to run. */
 	hasClosingSteps: boolean;
 };
@@ -128,7 +126,7 @@ export type DrainAction =
 	| { type: "finalizeNudge" }
 	| { type: "stallNotify" }
 	| { type: "pause"; reason: string }
-	| { type: "done"; leftovers: boolean }
+	| { type: "done" }
 	| { type: "probe"; delayMs: number; jitter: ProbeJitter };
 
 export type DrainEvent =
@@ -289,13 +287,8 @@ export function doneReport(tickets: readonly Ticket[]): string {
 	const lines = [`DONE: ${done} done, ${limbo} limbo, ${leftover.length} blocked-by-limbo.`];
 	const limboTickets = tickets.filter((t) => t.state === "limbo");
 	if (limboTickets.length > 0) lines.push(`Limbo (needs human review): ${limboTickets.map((t) => `${t.id} — ${t.reason ?? "no reason recorded"}`).join("; ")}`);
-	if (leftover.length > 0) lines.push(`Not worked because blocked by limbo: ${leftover.join(", ")}`);
+	if (leftover.length > 0) lines.push(`Not worked (blocked by limbo, unknown or cyclic blockers): ${leftover.join(", ")}`);
 	return lines.join("\n");
-}
-
-/** Restore-time shape check; a malformed persisted tree degrades to empty (run then fails closed). */
-export function restoreTickets(value: unknown): Ticket[] {
-	return Array.isArray(value) && value.every(isStoredTicket) ? value.map((t) => ({ ...t })) : [];
 }
 
 function isStoredTicket(value: unknown): value is Ticket {
@@ -713,15 +706,11 @@ export const FINALIZE_NUDGE_TEXT =
 
 // --- Operator UI (persistent widget + command completion) --------------------
 
-export type TargetKind = "map" | "spec" | "ticket";
-export type TargetInfo = { kind: TargetKind; title: string };
-
 export type WidgetView = {
 	phase: DrainPhase;
 	/** PREP in flight while the core is still OFF: discovery or READY proof. */
 	prep: "discover" | "proof" | null;
 	target: string | null;
-	info: TargetInfo | null;
 	pickable: number;
 	children: number;
 	nudgeCount: number;
@@ -733,11 +722,8 @@ export type WidgetView = {
 	backoffKind: "transient" | "quota" | null;
 };
 
-const ANSI = { reset: "\x1b[0m", bold: "\x1b[1m", dim: "\x1b[2m", red: "\x1b[31m", green: "\x1b[32m", yellow: "\x1b[33m", magenta: "\x1b[35m", cyan: "\x1b[36m" } as const;
+const ANSI = { reset: "\x1b[0m", bold: "\x1b[1m", dim: "\x1b[2m", red: "\x1b[31m", green: "\x1b[32m", yellow: "\x1b[33m", cyan: "\x1b[36m" } as const;
 const paint = (color: keyof typeof ANSI, text: string): string => `${ANSI[color]}${text}${ANSI.reset}`;
-
-const KIND_LABEL: Record<TargetKind, string> = { map: "MAP", spec: "SPEC", ticket: "TIKET" };
-const KIND_COLOR: Record<TargetKind, keyof typeof ANSI> = { map: "magenta", spec: "cyan", ticket: "yellow" };
 
 function clock(ms: number): string {
 	const total = Math.max(0, Math.floor(ms / 1000));
@@ -775,9 +761,7 @@ export function watchdogWidgetLines(v: WidgetView): string[] | null {
 		default:
 			[head, color, hint] = [v.prep === "discover" ? "\u2026 PREP: memilih target" : "\u2026 PREP: bukti kesiapan", "cyan", "jawab pertanyaan model \u00b7 /watchdog off batal"];
 	}
-	const kind = v.info === null ? null : paint(KIND_COLOR[v.info.kind], paint("bold", KIND_LABEL[v.info.kind]));
-	const title = v.info === null ? "" : `  ${v.info.title.length > 60 ? `${v.info.title.slice(0, 59)}\u2026` : v.info.title}`;
-	const ref = v.target === null ? "(target belum dipilih)" : `${kind === null ? "" : `${kind} `}${v.target}${title}`;
+	const ref = v.target === null ? "(target belum dipilih)" : v.target;
 	if (v.phase === "paused") body = `${v.pausedReason ?? "alasan tidak tercatat"}`;
 	else if (v.phase === "off" || v.phase === "done") body = `${v.pickable} pickable terakhir`;
 	else body = `${v.pickable} pickable \u00b7 ${v.children} jalan \u00b7 nudge ${v.nudgeCount}/${HARD_CAP} \u00b7 idle ${clock(v.idleMs)} \u00b7 ${v.nudgeInMs === undefined ? "" : v.nudgeInMs > 0 ? `nudge dalam ${clock(v.nudgeInMs)} \u00b7 ` : "nudge di tick berikut \u00b7 "}breaker ${v.noProgressStreak}/${BREAKER_K}`;
@@ -793,12 +777,12 @@ const WATCHDOG_SUBCOMMANDS: readonly { name: string; description: string }[] = [
 	{ name: "status", description: "Tampilkan fase, target, nudge, dan antrean" },
 	{ name: "resume", description: "Lanjutkan run yang PAUSED" },
 	{ name: "off", description: "Matikan watchdog dan batalkan PREP" },
-	{ name: "on", description: "Mulai PREP (opsional: on #N)" },
+	{ name: "on", description: "Mulai PREP (opsional: on <ref>)" },
 ];
 
 /**
  * Argument completion for `/watchdog`: only the first word completes
- * (`/watchdog sta` -> `status`); a `#N` ref or anything with a space gets none.
+ * (`/watchdog sta` -> `status`); a ref or anything with a space gets none.
  */
 export function watchdogCompletions(prefix: string): { value: string; label: string; description: string }[] | null {
 	if (/\s/.test(prefix)) return null;
@@ -1150,7 +1134,6 @@ function handleTick(state: DrainState, obs: TickObservation, now: number, config
 
 	// Terminal branch first: frontier 0, no children.
 	if (obs.pickable <= 0 && obs.childCount <= 0) {
-		if (obs.leftoverBlocked) return { state: { ...state, phase: "done" }, action: { type: "done", leftovers: true }, refusal: null };
 		if (obs.hasClosingSteps) {
 			// Exactly ONE closing nudge (design section 10, #34). Idle again after it
 			// with closing steps still open: pause, visibly, rather than nudge more or
@@ -1158,7 +1141,7 @@ function handleTick(state: DrainState, obs: TickObservation, now: number, config
 			if (state.phase === "finalizing") return toPaused(state, PAUSE_REASON.finalize);
 			return recordNudge(state, now, { type: "finalizeNudge" });
 		}
-		return { state: { ...state, phase: "done" }, action: { type: "done", leftovers: false }, refusal: null };
+		return { state: { ...state, phase: "done" }, action: { type: "done" }, refusal: null };
 	}
 
 	// Children running: observe only. A stall notifies; it never nudges the main.
@@ -1253,7 +1236,7 @@ export function transition(state: DrainState, event: DrainEvent, now: number, co
 			// Refused -> no-op (the tool reports the reason). Accepted -> the same DONE
 			// action as the tick path, so timers stop and the final report is audited.
 			if (doneRefusal(event.obs) !== null) return stay(state);
-			return { state: { ...state, phase: "done", pausedReason: null }, action: { type: "done", leftovers: false }, refusal: null };
+			return { state: { ...state, phase: "done", pausedReason: null }, action: { type: "done" }, refusal: null };
 		// L3: `breaker`/`hardCap` DrainEvents (distinct from the tick-internal
 		// noProgressStreak/nudgeCount gates above, which still use PAUSE_REASON.breaker/
 		// hardCap) had no dispatcher anywhere in this file — removed per their own
@@ -1333,7 +1316,7 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 	let prepTarget: string | null = null;
 	// Ticket tree declared during PREP; it joins the run state on arm.
 	let prepTickets: Ticket[] = [];
-	// True from a discovery request (/watchdog without a single #N) until the model
+	// True from a discovery request (/watchdog without a single target ref) until the model
 	// hands the operator's pick back through watchdog_target (or PREP is reset).
 	let discovering = false;
 	let readyDeclared = false;
@@ -1376,7 +1359,7 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 		pi.appendEntry(AUDIT_ENTRY_TYPE, { ts: new Date().toISOString(), event, phase: state.phase, ...detail });
 	};
 
-	/** Live view of the ticket tree: what the old queue query reported, now derived from state. */
+	/** Live view of the ticket tree: derived from state. */
 	const queueView = () => ({ ok: state.tickets.length > 0, pickable: pickableIds(state.tickets).length });
 
 	const persist = () => {
@@ -1477,7 +1460,6 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 				phase: state.phase,
 				prep,
 				target: runTarget ?? prepTarget,
-				info: null, // ponytail: no tracker lookup (tracker-agnostic); show the bare target id.
 				pickable: pickableIds(prepTarget !== null ? prepTickets : state.tickets).length,
 				children: childCount,
 				nudgeCount: state.nudgeCount,
@@ -1544,7 +1526,7 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 				break;
 			case "done":
 				clearTimers();
-				audit("done", { leftovers: t.action.leftovers, target: runTarget, report: doneReport(state.tickets) });
+				audit("done", { target: runTarget, report: doneReport(state.tickets) });
 				notify(`drain-watchdog ${doneReport(state.tickets)}`, "info");
 				runTarget = null;
 				break;
@@ -1590,8 +1572,6 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 				// providerError event — re-reporting the same failure every tick would
 				// escalate the ladder without probes.
 				lastError: null,
-				// Limbo/leftover tickets never block DONE; the done report lists them.
-				leftoverBlocked: false,
 				// Closing steps come from the executor's own state files (#38; the #34
 				// state.json contract): the FINALIZING trigger of the #34 flow. A missing
 				// scan root is the plain-run case (plain DONE stays plain); anomalies
@@ -1855,7 +1835,7 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 			return { text: `watchdog_done refused: ${refusal}.`, ok: false };
 		}
 		if (closing.anomalies.length > 0) audit("closing-signal-anomaly", { paths: closing.anomalies });
-		const report = doneReport(state.tickets); // read before `apply` (DONE keeps the tree, but be explicit)
+		const report = doneReport(state.tickets);
 		apply(transition(state, { type: "llmDone", obs }, Date.now()), "watchdog_done");
 		return { text: `Run complete. The watchdog is DONE; include this report in your final report:\n${report}`, ok: true };
 	};
