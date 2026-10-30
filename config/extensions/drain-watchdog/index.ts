@@ -615,44 +615,6 @@ export function targetToolGate(childSession: boolean, discovering: boolean): Too
 	return { ok: true };
 }
 
-/** Joined text of a message's text content parts; accepts loose shapes. */
-export function messageText(message: unknown): string {
-	if (typeof message !== "object" || message === null) return "";
-	const content = (message as { content?: unknown }).content;
-	if (typeof content === "string") return content;
-	if (!Array.isArray(content)) return "";
-	const parts: string[] = [];
-	for (const part of content) {
-		if (typeof part === "object" && part !== null) {
-			const p = part as { type?: unknown; text?: unknown };
-			if (p.type === "text" && typeof p.text === "string") parts.push(p.text);
-		}
-	}
-	return parts.join("\n");
-}
-
-/**
- * PREP -> ARMED gate: the model declares readiness by ending a turn whose last
- * non-empty line is exactly `READY`. Any other ending (question, prose, `not
- * ready`) keeps PREP open; only the operator confirm then arms.
- *
- * M3: takes the raw message, not pre-extracted text — a tool-result message
- * (grep output, a fixture file, ...) can legitimately end with a bare "READY"
- * line that has nothing to do with the model's own readiness proof. Only an
- * assistant-role message's own turn-ending line counts.
- */
-export function isReadyDeclaration(message: unknown): boolean {
-	if (typeof message !== "object" || message === null) return false;
-	if ((message as { role?: unknown }).role !== "assistant") return false;
-	const lines = messageText(message).trimEnd().split(/\r?\n/);
-	for (let i = lines.length - 1; i >= 0; i--) {
-		const line = lines[i].trim();
-		if (line === "") continue;
-		return line === "READY";
-	}
-	return false;
-}
-
 export type RunMessage = { role?: unknown; stopReason?: unknown; errorMessage?: unknown };
 
 /**
@@ -708,7 +670,7 @@ export const FINALIZE_NUDGE_TEXT =
 
 export type WidgetView = {
 	phase: DrainPhase;
-	/** PREP in flight while the core is still OFF: discovery or READY proof. */
+	/** PREP in flight while the core is still OFF: discovery or arm confirmation. */
 	prep: "discover" | "proof" | null;
 	target: string | null;
 	pickable: number;
@@ -1259,13 +1221,7 @@ const NUDGE_MESSAGE_TYPE = "drain-watchdog-nudge";
 const PROBE_MESSAGE_TYPE = "drain-watchdog-probe";
 
 const PREP_INSTRUCTION = (target: string, pickable: number): string =>
-	[
-		`drain-watchdog PREP for ${target}: the declared ticket tree has ${pickable} pickable ticket(s).`,
-		"If the declared tree covers the drained scope, end a turn whose last line is exactly:",
-		"READY",
-		"If the tree is wrong or incomplete, tell the operator what is missing. Do not write READY.",
-		SYNC_REMINDER,
-	].join("\n");
+	`drain-watchdog PREP for ${target}: the declared ticket tree has ${pickable} pickable ticket(s). End your turn now; the operator is asked to confirm arming.\n${SYNC_REMINDER}`;
 
 const DISCOVER_INSTRUCTION = (ref: string | null): string =>
 	[
@@ -1620,9 +1576,10 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 		}
 		prepTarget = target;
 		prepTickets = tickets;
+		readyDeclared = true; // the confirm runs at agent_settled, after this turn really ends.
 		refreshWidget();
 		audit("prep-proof", { target, pickable, tickets: tickets.length });
-		notify(`drain-watchdog PREP: target ${target}, ${pickable} pickable of ${tickets.length}. Waiting for the model's readiness proof (READY) then your confirmation.`, "info");
+		notify(`drain-watchdog PREP: target ${target}, ${pickable} pickable of ${tickets.length}. Waiting for the turn to end, then your confirmation.`, "info");
 		return null;
 	};
 
@@ -1926,7 +1883,7 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 	// --- Event wiring ------------------------------------------------------------
 
 	pi.registerCommand("watchdog", {
-		description: "Unattended drain watchdog (PREP -> READY -> ARMED; also: resume | off | status)",
+		description: "Unattended drain watchdog (PREP -> ARMED; also: resume | off | status)",
 		getArgumentCompletions: watchdogCompletions,
 		handler: async (args, ctx) => {
 			latestCtx = ctx;
@@ -2014,11 +1971,6 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 			// A completion steer is progress; the run stays live (nextAllowedAt reset).
 			apply(transition(state, { type: "progress" }, Date.now()), "child-completion");
 		}
-		// PREP readiness proof: the model ends a turn with a bare READY line. Arm
-		// confirmation happens at agent_settled, after the turn really ended.
-		if (prepTarget !== null && !readyDeclared && isReadyDeclaration(event.message)) {
-			readyDeclared = true;
-		}
 	});
 
 	pi.on("agent_end", (event) => {
@@ -2055,13 +2007,13 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 			const tickets = prepTickets;
 			readyDeclared = false;
 			if (!ctx.hasUI) {
-				notify("drain-watchdog: READY seen but no UI to confirm arming; run /watchdog again", "warning");
+				notify("drain-watchdog: no UI to confirm arming; run /watchdog again", "warning");
 				prepTarget = null;
 				return;
 			}
 			const go = await ctx.ui.confirm(
 				"Arm unattended drain?",
-				`The model declared READY for ${target} (${pickableIds(tickets).length} pickable of ${tickets.length}). Arm the watchdog for an unattended run?`,
+				`Target ${target} (${pickableIds(tickets).length} pickable of ${tickets.length}). Arm the watchdog for an unattended run?`,
 			);
 			prepTarget = null;
 			refreshWidget();

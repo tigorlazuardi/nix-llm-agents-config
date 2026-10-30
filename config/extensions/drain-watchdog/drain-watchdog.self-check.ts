@@ -5,7 +5,7 @@
  * Covers state transitions (incl. Esc-always-wins and child no-op), provider
  * error classification, backoff ladder sequences and jitter bounds, the SPLIT
  * predicate, the arm refusal condition, and the live-loop helpers (env parsing,
- * /watchdog argument grammar, READY/error detection, state restore). The ticket
+ * /watchdog argument grammar, error detection, state restore). The ticket
  * tree is covered as pickable / limbo / leftover with fail-closed unknown
  * blockers, sync upsert, watchdog_complete / watchdog_handoff / watchdog_stop
  * seams and their harness-driven behavior (child/phase gating, llmStop
@@ -64,10 +64,8 @@ import {
 	buildNudgeText,
 	extractLastError,
 	isProbeText,
-	isReadyDeclaration,
 	isSubagentCompletionNotice,
 	isSubagentSpawnTool,
-	messageText,
 	parseWatchdogSubcommand,
 	watchdogCompletions,
 	watchdogWidgetLines,
@@ -957,23 +955,6 @@ assert.equal(watchdogCompletions("zzz"), null);
 assert.equal(watchdogCompletions("on #3"), null, "no completion after the first word");
 assert.equal(watchdogCompletions("#35"), null, "a ref gets no completion");
 
-// Message text extraction and the READY gate.
-assert.equal(messageText({ content: [{ type: "text", text: "a" }, { type: "thinking", text: "b" }, { type: "text", text: "c" }] }), "a\nc");
-assert.equal(messageText({ content: "READY" }), "READY");
-assert.equal(messageText({ content: [{ type: "tool_result" }] }), "");
-assert.equal(messageText(null), "");
-assert.equal(isReadyDeclaration({ role: "assistant", content: "done.\nREADY\n" }), true);
-assert.equal(isReadyDeclaration({ role: "assistant", content: "READY\r\n" }), true);
-assert.equal(isReadyDeclaration({ role: "assistant", content: "everything green\n== READY ==\n" }), false, "only a bare final line counts");
-assert.equal(isReadyDeclaration({ role: "assistant", content: "READY later" }), false);
-assert.equal(isReadyDeclaration({ role: "assistant", content: "" }), false);
-// M3: a tool-result (or any non-assistant) message ending in a bare READY line
-// is not the model's own readiness proof and must not count.
-assert.equal(isReadyDeclaration({ role: "tool", content: "grep output\nREADY\n" }), false, "tool output must not count as readiness");
-assert.equal(isReadyDeclaration({ role: "user", content: "READY" }), false, "user message must not count as readiness");
-assert.equal(isReadyDeclaration({ content: "READY" }), false, "missing role must not count as readiness");
-assert.equal(isReadyDeclaration("READY"), false, "a bare string (no role) must not count as readiness");
-assert.equal(isReadyDeclaration(null), false);
 
 // Last failed message of a run end sequence.
 assert.equal(extractLastError([{ role: "assistant", stopReason: "toolUse" }, { role: "user", stopReason: "toolUse" }, { role: "assistant", stopReason: "error", errorMessage: "429 Too Many Requests" }]), "429 Too Many Requests");
@@ -1194,7 +1175,7 @@ function makeHarness(cwd: string): Harness {
 		cwd,
 		ui: {
 			notify: (message: string, level = "info") => notifications.push({ message, level }),
-			// The PREP -> READY -> arm flow asks once; interactive rows need an answer.
+			// The PREP -> arm flow asks once; interactive rows need an answer.
 			confirm: async () => true,
 			setWidget: (_key: string, lines: string[] | undefined) => {
 				widgetLines = lines;
@@ -1948,12 +1929,11 @@ assert.equal(restoreRunTarget([armedEntry({ runTarget: "///" })]), null, "an unu
 assert.equal(restoreRunTarget([]), null);
 assert.equal(restoreRunTarget([{ type: "message", role: "user" }]), null);
 
-/** Runs one PREP -> watchdog_target -> READY -> confirm cycle on an existing harness
+/** Runs one PREP -> watchdog_target -> confirm cycle on an existing harness
  *  through the real production path, then completes both tickets (empty frontier). */
 async function prepAgain(h: Harness, ref: string) {
 	await h.handlers["command:watchdog"]("", h.ctx);
 	await h.tools.watchdog_target!.execute("p1", { issue: ref, tickets: [{ id: "T1" }, { id: "T2", blockedBy: ["T1"] }] }, undefined, undefined, h.ctx);
-	h.handlers.message_end({ message: { role: "assistant", content: [{ type: "text", text: "proof done\nREADY" }] } }, h.ctx);
 	await h.handlers.agent_settled({ aborted: false, messages: [] }, h.ctx);
 	// Drain the tree so the frontier is empty (plain DONE / FINALIZING paths).
 	await h.tools.watchdog_complete!.execute("p2", { id: "T1" }, undefined, undefined, h.ctx);
@@ -1961,7 +1941,7 @@ async function prepAgain(h: Harness, ref: string) {
 }
 
 /** Arms through the real production path: /watchdog #38 -> PREP (queue proof) ->
- *  model READY -> confirm. Returns the harness with an ARMED run, runTarget 38. */
+ *  confirm. Returns the harness with an ARMED run, runTarget 38. */
 async function armThroughPrep(cwd: string, entries: unknown[] = []) {
 	const h = makeHarness(cwd);
 	for (const e of entries) h.entries.push(e);
@@ -1985,7 +1965,7 @@ await withNoAmbientSubagent(() =>
 		try {
 			const h = await armThroughPrep(cwd);
 			assert(h.audits.some((a) => a.type === "prep-proof"), "PREP ran through the real command path");
-			assert(h.audits.some((a) => a.type === "armed"), "READY + confirm armed the run (production path, runTarget set)");
+			assert(h.audits.some((a) => a.type === "armed"), "confirm armed the run (production path, runTarget set)");
 			assert.equal(restoreRunTarget(h.entries), "#38", "the armed run persists its target with the state entry (L1)");
 			clock.advance(IDLE_GRACE_MS + 1000);
 			const tickTimer = timers.find((t) => t.kind === "interval" && !t.cleared)!;
@@ -2208,7 +2188,7 @@ watchdogExtension(mainPi as any);
 assert(mainPi.commands.includes("watchdog"), "main factory registers /watchdog");
 assert.deepEqual(mainPi.tools.sort(), ["watchdog_complete", "watchdog_done", "watchdog_handoff", "watchdog_stop", "watchdog_sync", "watchdog_target"], "main factory registers exactly the ticket-tree tools");
 assert(mainPi.events.includes("session_start"), "main factory restores state");
-assert(mainPi.events.includes("agent_settled"), "main factory handles Esc and the READY confirm");
+assert(mainPi.events.includes("agent_settled"), "main factory handles Esc and the arm confirm");
 assert(mainPi.events.includes("agent_end"), "main factory reports provider errors");
 assert(!mainPi.events.includes("tick"), "no timer surfaces: ticks are setInterval-internal and only started on arm");
 
@@ -2217,7 +2197,7 @@ else process.env.PI_SUBAGENT_ID = ambientSubagentId;
 
 // Discovery (live): /watchdog asks the MODEL to find the target and its ticket tree (no
 // scan, no tracker call, no ui.select/ui.input); the operator's pick returns through
-// watchdog_target, which proves the tree and starts the READY step. The tool is refused
+// watchdog_target, which proves the tree and starts the arm step. The tool is refused
 // outside a pending discovery.
 const tree38 = [{ id: "KRIPT-1" }, { id: "KRIPT-2", blockedBy: ["KRIPT-1"] }];
 await withNoAmbientSubagent(() =>
@@ -2235,7 +2215,7 @@ await withNoAmbientSubagent(() =>
 			assert(h.userMessages[0].includes("watchdog_target"), "the model is told how to hand the pick back");
 			assert(h.userMessages[0].includes("ask_user_question"), "the model, not the extension, asks the operator");
 			assert(h.userMessages[0].includes(SYNC_REMINDER), "the discovery text carries the keep-in-sync reminder");
-			assert(!h.userMessages[0].includes("READY"), "no READY step before a target exists");
+			assert(!h.userMessages[0].includes("confirm arming"), "no arm step before a target exists");
 			assert(h.audits.some((a) => a.type === "prep-discover"));
 			assert.equal(h.execCalls.length, 0, "the extension never calls a tracker");
 
@@ -2247,14 +2227,13 @@ await withNoAmbientSubagent(() =>
 			assert(!ok.isError, "the pick is accepted while discovery is pending");
 			assert(h.audits.some((a) => a.type === "prep-proof" && a.data.target === "KRIPT-222"), "the chosen target gets the ticket-tree proof");
 			// The tool runs mid-turn: sendUserMessage would throw "Agent is already
-			// processing", so the READY instruction rides the tool result instead.
+			// processing", so the PREP instruction rides the tool result instead.
 			assert.equal(h.userMessages.length, 1, "the tool path sends no user message");
-			assert(ok.content[0].text.includes("KRIPT-222") && ok.content[0].text.includes("READY"), "the READY instruction is the tool result");
+			assert(ok.content[0].text.includes("KRIPT-222") && ok.content[0].text.includes("confirm arming"), "the PREP instruction is the tool result");
 
 			const again = await h.tools.watchdog_target!.execute("d2", { issue: "KRIPT-300", tickets: tree38 }, undefined, undefined, h.ctx);
 			assert(again.isError, "one pick per discovery request");
 
-			h.handlers.message_end({ message: { role: "assistant", content: [{ type: "text", text: "proof done\nREADY" }] } }, h.ctx);
 			await h.handlers.agent_settled({ aborted: false, messages: [] }, h.ctx);
 			h.handlers["command:watchdog"]("status", h.ctx);
 			assert(h.notifications.some((n) => n.message.includes("phase armed") && n.message.includes("run target KRIPT-222")), "the discovered target arms through the normal PREP path");
