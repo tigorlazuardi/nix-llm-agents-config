@@ -882,7 +882,7 @@ const DISCOVER_INSTRUCTION = (ref: string | null): string =>
 		"drain-watchdog PREP: the operator did not pick the run target yet" + (ref !== null && ref.trim() !== "" ? ` (they wrote: ${JSON.stringify(ref.trim())})` : "") + ".",
 		"Find the candidate run targets yourself: the map, spec, epic, or ticket(s) this work is about, in whatever tracker this project uses. Use this conversation first, then the tracker. Never ask the operator to look anything up.",
 		"Then ask the operator to choose with ask_user_question: 2-4 candidates, each labelled with its id and title, the most likely one first marked (Recommended). If exactly one candidate is clearly right, still confirm it.",
-		"Call the watchdog_target tool with the chosen id (`issue`, any opaque string such as KRIPT-222 or #38) and `tickets`: the target's ticket tree, each { id, blockedBy?, state?, reason? } read from the tracker. If the operator named a check command (build/test/lint), pass it verbatim as the optional `checkCommand`; never invent one. It continues PREP for you. If no candidate exists, tell the operator and stop; do not guess.",
+		"Call the watchdog_target tool with the chosen id (`issue`, any opaque string such as KRIPT-222 or #38) and `tickets`: the target's ticket tree, each { id, blockedBy?, state?, reason? } read from the tracker. Also pass the optional `checkCommand` (the command that verifies a ticket: build/test/lint): use what the operator named or what the project itself declares (AGENTS.md, README, Makefile, package scripts, CI config); never invent one. If you cannot find it, ask in that same ask_user_question call (a second question, not a separate call) with 2-4 recommended commands, the most likely first marked (Recommended), then pass the answer verbatim. It continues PREP for you. If no candidate exists, tell the operator and stop; do not guess.",
 		SYNC_REMINDER,
 	].join("\n");
 
@@ -1446,7 +1446,7 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 		parameters: Type.Object({
 			issue: Type.String({ description: "Opaque id of the run target the operator chose (map, spec, epic or ticket)" }),
 			tickets: Type.Array(ticketSchema, { description: "The ticket tree to drain: id, blockedBy, optional state" }),
-			checkCommand: Type.Optional(Type.String({ description: "Optional: the exact command that verifies a ticket (build/test/lint). Only when the operator named one; never invent it." })),
+			checkCommand: Type.Optional(Type.String({ description: "Optional: the exact command that verifies a ticket (build/test/lint). Fill it from the operator or the project's own declared config; if unknown, ask the operator (with a recommended option) before calling; never invent it." })),
 		}),
 		async execute(_id, params) {
 			const gate = targetToolGate(isChildSession(process.env), discovering);

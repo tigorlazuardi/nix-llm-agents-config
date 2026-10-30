@@ -1546,6 +1546,7 @@ await withNoAmbientSubagent(() =>
 			assert.equal(h.userMessages.length, 1, "discovery sends exactly one instruction to the model");
 			assert(h.userMessages[0].includes("watchdog_target"), "the model is told how to hand the pick back");
 			assert(h.userMessages[0].includes("ask_user_question"), "the model, not the extension, asks the operator");
+			assert(h.userMessages[0].includes("checkCommand") && h.userMessages[0].includes("never invent one"), "discovery tells the model to fill checkCommand from the project, else ask");
 			assert(h.userMessages[0].includes(SYNC_REMINDER), "the discovery text carries the keep-in-sync reminder");
 			assert(!h.userMessages[0].includes("confirm arming"), "no arm step before a target exists");
 			assert(h.audits.some((a) => a.type === "prep-discover"));
