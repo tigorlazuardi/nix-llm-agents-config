@@ -1261,10 +1261,9 @@ const PROBE_MESSAGE_TYPE = "drain-watchdog-probe";
 const PREP_INSTRUCTION = (target: string, pickable: number): string =>
 	[
 		`drain-watchdog PREP for ${target}: the declared ticket tree has ${pickable} pickable ticket(s).`,
-		"Prove readiness now: run the project's check command (nix flake check here; it is long, so give it a generous timeout and report the result).",
-		"If it is green and the drained scope covers the tree, end a turn whose last line is exactly:",
+		"If the declared tree covers the drained scope, end a turn whose last line is exactly:",
 		"READY",
-		"If it failed, report what failed. Do not write READY.",
+		"If the tree is wrong or incomplete, tell the operator what is missing. Do not write READY.",
 		SYNC_REMINDER,
 	].join("\n");
 
