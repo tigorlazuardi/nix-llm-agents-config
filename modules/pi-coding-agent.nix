@@ -406,6 +406,10 @@ let
       reserveTokens = 128000;
       keepRecentTokens = 20000;
     };
+    # A silent provider stream (no bytes at all) times out after 300s and the
+    # timeout error rides pi's own retry. Pinned so it does not depend on
+    # pi's httpIdleTimeoutMs default. ponytail: fixed to 300s; make an option when a second value exists.
+    retry.provider.timeoutMs = 300000;
   }
   // lib.optionalAttrs mcpPlugin.enable {
     # pi-mcp-adapter: allow project-scoped MCP servers in trusted headless

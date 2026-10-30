@@ -536,6 +536,7 @@ in
           reserveTokens = 128000;
           keepRecentTokens = 20000;
         };
+        retry.provider.timeoutMs = 300000;
         packages = [
           expectedCommandCodeProviderPath
           expectedEffortPath
@@ -1090,6 +1091,9 @@ in
     assert builtins.elem overridePackage overridden.config.home.packages;
     assert settingsOverridden.config.programs.pi-coding-agent.settings.theme == "light";
     assert settingsOverridden.config.programs.pi-coding-agent.settings.retry.maxRetries == 3;
+    assert default.config.programs.pi-coding-agent.settings.retry.provider.timeoutMs == 300000;
+    assert
+      settingsOverridden.config.programs.pi-coding-agent.settings.retry.provider.timeoutMs == 300000;
     assert
       settingsOverridden.config.programs.pi-coding-agent.settings.packages == [
         expectedCommandCodeProviderPath
