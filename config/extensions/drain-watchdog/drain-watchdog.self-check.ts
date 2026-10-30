@@ -29,10 +29,7 @@ import {
 	INITIAL_STATE,
 	TICK_MS,
 	QUOTA_OUTAGE_BUDGET_MS,
-	SPEC_REVIEW_BUDGET_MS,
 	STALL_LIMIT_MS,
-	STANDARDS_REVIEW_BUDGET_MS,
-	SPLIT_DEPTH_CAP,
 	TRANSIENT_OUTAGE_BUDGET_MS,
 	SYNC_REMINDER,
 	armRefusal,
@@ -58,7 +55,6 @@ import {
 	executorStateFilePath,
 	executorStateRoot,
 	readClosingSignal,
-	shouldSplit,
 	transition,
 
 	buildNudgeText,
@@ -870,26 +866,6 @@ assert.deepEqual(watchdogToolGate("stop", false, "paused"), { ok: true });
 assert.deepEqual(watchdogToolGate("stop", false, "finalizing"), { ok: true });
 // The off/done error names the situation and the way out.
 assert(JSON.stringify(watchdogToolGate("stop", false, "done")).includes("no active watchdog run"));
-
-// --- SPLIT predicate --------------------------------------------------------------------------
-
-// FAIL after the axis budget splits (10 min standards, 20 min spec).
-assert.equal(shouldSplit("standards", "fail", STANDARDS_REVIEW_BUDGET_MS + 1, 0), "split");
-assert.equal(shouldSplit("spec", "fail", SPEC_REVIEW_BUDGET_MS + 1, 0), "split");
-// FAIL within budget is the fix loop; exactly at budget is not over it.
-assert.equal(shouldSplit("standards", "fail", STANDARDS_REVIEW_BUDGET_MS, 0), "fixLoop");
-assert.equal(shouldSplit("spec", "fail", SPEC_REVIEW_BUDGET_MS, 0), "fixLoop");
-assert.equal(shouldSplit("standards", "fail", 5 * MIN, 0), "fixLoop");
-// Within budget at the depth cap is still the fix loop, not a handoff.
-assert.equal(shouldSplit("standards", "fail", 5 * MIN, SPLIT_DEPTH_CAP), "fixLoop");
-// PASS never splits; a hung review (no verdict) never splits.
-assert.equal(shouldSplit("standards", "pass", STANDARDS_REVIEW_BUDGET_MS * 10, 0), "none");
-assert.equal(shouldSplit("spec", null, SPEC_REVIEW_BUDGET_MS * 10, 0), "none");
-assert.equal(shouldSplit("spec", undefined, SPEC_REVIEW_BUDGET_MS * 10, 0), "none");
-// Depth cap: an over-budget FAIL at SPLIT_DEPTH_CAP hands off (ticket -> ready-for-human).
-assert.equal(shouldSplit("standards", "fail", STANDARDS_REVIEW_BUDGET_MS + 1, SPLIT_DEPTH_CAP - 1), "split");
-assert.equal(shouldSplit("standards", "fail", STANDARDS_REVIEW_BUDGET_MS + 1, SPLIT_DEPTH_CAP), "handoff");
-assert.equal(shouldSplit("standards", "fail", STANDARDS_REVIEW_BUDGET_MS + 1, SPLIT_DEPTH_CAP + 1), "handoff");
 
 // --- Child sessions ----------------------------------------------------------------------------
 

@@ -160,9 +160,6 @@ export const TICK_MS = 15_000;
 export const STALL_LIMIT_MS = 45 * 60_000;
 export const BREAKER_K = 4;
 export const HARD_CAP = 30;
-export const SPLIT_DEPTH_CAP = 5;
-export const STANDARDS_REVIEW_BUDGET_MS = 10 * 60_000;
-export const SPEC_REVIEW_BUDGET_MS = 20 * 60_000;
 export const TRANSIENT_OUTAGE_BUDGET_MS = 6 * 3_600_000;
 export const QUOTA_OUTAGE_BUDGET_MS = 12 * 3_600_000;
 /** Backoff jitter half-width: delays land within +-20% of the ladder step. */
@@ -541,32 +538,6 @@ export function watchdogToolGate(kind: WatchdogToolKind, childSession: boolean, 
 	if (childSession) return { ok: false, error: `watchdog_${kind} is main-session only; child sessions cannot invoke it` };
 	if (phase === "off" || phase === "done") return { ok: false, error: `watchdog_${kind} ignored: no active watchdog run (phase ${phase}); arm one with /watchdog first` };
 	return { ok: true };
-}
-
-// --- SPLIT predicate ------------------------------------------------------------
-
-export type ReviewAxis = "standards" | "spec";
-
-/** What the caller does with a finished review. */
-export type SplitDecision = "split" | "fixLoop" | "handoff" | "none";
-
-/**
- * SPLIT rule: only a review that FINISHED with FAIL after exceeding its axis
- * budget (10 min standards, 20 min spec) splits, and only while depth < cap;
- * at the cap an over-budget FAIL is a `handoff` (ticket -> `ready-for-human`,
- * see `handoffExit`). FAIL within budget is the ordinary `fixLoop`; PASS never
- * splits; a hung review (no verdict) is `none` — stall detection covers it.
- */
-export function shouldSplit(
-	axis: ReviewAxis,
-	verdict: "pass" | "fail" | null | undefined,
-	durationMs: number,
-	splitDepth: number,
-): SplitDecision {
-	if (verdict !== "fail") return "none";
-	const budget = axis === "spec" ? SPEC_REVIEW_BUDGET_MS : STANDARDS_REVIEW_BUDGET_MS;
-	if (durationMs <= budget) return "fixLoop";
-	return splitDepth >= SPLIT_DEPTH_CAP ? "handoff" : "split";
 }
 
 // --- Live-loop helpers (#30 effect layer decisions) -------------------------
