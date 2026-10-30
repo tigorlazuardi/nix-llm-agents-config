@@ -20,15 +20,15 @@
  *    the extension never calls the tracker. A run with no tickets declared
  *    refuses/pauses; it is never interpreted as "done" or an empty queue.
  *  - Tick order is fixed and the nudge is the last resort.
- *  - #38: the closing-step signal is the executor's own state files
- *    (/tmp/executor/<repo-slug>/.../state.json, closingStepsDone); a malformed
- *    or unreadable file is an audited anomaly, never a pause (plain DONE stays plain).
+ *  - #38: the harness never reads run state files or names a flow; it only sees the ticket tree.
+ *    The LLM decides completion: an idle tick with an empty frontier and no
+ *    child only nudges (closing steps, then watchdog_done); the tick never completes.
  *
  * `progress` is dispatched by the live loop for child completion steers and
  * ticket-tree changes (complete/handoff/sync are progress by design, flow.html
- * section 5 — the breaker stays cold). Only the harness decides completion:
- * `llmDone` (watchdog_done) is accepted from ARMED or FINALIZING only when the
- * ticket tree proves nothing is left (`doneRefusal`).
+ * section 5 — the breaker stays cold). The model decides completion: `llmDone`
+ * (watchdog_done) is accepted from ARMED only when the ticket tree proves
+ * nothing is left (`doneRefusal`).
  *
  * Imports `isRetryableAssistantError` from @earendil-works/pi-ai, so the module
  * needs pi-ai resolvable (checks.nix symlinks it from the pi runtime into the
@@ -40,17 +40,15 @@
  * PI_WATCHDOG_* env overrides wired from the Nix module as session variables.
  */
 
-import { readFileSync, readdirSync } from "node:fs";
-import { basename, join } from "node:path";
 
 import { isRetryableAssistantError, StringEnum } from "@earendil-works/pi-ai";
-import type { AgentToolResult, ExtensionAPI, ExtensionCommandContext, ExtensionContext, ExtensionToolContext } from "@earendil-works/pi-coding-agent";
+import type { AgentToolResult, ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 type RuntimeMessage = Parameters<typeof isRetryableAssistantError>[0];
 
 // --- Types -------------------------------------------------------------------
 
-export type DrainPhase = "off" | "armed" | "backoff" | "paused" | "done" | "finalizing";
+export type DrainPhase = "off" | "armed" | "backoff" | "paused" | "done";
 
 export type ProviderErrorKind = "transient" | "quota" | "auth" | "unknown";
 
@@ -95,8 +93,6 @@ export type TickObservation = {
 	progressAgeMs: number;
 	/** Error message from the last ended run, if it ended in error. */
 	lastError: string | null;
-	/** The flow has closing steps (code-review, PR, cleanup) still to run. */
-	hasClosingSteps: boolean;
 };
 
 /** What the effect layer saw when the model called watchdog_done. */
@@ -104,26 +100,23 @@ export type DoneObservation = {
 	queueOk: boolean;
 	pickable: number;
 	childCount: number;
-	hasClosingSteps: boolean;
 };
 
 /**
  * Why a watchdog_done promise must be refused, or null when the run is really
- * finished. The model only supplies the claim; the ticket tree, the child count
- * and the executor's closing flag decide. Limbo/leftover tickets never block DONE.
+ * finished. The model only supplies the claim; the ticket tree and the child count
+ * decide. Limbo/leftover tickets never block DONE.
  */
 export function doneRefusal(o: DoneObservation): string | null {
 	if (!o.queueOk) return "no tickets are declared (watchdog_target); cannot verify that the run is finished";
 	if (o.pickable > 0) return `${o.pickable} pickable ticket(s) remain; keep working, or mark them done (watchdog_complete) or limbo (watchdog_handoff)`;
 	if (o.childCount > 0) return `${o.childCount} child session(s) are still running`;
-	if (o.hasClosingSteps) return "closing steps are not done yet (closingStepsDone is false in the executor state.json); run them, set closingStepsDone: true, then call watchdog_done again";
 	return null;
 }
 
 export type DrainAction =
 	| { type: "wait" }
 	| { type: "nudge" }
-	| { type: "finalizeNudge" }
 	| { type: "stallNotify" }
 	| { type: "pause"; reason: string }
 	| { type: "done" }
@@ -624,18 +617,22 @@ export function isSubagentCompletionNotice(customType: unknown): boolean {
  */
 export function buildNudgeText(p: { target: string | null; pickable: number }): string {
 	const target = p.target === null ? "the accepted tickets" : p.target;
+	if (p.pickable <= 0) {
+		// Empty frontier, no child: the LLM decides it is finished (the tick never completes the run).
+		return [
+			`drain-watchdog: unattended run on ${target}; you are idle with no pickable ticket and no child running.`,
+			"No pickable ticket and no child running: finish any closing steps (merge, PR, cleanup), then call watchdog_done; do not open new work. The watchdog verifies the ticket tree and completes the run at once.",
+			SYNC_REMINDER,
+		].join("\n");
+	}
 	return [
-		`drain-watchdog: unattended run on ${target}; you are idle with ${p.pickable} pickable ticket(s) in the watchdog ticket tree. Do not ask the user — continue per the executor flow (config/prompts/executor.md, state in /tmp/executor/<repo-slug>/<target>/state.json) now. Work in parallel, not one ticket at a time: read the frontier fresh and, while slots are free (PARALLEL_WIDTH), start every independent pickable ticket at once, each in its own worktree. All work merges into the target's integration/<slug> branch, so parallel tickets stay close to the same base and conflicts stay small.`,
+		`drain-watchdog: unattended run on ${target}; you are idle with ${p.pickable} pickable ticket(s) in the watchdog ticket tree. Do not ask the user — continue the drain flow you are running now. Work in parallel, not one ticket at a time: read the frontier fresh and, while slots are free (PARALLEL_WIDTH), start every independent pickable ticket at once, each in its own worktree. All work merges into the target's integration/<slug> branch, so parallel tickets stay close to the same base and conflicts stay small.`,
 		"Ambiguous or product-question tickets, and low-tolerance work (auth/authz, secrets/credentials, DB migrations, public API contracts, money/billing, data deletion, irreversible operations), must leave the tree through watchdog_handoff (limbo, human review) instead of waiting; finished tickets go through watchdog_complete.",
 		SYNC_REMINDER,
-		"When no pickable ticket is left and no child is running, finish the closing steps if any, then call watchdog_done: the watchdog verifies the ticket tree and completes the run at once.",
+		"When no pickable ticket is left and no child is running, finish any closing steps (merge, PR, cleanup), then call watchdog_done; do not open new work.",
 	].join("\n");
 }
 
-
-/** Closing nudge of a finalizing flow (flow.html section 10; one per successful delivery). */
-export const FINALIZE_NUDGE_TEXT =
-	"drain-watchdog: frontier is empty. Finish the closing steps (final review, integration branch/PR, cleanup), set closingStepsDone: true, then call watchdog_done; do not open new work.";
 
 // --- Operator UI (persistent widget + command completion) --------------------
 
@@ -666,7 +663,7 @@ function clock(ms: number): string {
 /**
  * The persistent watchdog widget (string[] above the editor), or null when
  * there is nothing to show (OFF without a PREP). Green ARMED, yellow
- * BACKOFF/FINALIZING/PREP, red PAUSED, dim DONE. Pure: the effect layer
+ * BACKOFF/PREP, red PAUSED, dim DONE. Pure: the effect layer
  * supplies the view and the clock.
  */
 export function watchdogWidgetLines(v: WidgetView): string[] | null {
@@ -681,9 +678,6 @@ export function watchdogWidgetLines(v: WidgetView): string[] | null {
 			break;
 		case "backoff":
 			[head, color, hint] = [`\u25d0 BACKOFF${v.backoffKind === null ? "" : ` (${v.backoffKind})`}`, "yellow", "probe otomatis \u00b7 Esc jeda \u00b7 /watchdog off"];
-			break;
-		case "finalizing":
-			[head, color, hint] = ["\u25d1 FINALIZING", "yellow", "closing steps berjalan \u00b7 Esc jeda"];
 			break;
 		case "paused":
 			[head, color, hint] = ["\u25cb PAUSED", "red", "/watchdog resume \u00b7 /watchdog off"];
@@ -727,16 +721,16 @@ export function watchdogCompletions(prefix: string): { value: string; label: str
 const STATE_ENTRY_TYPE = "drain-watchdog-state";
 
 /** Valid DrainPhase values, for restoring persisted state without trusting it. */
-const DRAIN_PHASES: readonly DrainPhase[] = ["off", "armed", "backoff", "paused", "done", "finalizing"];
+const DRAIN_PHASES: readonly DrainPhase[] = ["off", "armed", "backoff", "paused", "done"];
 
 /**
  * A live run a new PREP must not replace (the run is being observed: work,
- * backoff probe, or closing steps). `/watchdog off` is the way out; PAUSED has
+ * backoff probe). `/watchdog off` is the way out; PAUSED has
  * its own resume path. One definition, used by the PREP guard and the status
  * detail line, so a phase added to the live loop cannot silently miss a guard
- * again (#38 G: FINALIZING was missing from the PREP guard only).
+ * again.
  */
-export const isActivePhase = (phase: DrainPhase): boolean => phase === "armed" || phase === "backoff" || phase === "finalizing";
+export const isActivePhase = (phase: DrainPhase): boolean => phase === "armed" || phase === "backoff";
 
 /**
  * Latest valid persisted watchdog state from session entries (null when the
@@ -810,11 +804,9 @@ export function restoreDrainState(entries: readonly unknown[]): DrainState | nul
 }
 
 /**
- * #38 C: the run target persisted with the state entry, restored separately so
- * the pure DrainState shape stays untouched. Without it a restored run has no
- * target and would scan every /tmp/executor/<slug>/* directory, letting a stale
- * sibling target's closingStepsDone:false nudge (then pause) an unrelated run.
- * Latest entry wins; an invalid value degrades to null (scan path).
+ * The run target (opaque id string) persisted with the state entry, restored
+ * separately so the pure DrainState shape stays untouched. Latest entry wins;
+ * an invalid value degrades to null.
  */
 export function restoreRunTarget(entries: readonly unknown[]): string | null {
 	for (let i = entries.length - 1; i >= 0; i--) {
@@ -824,117 +816,9 @@ export function restoreRunTarget(entries: readonly unknown[]): string | null {
 		if (entry.type !== "custom" || entry.customType !== STATE_ENTRY_TYPE) continue;
 		if (typeof entry.data !== "object" || entry.data === null) continue;
 		const value = (entry.data as { runTarget?: unknown }).runTarget;
-		return typeof value === "string" && targetDirName(value) !== null ? value : null;
+		return typeof value === "string" && value.trim() !== "" ? value : null;
 	}
 	return null;
-}
-
-// --- Closing-step signal (#38) -------------------------------------------------
-
-/**
- * One executor state file as the effect layer observed it: the path it was
- * found at (audit detail only) and its bytes, or the read outcome when there
- * were none. `missing` separates "no file / no target dir" (ENOENT: an
- * executor never ran, or a sibling target — no signal AND no anomaly) from a
- * real IO failure (content null, missing false: unreadable, an anomaly). The
- * effect layer only classifies the syscall result; deciding stays here.
- */
-export type ExecutorStateFile = { path: string; content: string | null; missing?: boolean };
-
-/**
- * Closing signal of one executor run-directory scan: does any target still
- * have closing steps to run (the FINALIZING trigger), plus any anomaly that
- * should be audited. One seam for the whole #38 decision; the effect layer
- * only lists and reads files.
- */
-export type ClosingSignal = { hasClosingSteps: boolean; anomalies: string[] };
-
-/**
- * hasClosingSteps = any state file that parses AND carries `closingStepsDone:
- * false` (an executor target still closing). Fail-safe by contract:
- *
- *  - a file reported `missing` (ENOENT: no /tmp/executor/<repo-slug>, no
- *    target dir, or the target's own state.json absent while the caller reads
- *    one known target) -> no signal, no anomaly: plain DONE stays plain (#38
- *    AC3), and a targeted plus a scanning read of the same absent state agree.
- *  - an unparseable state.json, an unreadable file (read failed for a reason
- *    other than ENOENT), or a JSON that parses but is not an object with a
- *    boolean closingStepsDone -> also "no closing steps" (a DONE, not a
- *    pause), but as an audited anomaly — a half-written or corrupt executor
- *    state must be visible in the audit trail, and an unparseable file must
- *    never block an unattended run.
- *  - closingStepsDone: true with a healthy file -> no signal (the executor
- *    reports closing finished). A parseable file without a boolean
- *    closingStepsDone violates the #34 state.json contract (the field is
- *    always present): no signal, but an audited anomaly — only an explicit
- *    false may claim closing work.
- *
- *  ponytail: malformed/unreadable state files are treated as "no closing
- *  steps" + anomaly (DONE with an audit trail), the safer of the two options
- *  (pause would hang an unattended run on a corrupt file; a false DONE is
- *  bounded because the audit names the path). Make this a pause when a second
- *  consumer needs strictness.
- */
-export function readClosingSignal(entries: readonly ExecutorStateFile[]): ClosingSignal {
-	const anomalies: string[] = [];
-	for (const e of entries) {
-		if (e.missing === true) continue; // ENOENT: nothing was ever written there.
-		if (e.content === null) {
-			anomalies.push(`${e.path}: unreadable`);
-			continue;
-		}
-		let parsed: unknown;
-		try {
-			parsed = JSON.parse(e.content);
-		} catch {
-			anomalies.push(`${e.path}: state.json is not valid JSON`);
-			continue;
-		}
-		const data = typeof parsed === "object" && parsed !== null ? (parsed as Record<string, unknown>) : null;
-		if (data === null || typeof data.closingStepsDone !== "boolean") {
-			anomalies.push(`${e.path}: parsed but closingStepsDone is not a boolean`);
-			continue;
-		}
-		if (data.closingStepsDone === false) return { hasClosingSteps: true, anomalies };
-	}
-	return { hasClosingSteps: false, anomalies };
-}
-
-/**
- * Repo slug for the executor state root, from the watched repo path — the
- * same convention the executor prompt's /tmp/executor/<repo-slug> contract
- * uses (dev-journal's slugify pattern: lowercase, non-alphanumerics collapse
- * to one dash, no leading/trailing dash).
- */
-export function executorRepoSlug(cwd: string): string {
-	return basename(cwd).toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
-}
-
-/**
- * The executor's state root for this repo: /tmp/executor/<repo-slug>. The
- * effect layer lists its per-target subdirs and reads each one's state.json;
- * readClosingSignal stays the pure seam. Single-run state path for a known
- * target is /tmp/executor/<repo-slug>/<target>/state.json (the #34 contract).
- */
-export function executorStateRoot(cwd: string): string | null {
-	const slug = executorRepoSlug(cwd);
-	if (slug === "") return null;
-	return join("/tmp/executor", slug);
-}
-
-/**
- * Directory name of an opaque run target ("#38" -> "38", "KRIPT-222" stays):
- * a leading "#" is dropped and everything outside [A-Za-z0-9_-] collapses to
- * "-", so a model-supplied id can never walk out of /tmp/executor/<slug>.
- * null when nothing usable is left.
- */
-export function targetDirName(target: string): string | null {
-	const name = target.trim().replace(/^#/, "").replace(/[^A-Za-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "");
-	return name === "" ? null : name;
-}
-
-export function executorStateFilePath(cwd: string, target: string): string {
-	return join("/tmp/executor", executorRepoSlug(cwd), targetDirName(target) ?? "unknown-target", "state.json");
 }
 
 // --- State machine ---------------------------------------------------------------
@@ -950,7 +834,6 @@ const PAUSE_REASON = {
 	outage: "provider outage budget exhausted",
 	abort: "aborted (Esc/abort)",
 	llmStop: "watchdog_stop",
-	finalize: "finalization not confirmed after the closing nudge; run paused",
 } as const;
 
 /** watchdog_stop's own reason text overrides the generic llmStop reason when given. */
@@ -968,23 +851,23 @@ const toPaused = (state: DrainState, reason: string): DrainTransition => ({
  * no-op enforced once at the top of `transition`. OFF, PAUSED and DONE own
  * almost nothing on purpose: only `arm` (from OFF) and `resume` (from PAUSED)
  * leave them, and DONE is terminal (a new run starts from INITIAL_STATE).
- * `llmDone` (watchdog_done) is accepted from ARMED and FINALIZING but only with
- * a live observation that `doneRefusal` clears (no pickable ticket,
- * no children, no open closing steps); a refused claim is a no-op that keeps the
- * run going, and the tool reports the reason back to the model. BACKOFF never
- * accepts it: a provider outage is not a finished run.
+ * `llmDone` (watchdog_done) is accepted from ARMED only, and only with a live
+ * observation that `doneRefusal` clears (no pickable ticket, no children); a
+ * refused claim is a no-op that keeps the run going, and the tool reports the
+ * reason back to the model. BACKOFF never accepts it: a provider outage is not
+ * a finished run.
  */
 const EVENT_PHASES: Record<DrainEvent["type"], readonly DrainPhase[]> = {
 	arm: ["off"],
-	off: ["armed", "backoff", "paused", "finalizing"],
+	off: ["armed", "backoff", "paused"],
 	resume: ["paused"],
-	abort: ["armed", "backoff", "finalizing"],
-	tick: ["armed", "finalizing"],
-	providerError: ["armed", "backoff", "finalizing"],
+	abort: ["armed", "backoff"],
+	tick: ["armed"],
+	providerError: ["armed", "backoff"],
 	probeOk: ["backoff"],
-	llmStop: ["armed", "backoff", "finalizing"],
-	llmDone: ["armed", "finalizing"],
-	progress: ["armed", "backoff", "finalizing"],
+	llmStop: ["armed", "backoff"],
+	llmDone: ["armed"],
+	progress: ["armed", "backoff"],
 };
 
 /**
@@ -1018,14 +901,14 @@ function enterBackoff(
 }
 
 /**
- * The only place a nudge (plain or finalize) is recorded: breaker and hard-cap
+ * The only place a nudge is recorded: breaker and hard-cap
  * gate first, then count, streak and the 3/6/12/24/30 min cooldown. There is
  * deliberately no external "nudge" event — effects must not re-record.
  */
 function recordNudge(
 	state: DrainState,
 	now: number,
-	action: { type: "nudge" } | { type: "finalizeNudge" },
+	action: { type: "nudge" },
 ): DrainTransition {
 	if (state.noProgressStreak >= BREAKER_K) return toPaused(state, PAUSE_REASON.breaker);
 	if (state.nudgeCount >= HARD_CAP) return toPaused(state, PAUSE_REASON.hardCap);
@@ -1033,7 +916,6 @@ function recordNudge(
 	return {
 		state: {
 			...state,
-			phase: action.type === "finalizeNudge" ? "finalizing" : state.phase,
 			noProgressStreak: state.noProgressStreak + 1,
 			nudgeCount,
 			nextAllowedAt: now + nudgeLadderDelayMs(nudgeCount),
@@ -1064,18 +946,6 @@ function handleTick(state: DrainState, obs: TickObservation, now: number, config
 	if (now < state.nextAllowedAt) return stay(state);
 
 	if (!obs.queueOk) return toPaused(state, PAUSE_REASON.queue);
-
-	// Terminal branch first: frontier 0, no children.
-	if (obs.pickable <= 0 && obs.childCount <= 0) {
-		if (obs.hasClosingSteps) {
-			// Exactly ONE closing nudge (design section 10, #34). Idle again after it
-			// with closing steps still open: pause, visibly, rather than nudge more or
-			// wait forever unattended. Breaker + hard cap still gate the first nudge.
-			if (state.phase === "finalizing") return toPaused(state, PAUSE_REASON.finalize);
-			return recordNudge(state, now, { type: "finalizeNudge" });
-		}
-		return { state: { ...state, phase: "done" }, action: { type: "done" }, refusal: null };
-	}
 
 	// Children running: observe only. A stall notifies; it never nudges the main.
 	if (obs.childCount > 0) {
@@ -1166,8 +1036,8 @@ export function transition(state: DrainState, event: DrainEvent, now: number, co
 			return toPaused(state, stopReason(event.reason));
 		case "llmDone":
 			// Promise path: verified against the live observation, never taken on faith.
-			// Refused -> no-op (the tool reports the reason). Accepted -> the same DONE
-			// action as the tick path, so timers stop and the final report is audited.
+			// Refused -> no-op (the tool reports the reason). Accepted -> the only path to
+			// DONE, so timers stop and the final report is audited.
 			if (doneRefusal(event.obs) !== null) return stay(state);
 			return { state: { ...state, phase: "done", pausedReason: null }, action: { type: "done" }, refusal: null };
 		// L3: `breaker`/`hardCap` DrainEvents (distinct from the tick-internal
@@ -1289,11 +1159,8 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 	const queueView = () => ({ ok: state.tickets.length > 0, pickable: pickableIds(state.tickets).length });
 
 	const persist = () => {
-		// #38 C: runTarget rides along so a restored run keeps reading its own
-		// target's state.json instead of scanning every target dir (a stale sibling
-		// /tmp/executor/<slug>/<other>/state.json must not trigger FINALIZING on a
-		// different run). restoreDrainState ignores the extra key; restoreRunTarget
-		// reads it back.
+		// runTarget rides along so a restored run keeps its target label.
+		// restoreDrainState ignores the extra key; restoreRunTarget reads it back.
 		pi.appendEntry(STATE_ENTRY_TYPE, { ...state, runTarget });
 		refreshWidget();
 	};
@@ -1332,46 +1199,6 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 		}, delay);
 	};
 
-	/**
-	 * #38 effect layer: list and read the executor's state files for this repo
-	 * and hand the raw bytes to the pure seam. Every failure mode (missing
-	 * root dir, unreadable file) becomes an ExecutorStateFile; deciding is
-	 * readClosingSignal's job alone. Runs synchronously between awaits, and
-	 * ticks re-check `closed` right after — no state change after shutdown.
-	 */
-	const readExecutorClosingSignal = (ctx: ExtensionContext): ClosingSignal => {
-		const repoRoot = executorStateRoot(ctx.cwd);
-		if (repoRoot === null) return { hasClosingSteps: false, anomalies: [] };
-		// One known target run: read its state.json directly; no target (count-only
-		// context): list every target dir under the repo root. Either way the same
-		// pure seam decides.
-		let statePaths: string[] | null;
-		if (runTarget !== null) {
-			statePaths = [executorStateFilePath(ctx.cwd, runTarget)];
-		} else {
-			try {
-				statePaths = readdirSync(repoRoot, { withFileTypes: true })
-					.filter((d) => d.isDirectory())
-					.map((d) => join(repoRoot, d.name, "state.json"));
-			} catch {
-				// Missing /tmp/executor/<repo-slug>: no executor ever ran for this repo —
-				// the plain-run case (AC3), no signal, no anomaly.
-				return { hasClosingSteps: false, anomalies: [] };
-			}
-		}
-		const files: ExecutorStateFile[] = statePaths.map((statePath) => {
-			try {
-				return { path: statePath, content: readFileSync(statePath, "utf8") };
-			} catch (error) {
-				// ENOENT covers both "no /tmp/executor/<repo-slug> for this repo" (the
-				// plain-run case) and "this target has no state.json yet" — a missing
-				// file is not a corrupt one, so it is not an anomaly. Every other IO
-				// failure (EACCES, EISDIR, ...) stays content:null for the seam to audit.
-				return { path: statePath, content: null, missing: (error as { code?: string } | null)?.code === "ENOENT" };
-			}
-		});
-		return readClosingSignal(files);
-	};
 
 	const WIDGET_KEY = "drain-watchdog";
 	const WIDGET_REFRESH_MS = 1000;
@@ -1437,10 +1264,6 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 				audit("nudge", { source, streak: state.noProgressStreak, nudgeCount: state.nudgeCount, pickable: pickableIds(state.tickets).length });
 				deliver(NUDGE_MESSAGE_TYPE, buildNudgeText({ target: runTarget, pickable: pickableIds(state.tickets).length }));
 				break;
-			case "finalizeNudge":
-				audit("finalize-nudge", { source });
-				deliver(NUDGE_MESSAGE_TYPE, FINALIZE_NUDGE_TEXT);
-				break;
 			case "stallNotify":
 				audit("stall-notify", { children: childCount, stallLimitMs });
 				notify(`drain-watchdog: children are running but no progress for ${Math.round(stallLimitMs / 60_000)}m — inspect the herdr panes; no nudge sent.`, "warning");
@@ -1474,7 +1297,7 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 			idleSinceMs = now;
 			return;
 		}
-		if (state.phase !== "armed" && state.phase !== "finalizing") {
+		if (state.phase !== "armed") {
 			if (state.phase === "backoff") return; // only the probe ladder drives BACKOFF
 			clearTimers();
 			return;
@@ -1484,7 +1307,6 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 		tickInFlight = true;
 		try {
 			const q = queueView();
-			const closingSignal = readExecutorClosingSignal(ctx);
 			const observedAt = Date.now();
 			const obs: TickObservation = {
 				running: false,
@@ -1498,13 +1320,7 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 				// providerError event — re-reporting the same failure every tick would
 				// escalate the ladder without probes.
 				lastError: null,
-				// Closing steps come from the executor's own state files (#38; the #34
-				// state.json contract): the FINALIZING trigger of the #34 flow. A missing
-				// scan root is the plain-run case (plain DONE stays plain); anomalies
-				// are audited below, never a pause.
-				hasClosingSteps: closingSignal.hasClosingSteps,
 			};
-			if (closingSignal.anomalies.length > 0) audit("closing-signal-anomaly", { paths: closingSignal.anomalies });
 			// M2: idleGraceMs/stallLimitMs are the configured (env/module) values — the
 			// core's own threshold must match the one already gating the pre-filter
 			// below and the notify/audit text, or shortening either option silently
@@ -1747,21 +1563,19 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 
 	/**
 	 * watchdog_done effect: the model's promise that nothing is left. The ticket
-	 * tree, child count and executor closing flag are re-read here and the core
+	 * tree and child count are re-read here and the core
 	 * decides; a refused promise changes nothing and the reason goes back to the
-	 * model. Accepted -> the same DONE action as the tick path, no idle wait.
+	 * model. Accepted -> DONE at once, no idle wait.
 	 */
-	const runDone = (toolCtx: ExtensionToolContext): { text: string; ok: boolean } => {
+	const runDone = (): { text: string; ok: boolean } => {
 		const q = queueView();
-		const closing = readExecutorClosingSignal(toolCtx);
-		const obs: DoneObservation = { queueOk: q.ok, pickable: q.pickable, childCount, hasClosingSteps: closing.hasClosingSteps };
+		const obs: DoneObservation = { queueOk: q.ok, pickable: q.pickable, childCount };
 		const refusal = doneRefusal(obs);
 		if (refusal !== null) {
 			audit("done-refused", { reason: refusal, ...obs });
 			refreshWidget();
 			return { text: `watchdog_done refused: ${refusal}.`, ok: false };
 		}
-		if (closing.anomalies.length > 0) audit("closing-signal-anomaly", { paths: closing.anomalies });
 		const report = doneReport(state.tickets);
 		apply(transition(state, { type: "llmDone", obs }, Date.now()), "watchdog_done");
 		return { text: `Run complete. The watchdog is DONE; include this report in your final report:\n${report}`, ok: true };
@@ -1771,26 +1585,26 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 		name: "watchdog_done",
 		label: "Watchdog Done",
 		description:
-			"Declare the unattended drain run finished. The watchdog verifies its own ticket tree (no pickable ticket), running children and the executor's closingStepsDone flag; only when nothing is left does it complete the run (DONE) immediately, without waiting for idle time, and returns the done/limbo/blocked-by-limbo report. Otherwise it refuses and says what remains. Main session only.",
+			"Declare the unattended drain run finished. The watchdog verifies its own ticket tree (no pickable ticket), and running children; only when nothing is left does it complete the run (DONE) immediately, without waiting for idle time, and returns the done/limbo/blocked-by-limbo report. Otherwise it refuses and says what remains. Main session only.",
 		promptSnippet: "Declare the drain run finished once no ticket is pickable; the watchdog verifies and completes it",
 		promptGuidelines: [
-			"Call watchdog_done when no pickable ticket is left, no child is running, and any closing steps have run; the watchdog verifies and refuses a premature call. Limbo and blocked-by-limbo tickets do not block DONE; copy the returned report into your final report.",
+			"Call watchdog_done when no pickable ticket is left, no child is running, and you have run any closing steps (merge, PR, cleanup); the watchdog verifies and refuses a premature call. Limbo and blocked-by-limbo tickets do not block DONE; copy the returned report into your final report.",
 			SYNC_REMINDER,
 		],
 		parameters: Type.Object({}),
-		async execute(_id, _params, _signal, _update, toolCtx) {
-			// A tick may have reached DONE before the model called: not an error, hand back the report.
+		async execute() {
+			// Repeat call after DONE: not an error, hand back the report.
 			if (state.phase === "done" && !isChildSession(process.env)) {
 				return textResult(`Run already complete. The watchdog is DONE; include this report in your final report:\n${doneReport(state.tickets)}`, false, { phase: state.phase });
 			}
 			const gate = watchdogToolGate("done", isChildSession(process.env), state.phase);
 			if (!gate.ok) return textResult(gate.error, true);
 			if (closed) return textResult("watchdog_done ignored: session is shutting down", true);
-			if (state.phase !== "armed" && state.phase !== "finalizing") {
-				return textResult(`watchdog_done ignored: phase ${state.phase} cannot complete (only armed or finalizing)`, true);
+			if (state.phase !== "armed") {
+				return textResult(`watchdog_done ignored: phase ${state.phase} cannot complete (only armed)`, true);
 			}
 			try {
-				const { text, ok } = runDone(toolCtx);
+				const { text, ok } = runDone();
 				return textResult(text, !ok, { phase: state.phase });
 			} catch (e) {
 				return textResult(`watchdog_done failed: ${String(e)}`, true);
@@ -1839,7 +1653,7 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 			if (!gate.ok) return textResult(gate.error, true);
 			if (closed) return textResult("watchdog_target ignored: session is shutting down", true);
 			const issue = typeof params.issue === "string" ? params.issue.trim() : "";
-			if (issue === "" || targetDirName(issue) === null) return textResult(`watchdog_target: ${JSON.stringify(params.issue)} is not a usable target id`, true);
+			if (issue === "") return textResult(`watchdog_target: ${JSON.stringify(params.issue)} is not a usable target id`, true);
 			const parsed = parseTicketInputs(params.tickets);
 			if (!parsed.ok) return textResult(`watchdog_target: ${parsed.error}`, true);
 			const tickets = upsertTickets([], parsed.tickets).tickets;
@@ -1882,7 +1696,7 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 		state = restored;
 		// #38 C: keep the run target across a restart (targeted state read).
 		runTarget = restoreRunTarget(ctx.sessionManager.getEntries());
-		if (state.phase === "armed" || state.phase === "finalizing") {
+		if (state.phase === "armed") {
 			audit("restored", { phase: state.phase });
 			startLoop();
 			refreshWidget();

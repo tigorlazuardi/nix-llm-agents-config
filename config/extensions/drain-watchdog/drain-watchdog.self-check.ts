@@ -16,14 +16,13 @@
  * symlinks them into a node_modules next to the copy).
  */
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { basename, join } from "node:path";
-import type { DrainEvent, DrainState, ExecutorStateFile, ProbeJitter, Ticket, TickObservation } from "./index.ts";
+import { join } from "node:path";
+import type { DrainEvent, DrainState, ProbeJitter, Ticket, TickObservation } from "./index.ts";
 import {
 	BREAKER_K,
 	DEFAULT_TICK_CONFIG,
-	FINALIZE_NUDGE_TEXT,
 	HARD_CAP,
 	IDLE_GRACE_MS,
 	INITIAL_STATE,
@@ -38,7 +37,6 @@ import {
 	handoffTicket,
 	parseTicketInputs,
 	pickableIds,
-	targetDirName,
 	ticketCounts,
 	upsertTickets,
 	classifyProviderError,
@@ -51,10 +49,6 @@ import {
 	nextLadderDelayMs,
 	parseResetTimeMs,
 	probeDelayForError,
-	executorRepoSlug,
-	executorStateFilePath,
-	executorStateRoot,
-	readClosingSignal,
 	transition,
 
 	buildNudgeText,
@@ -95,7 +89,6 @@ const baseObs = (): TickObservation => ({
 	pickable: 2,
 	progressAgeMs: 0,
 	lastError: null,
-	hasClosingSteps: false,
 });
 
 // --- Transition: arming --------------------------------------------------------
@@ -142,7 +135,7 @@ assert.equal(transition(armOK.state, { type: "resume" }, 4000).state.phase, "arm
 
 // --- Transition: Esc/abort always wins --------------------------------------------
 
-for (const phase of ["armed", "backoff", "finalizing"] as const) {
+for (const phase of ["armed", "backoff"] as const) {
 	const s = transition({ ...armed(), phase }, { type: "abort" }, 5000);
 	assert.equal(s.state.phase, "paused", `abort must win from ${phase}`);
 	assert.equal(s.action.type, "pause");
@@ -298,16 +291,15 @@ assert.equal(stopped.state.pausedReason, "watchdog_stop");
 const stoppedWithReason = transition(armOK.state, { type: "llmStop", reason: "gh auth expired on the runner" }, 40_001);
 assert.equal(stoppedWithReason.state.pausedReason, "gh auth expired on the runner");
 assert.equal(transition(armOK.state, { type: "llmStop", reason: "   " }, 40_002).state.pausedReason, "watchdog_stop");
-// From BACKOFF and FINALIZING too (llmStop owners), with the reason kept.
+// From BACKOFF too (llmStop owners), with the reason kept.
 assert.equal(transition({ ...armed(), phase: "backoff", backoffKind: "transient" }, { type: "llmStop", reason: "disk full" }, 40_003).state.pausedReason, "disk full");
-assert.equal(transition({ ...armed(), phase: "finalizing" }, { type: "llmStop", reason: "repo dirty beyond repair" }, 40_004).state.pausedReason, "repo dirty beyond repair");
 // llmStop from PAUSED/OFF/DONE stays a no-op (EVENT_PHASES matrix covers it; spot-check).
 assert.equal(transition(pausedStateFor(), { type: "llmStop", reason: "x" }, 40_005).state.phase, "paused");
 
-const doneClear = { queueOk: true, pickable: 0, childCount: 0, hasClosingSteps: false };
-const finisher = transition({ ...armed(), phase: "finalizing" }, { type: "llmDone", obs: doneClear }, 41_000);
+const doneClear = { queueOk: true, pickable: 0, childCount: 0 };
+const finisher = transition(armed(), { type: "llmDone", obs: doneClear }, 41_000);
 assert.equal(finisher.state.phase, "done");
-assert.deepEqual(finisher.action, { type: "done" }, "the promise path emits the same DONE action as the tick path");
+assert.deepEqual(finisher.action, { type: "done" }, "the promise path emits the DONE action");
 // watchdog_done (llmDone) is a verified promise: ARMED accepts it too, but only when
 // the live observation shows nothing left. The model's claim alone never completes.
 {
@@ -317,7 +309,6 @@ assert.deepEqual(finisher.action, { type: "done" }, "the promise path emits the 
 	for (const bad of [
 		{ ...doneClear, pickable: 1 },
 		{ ...doneClear, childCount: 1 },
-		{ ...doneClear, hasClosingSteps: true },
 		{ ...doneClear, queueOk: false },
 	]) {
 		const early = transition(armOK.state, { type: "llmDone", obs: bad }, 42_000);
@@ -331,17 +322,6 @@ assert.deepEqual(finisher.action, { type: "done" }, "the promise path emits the 
 	assert.deepEqual(transition(bo, { type: "llmDone", obs: doneClear }, 42_002).state, bo);
 	assert.equal(finisher.state.pausedReason, null);
 }
-// FINALIZING accepts the other model/harness events too (positive owners).
-{
-	const fz: DrainState = { ...armed(), phase: "finalizing", noProgressStreak: 2 };
-	assert.equal(transition(fz, { type: "llmStop" }, 43_000).state.phase, "paused");
-	assert.equal(transition(fz, { type: "providerError", kind: "transient" }, 43_000).state.phase, "backoff");
-	const prog = transition(fz, { type: "progress" }, 43_000);
-	assert.equal(prog.state.phase, "finalizing");
-	assert.equal(prog.state.noProgressStreak, 0);
-	assert.equal(transition(fz, { type: "off" }, 43_000).state.phase, "off");
-}
-
 // --- Transition: progress sources reset the streak ---------------------------------------
 
 // Handoff, child steer and queue change all report as the one `progress` event.
@@ -404,53 +384,33 @@ const queueFail = transition(armed(), { type: "tick", obs: { ...baseObs(), queue
 assert.equal(queueFail.state.phase, "paused");
 assert.equal(queueFail.action.type, "pause");
 
-// 5. Frontier 0 + children 0 → DONE (do not nudge).
-const done = transition(armed(), { type: "tick", obs: { ...baseObs(), pickable: 0 } }, T);
-assert.equal(done.state.phase, "done");
-assert.deepEqual(done.action, { type: "done" });
-
-// 6. FINALIZING: pickable 0 + closing steps → one finalize nudge.
-const fin = transition(armed(), { type: "tick", obs: { ...baseObs(), pickable: 0, hasClosingSteps: true } }, T);
-assert.equal(fin.state.phase, "finalizing");
-assert.deepEqual(fin.action, { type: "finalizeNudge" });
-assert.equal(fin.state.nudgeCount, 1);
-assert.equal(fin.state.noProgressStreak, 1);
-assert.equal(fin.state.nextAllowedAt, T + 3 * MIN);
-
-// 6b. FINALIZING sends exactly ONE closing nudge (design section 10, #34). Idle again with
-// closing steps still open pauses visibly: no second nudge, no infinite silent wait.
+// 5. Frontier 0 + children 0 → the plain nudge (the tick never completes the run; the LLM
+// calls watchdog_done). Breaker and hard cap still bound it.
 {
-	const finObs = { ...baseObs(), pickable: 0, hasClosingSteps: true };
-	const first = transition(armed(), { type: "tick", obs: finObs }, T);
-	assert.deepEqual(first.action, { type: "finalizeNudge" });
-	assert.equal(first.state.phase, "finalizing");
-	// Inside the cooldown it just waits.
-	const during = transition(first.state, { type: "tick", obs: finObs }, T + MIN);
-	assert.deepEqual(during.action, { type: "wait" });
-	assert.equal(during.state.nudgeCount, 1);
-	// After the cooldown: pause, never a second finalizeNudge or nudge.
-	const after = transition(first.state, { type: "tick", obs: finObs }, first.state.nextAllowedAt);
-	assert.equal(after.state.phase, "paused");
-	assert.equal(after.action.type, "pause");
-	assert.equal(after.state.nudgeCount, 1);
-	// Across many idle ticks there is exactly one finalize nudge in total.
+	const emptyObs = { ...baseObs(), pickable: 0 };
+	const n = transition(armed(), { type: "tick", obs: emptyObs }, T);
+	assert.equal(n.state.phase, "armed", "an empty frontier never completes via the tick");
+	assert.deepEqual(n.action, { type: "nudge" });
+	assert.equal(n.state.nudgeCount, 1);
+	assert.equal(n.state.noProgressStreak, 1);
+	assert.equal(n.state.nextAllowedAt, T + 3 * MIN);
+	assert.equal(transition(n.state, { type: "tick", obs: emptyObs }, T + MIN).action.type, "wait", "cooldown applies");
+	assert.equal(transition(armed({ nudgeCount: HARD_CAP }), { type: "tick", obs: emptyObs }, T).state.phase, "paused", "hard cap still gates it");
+	assert.equal(transition(armed({ noProgressStreak: BREAKER_K }), { type: "tick", obs: emptyObs }, T).state.phase, "paused", "breaker still gates it");
 	let nudges = 0;
 	let ph: DrainState = armed();
 	let t8 = T;
-	for (let i = 0; i < 8; i++) {
-		const r = transition(ph, { type: "tick", obs: finObs }, t8);
-		if (r.action.type === "finalizeNudge" || r.action.type === "nudge") nudges++;
+	for (let i = 0; i < 40; i++) {
+		const r = transition(ph, { type: "tick", obs: emptyObs }, t8);
+		if (r.action.type === "nudge") nudges++;
+		assert.notEqual(r.action.type, "done", "the tick never emits done");
 		ph = r.state;
 		t8 = Math.max(t8, ph.nextAllowedAt);
 	}
-	assert.equal(nudges, 1);
-	assert.equal(ph.phase, "paused");
-	// Closing steps done (pickable 0, none left) completes the run from FINALIZING.
-	const completes = transition(first.state, { type: "tick", obs: { ...baseObs(), pickable: 0 } }, first.state.nextAllowedAt);
-	assert.equal(completes.state.phase, "done");
-	// The hard cap still gates the first finalize nudge.
-	const capFin = transition(armed({ nudgeCount: HARD_CAP }), { type: "tick", obs: finObs }, T);
-	assert.equal(capFin.state.phase, "paused");
+	assert.equal(ph.phase, "paused", "an unanswered empty-frontier nudge ends in the breaker pause");
+	assert(nudges >= 1 && nudges <= BREAKER_K);
+	assert(buildNudgeText({ target: "#38", pickable: 0 }).includes("finish any closing steps (merge, PR, cleanup), then call watchdog_done; do not open new work"));
+	assert(buildNudgeText({ target: "#38", pickable: 2 }).includes("watchdog_done"));
 }
 
 // 7. Children running: progress within stall limit → wait; stalled → notify only, never a nudge.
@@ -534,6 +494,7 @@ assert.deepEqual(cooldowns, [3, 6, 12, 24, 30, 30].map((m) => m * MIN));
 assert.equal(transition(armed({ nudgeCount: HARD_CAP }), { type: "tick", obs: baseObs() }, T).state.phase, "paused");
 
 // 12. Done is terminal: no resurrect from stray events.
+const done = transition(armed(), { type: "llmDone", obs: { queueOk: true, pickable: 0, childCount: 0 } }, T);
 const doneState = done.state;
 assert.equal(transition(doneState, { type: "resume" }, T + 1).state.phase, "done");
 assert.equal(transition(doneState, { type: "abort" }, T + 1).state.phase, "done");
@@ -546,7 +507,7 @@ assert.equal(JSON.stringify(snapshot), before);
 
 // 14. Full event × phase matrix: a phase that does not own an event stays put.
 {
-	const phases = ["off", "armed", "backoff", "paused", "done", "finalizing"] as const;
+	const phases = ["off", "armed", "backoff", "paused", "done"] as const;
 	const events: DrainEvent[] = [
 		{ type: "arm", queueOk: true, pickable: 3 },
 		{ type: "off" },
@@ -560,21 +521,21 @@ assert.equal(JSON.stringify(snapshot), before);
 		{ type: "providerError", kind: "unknown" },
 		{ type: "probeOk" },
 		{ type: "llmStop" },
-		{ type: "llmDone", obs: { queueOk: true, pickable: 0, childCount: 0, hasClosingSteps: false } },
+		{ type: "llmDone", obs: { queueOk: true, pickable: 0, childCount: 0 } },
 		{ type: "progress" },
 	];
 	// Phases allowed to act per event; everything else must be a pure no-op.
 	const owners: Record<string, readonly string[]> = {
 		arm: ["off"],
-		off: ["armed", "backoff", "paused", "finalizing"],
+		off: ["armed", "backoff", "paused"],
 		resume: ["paused"],
-		abort: ["armed", "backoff", "finalizing"],
-		tick: ["armed", "finalizing"],
-		providerError: ["armed", "backoff", "finalizing"],
+		abort: ["armed", "backoff"],
+		tick: ["armed"],
+		providerError: ["armed", "backoff"],
 		probeOk: ["backoff"],
-		llmStop: ["armed", "backoff", "finalizing"],
-		llmDone: ["armed", "finalizing"],
-		progress: ["armed", "backoff", "finalizing"],
+		llmStop: ["armed", "backoff"],
+		llmDone: ["armed"],
+		progress: ["armed", "backoff"],
 	};
 	let checked = 0;
 	for (const phase of phases) {
@@ -659,13 +620,6 @@ const tk = (id: string, state: Ticket["state"] = "open", blockedBy: string[] = [
 	assert.deepEqual(restoreDrainState([{ type: "custom", customType: "drain-watchdog-state", data: { phase: "armed", tickets: "x" } }])!.tickets, []);
 	assert.deepEqual(restoreDrainState([{ type: "custom", customType: "drain-watchdog-state", data: { phase: "armed", tickets: [tk("A")] } }])!.tickets, [tk("A")], "restoreDrainState keeps a valid tree");
 	assert.deepEqual(restoreDrainState([{ type: "custom", customType: "drain-watchdog-state", data: { phase: "armed", tickets: [{ id: 1 }] } }])!.tickets, [], "a malformed tree is dropped, not half-applied");
-
-	// Target dir names: opaque ids never escape /tmp/executor/<slug>.
-	assert.equal(targetDirName("#38"), "38");
-	assert.equal(targetDirName("KRIPT-222"), "KRIPT-222");
-	assert.equal(targetDirName("../../etc"), "etc");
-	assert.equal(targetDirName("///"), null);
-	assert.equal(executorStateFilePath("/repos/demo", "#38"), "/tmp/executor/demo/38/state.json");
 }
 
 // --- classifyProviderError -------------------------------------------------------------------
@@ -853,7 +807,7 @@ assert.ok(!isProbeText(buildNudgeText({ target: "#32", pickable: 2 })), "normal 
 
 // Gate: a child can never invoke any ticket/stop/done tool, from any phase; a live run passes.
 for (const kind of ["complete", "handoff", "sync", "stop", "done"] as const) {
-	for (const phase of ["off", "armed", "backoff", "paused", "done", "finalizing"] as const) {
+	for (const phase of ["off", "armed", "backoff", "paused", "done"] as const) {
 		assert.deepEqual(watchdogToolGate(kind, true, phase), { ok: false, error: `watchdog_${kind} is main-session only; child sessions cannot invoke it` }, `child blocked: ${kind} at ${phase}`);
 	}
 	// No active run (off/done): an error result, never a silent success.
@@ -863,7 +817,6 @@ for (const kind of ["complete", "handoff", "sync", "stop", "done"] as const) {
 }
 assert.deepEqual(watchdogToolGate("stop", false, "backoff"), { ok: true });
 assert.deepEqual(watchdogToolGate("stop", false, "paused"), { ok: true });
-assert.deepEqual(watchdogToolGate("stop", false, "finalizing"), { ok: true });
 // The off/done error names the situation and the way out.
 assert(JSON.stringify(watchdogToolGate("stop", false, "done")).includes("no active watchdog run"));
 
@@ -917,7 +870,6 @@ assert(!plain(watchdogWidgetLines(baseView)).includes("nudge dalam"), "no countd
 const pausedLines = watchdogWidgetLines({ ...baseView, phase: "paused", pausedReason: "no progress for 45m (stall)" })!;
 assert(pausedLines[0].includes("\x1b[31m") && plain(pausedLines).includes("PAUSED") && plain(pausedLines).includes("no progress for 45m (stall)") && plain(pausedLines).includes("/watchdog resume"), "paused is red with reason and next action");
 assert(plain(watchdogWidgetLines({ ...baseView, phase: "backoff", backoffKind: "quota" })).includes("BACKOFF (quota)"));
-assert(plain(watchdogWidgetLines({ ...baseView, phase: "finalizing" })).includes("FINALIZING"));
 assert(plain(watchdogWidgetLines({ ...baseView, phase: "done" })).includes("DONE"));
 assert.equal(watchdogWidgetLines({ ...baseView, phase: "off", prep: null, target: null }), null, "OFF without PREP shows nothing");
 assert(plain(watchdogWidgetLines({ ...baseView, phase: "off", prep: "discover", target: null })).includes("memilih target"));
@@ -1451,7 +1403,7 @@ await withNoAmbientSubagent(() =>
 		assert.equal(timers.filter((t) => !t.cleared).length, 0, "DONE clears every timer");
 		assert.equal(liveWidgetTimers(), 0, "DONE also stops the widget countdown");
 		const again = await h.tools.watchdog_done!.execute("d3", {}, undefined, undefined, h.ctx);
-		assert(!again.isError, "watchdog_done after DONE (a tick got there first) is not an error");
+		assert(!again.isError, "watchdog_done after DONE (repeat call after DONE) is not an error");
 		assert(String(again.content[0].text).includes("already complete") && String(again.content[0].text).includes("DONE: 1 done, 1 limbo"), "it returns the report and says the run is complete");
 		assert.equal(persistedLatest(h.entries).data.phase, "done", "the repeat call changes nothing");
 	}),
@@ -1704,204 +1656,15 @@ await withNoAmbientSubagent(() =>
 	}),
 );
 
-// --- #38 closing-step signal: pure seam -----------------------------------------------------
-
-const stateFile = (content: string | null, path = "/tmp/executor/x/38/state.json"): ExecutorStateFile => ({ path, content });
-
-// closingStepsDone: false parses -> closing steps remain.
-assert.deepEqual(readClosingSignal([stateFile(JSON.stringify({ closingStepsDone: false }))]), { hasClosingSteps: true, anomalies: [] });
-// closingStepsDone: true with a healthy file -> no signal, no anomaly (the
-// executor reports closing finished). A parseable file WITHOUT the boolean violates
-// the #34 contract (the field is always present): no signal but an anomaly — only
-// an explicit false may claim closing work.
-assert.deepEqual(readClosingSignal([stateFile(JSON.stringify({ closingStepsDone: true }))]), { hasClosingSteps: false, anomalies: [] });
-assert.deepEqual(readClosingSignal([stateFile(JSON.stringify({}))]), { hasClosingSteps: false, anomalies: ["/tmp/executor/x/38/state.json: parsed but closingStepsDone is not a boolean"] });
-// No files at all (executor never ran) -> no signal, no anomaly: plain DONE stays plain (AC3).
-assert.deepEqual(readClosingSignal([]), { hasClosingSteps: false, anomalies: [] });
-// Malformed JSON / non-object / non-boolean / unreadable: no signal, but each is an anomaly.
-{
-	const bad = readClosingSignal([stateFile("{not json"), stateFile(JSON.stringify([1, 2])), stateFile(JSON.stringify({ closingStepsDone: "no" })), stateFile(null)]);
-	assert.equal(bad.hasClosingSteps, false, "a malformed file never claims closing work");
-	assert.equal(bad.anomalies.length, 4, "every malformed shape is an anomaly");
-	assert(bad.anomalies.every((a) => a.includes("state.json")), "anomalies name the path");
-}
-// Any target still false wins over one that finished (multi-target dirs).
-{
-	const mixed = readClosingSignal([stateFile(JSON.stringify({ closingStepsDone: true }), "/tmp/executor/x/38/state.json"), stateFile(JSON.stringify({ closingStepsDone: false }), "/tmp/executor/x/40/state.json")]);
-	assert.equal(mixed.hasClosingSteps, true, "one open target keeps the closing trigger");
-	assert.equal(mixed.anomalies.length, 0);
-}
-
-// Repo slug + state path derivation (the /tmp/executor/<repo-slug> contract).
-assert.equal(executorRepoSlug("/home/homeserver/projects/nix-llm-agents-config"), "nix-llm-agents-config");
-assert.equal(executorRepoSlug("/repos/My_App"), "my-app");
-assert.equal(executorRepoSlug("/"), "");
-assert.equal(executorStateRoot("/repos/demo"), "/tmp/executor/demo");
-assert.equal(executorStateFilePath("/repos/demo", "#38"), "/tmp/executor/demo/38/state.json");
+// --- #38 the LLM decides completion: no executor state, no FINALIZING -------------------------
 
 const drainedTickets = [tk("T1", "done"), tk("T2", "done")];
 
-// --- #38 closing-step signal: live loop through the factory ----------------------------------
-
-/** Writes /tmp/executor/<slug>/<target>/state.json — the real path the effect
- *  layer scans. The fixture plays the executor, so it applies the same
- *  documented <repo-slug> rule the prompt states and executorRepoSlug implements
- *  (lowercased basename, non-alphanumerics collapsed to one dash).
- *  Returns a cleanup that removes the repo's whole /tmp/executor/<slug> root. */
-function makeExecutorFixture(cwd: string, targets: { dir: string; state: object | string | null }[]): () => void {
-	const slug = executorRepoSlug(cwd);
-	const root = join("/tmp", "executor", slug);
-	rmSync(root, { recursive: true, force: true });
-	for (const t of targets) {
-		const dir = join(root, t.dir);
-		mkdirSync(dir, { recursive: true });
-		if (t.state !== null) writeFileSync(join(dir, "state.json"), typeof t.state === "string" ? t.state : JSON.stringify(t.state));
-	}
-	return () => rmSync(root, { recursive: true, force: true });
-}
-
-// AC1/AC2/AC3 through the live loop: one ARMED run, empty frontier, idle past
-// the grace gate, one tick each. The executor fixture is at the real
-// /tmp/executor/<slug>/<target>/state.json the effect layer scans.
-await withNoAmbientSubagent(() =>
-	withFakeTimers(async (timers, flush, clock) => {
-		const cwd = makeFixtureCwd();
-		const cleanup = makeExecutorFixture(cwd, [{ dir: "38", state: { closingStepsDone: false } }]);
-		try {
-			const h = makeHarness(cwd);
-			h.entries.push(armedEntry({ tickets: drainedTickets }));
-			h.handlers.session_start({}, h.ctx);
-			clock.advance(IDLE_GRACE_MS + 1000);
-			const tickTimer = timers.find((t) => t.kind === "interval" && !t.cleared)!;
-			tickTimer.fire();
-			await flush();
-			await flush();
-			assert.equal(h.sent.length, 1, "an empty frontier with closing steps left sends exactly one FINALIZING nudge");
-			assert.equal(h.sent[0]!.customType, "drain-watchdog-nudge");
-			assert.equal(h.sent[0]!.content, FINALIZE_NUDGE_TEXT, "the nudge is the FINALIZING closing text, not a plain nudge");
-			assert(h.audits.some((a) => a.type === "finalize-nudge"), "the finalize nudge is audited (AC1)");
-			assert.equal(persistedLatest(h.entries).data.phase, "finalizing");
-
-			// AC2 (completion): the executor finishes (closingStepsDone: true); the next
-			// idle tick reaches DONE from FINALIZING, with the done audit + notify.
-			writeFileSync(executorStateFilePath(cwd, "#38"), JSON.stringify({ closingStepsDone: true }));
-			clock.advance(4 * MIN + 1000);
-			tickTimer.fire();
-			await flush();
-			await flush();
-			assert.equal(persistedLatest(h.entries).data.phase, "done", "closingStepsDone true completes the run as DONE (AC2)");
-			assert(h.audits.some((a) => a.type === "done"), "the DONE is audited (the final report entry)");
-			assert(h.notifications.some((n) => n.message.includes("DONE")), "DONE notifies");
-
-			// AC1 second half + AC2 second half: idle AGAIN in FINALIZING without
-			// completion pauses visibly, exactly once, with no second nudge.
-			const cwd2 = makeFixtureCwd();
-			const cleanup2 = makeExecutorFixture(cwd2, [{ dir: "38", state: { closingStepsDone: false } }]);
-			try {
-				const h2 = makeHarness(cwd2);
-				h2.entries.push(armedEntry({ tickets: drainedTickets }));
-				h2.handlers.session_start({}, h2.ctx);
-				clock.advance(IDLE_GRACE_MS + 1000);
-				const tick2 = timers.filter((t) => t.kind === "interval" && !t.cleared).at(-1)!;
-				tick2.fire();
-				await flush();
-				await flush();
-				assert.equal(persistedLatest(h2.entries).data.phase, "finalizing");
-				assert.equal(h2.sent.filter((s) => s.content === FINALIZE_NUDGE_TEXT).length, 1, "exactly one FINALIZING nudge");
-				// The file never flips to true; after the cooldown the next idle tick pauses.
-				clock.advance(4 * MIN + 1000);
-				tick2.fire();
-				await flush();
-				await flush();
-				assert.equal(persistedLatest(h2.entries).data.phase, "paused", "idle again in FINALIZING without completion pauses (AC2)");
-				const pauseAudit = h2.audits.filter((a) => a.type === "paused").at(-1)!;
-				assert(String(pauseAudit.data.reason).includes("finalization"), "the pause names finalization not confirmed");
-				assert(h2.notifications.some((n) => n.message.includes("PAUSED")), "the pause notifies");
-				assert.equal(h2.sent.filter((s) => s.content === FINALIZE_NUDGE_TEXT).length, 1, "never a second FINALIZING nudge");
-			} finally {
-				cleanup2();
-			}
-
-			// AC3: no executor state at all — the same tick goes straight to DONE.
-			const cwd3 = makeFixtureCwd();
-			try {
-				const h3 = makeHarness(cwd3);
-				h3.entries.push(armedEntry({ tickets: drainedTickets }));
-				h3.handlers.session_start({}, h3.ctx);
-				clock.advance(IDLE_GRACE_MS + 1000);
-				const tick3 = timers.filter((t) => t.kind === "interval" && !t.cleared).at(-1)!;
-				tick3.fire();
-				await flush();
-				await flush();
-				assert.equal(persistedLatest(h3.entries).data.phase, "done", "an empty frontier with no closing steps goes straight to DONE (AC3)");
-				assert(!h3.audits.some((a) => a.type === "finalize-nudge"), "no FINALIZING nudge without a closing signal");
-			} finally {
-				rmSync(cwd3, { recursive: true, force: true });
-			}
-		} finally {
-			cleanup();
-		}
-	}),
-);
-
-// Malformed executor state: the tick treats it as "no closing steps" (DONE, never
-// a pause) and writes the closing-signal-anomaly audit naming the path.
-await withNoAmbientSubagent(() =>
-	withFakeTimers(async (timers, flush, clock) => {
-		const cwd = makeFixtureCwd();
-		const cleanup = makeExecutorFixture(cwd, [{ dir: "38", state: "{not json" }]);
-		try {
-			const h = makeHarness(cwd);
-			h.entries.push(armedEntry({ tickets: drainedTickets }));
-			h.handlers.session_start({}, h.ctx);
-			clock.advance(IDLE_GRACE_MS + 1000);
-			const tickTimer = timers.find((t) => t.kind === "interval" && !t.cleared)!;
-			tickTimer.fire();
-			await flush();
-			await flush();
-			assert.equal(persistedLatest(h.entries).data.phase, "done", "a malformed state file never blocks the run (ponytail fail-safe)");
-			const anomaly = h.audits.find((a) => a.type === "closing-signal-anomaly");
-			assert(anomaly !== undefined, "the anomaly is audited");
-			assert(String(anomaly!.data.paths).includes("state.json"), "the anomaly names the file");
-		} finally {
-			cleanup();
-		}
-	}),
-);
-
-// A restored run with no persisted target still drains from its ticket tree (the target
-// only selects the executor state file; it never gates the tree).
-await withNoAmbientSubagent(() =>
-	withFakeTimers(async (timers, flush, clock) => {
-		const h = makeHarness(makeFixtureCwd());
-		h.entries.push(armedEntry({ runTarget: null }));
-		h.handlers.session_start({}, h.ctx);
-		clock.advance(IDLE_GRACE_MS + 1000);
-		timers.find((t) => t.kind === "interval" && !t.cleared)!.fire();
-		await flush();
-		await flush();
-		assert.equal(persistedLatest(h.entries).data.phase, "armed", "pickable tickets keep the run armed");
-		assert.equal(h.sent.length, 1, "and the tick nudges from the tree");
-	}),
-);
-
-// --- #38 A/C: production arm path + targeted reads ---------------------------------------
-
-// A (pure): a file the effect layer reported missing (ENOENT) is silence — no
-// signal and no anomaly — while a real read failure and malformed JSON stay
-// anomalies. This is the seam that keeps a plain run from auditing a false
-// "unreadable" state.json on every tick.
-assert.deepEqual(readClosingSignal([{ path: "/tmp/executor/x/38/state.json", content: null, missing: true }]), { hasClosingSteps: false, anomalies: [] });
-assert.deepEqual(readClosingSignal([{ path: "/tmp/executor/x/38/state.json", content: null }]), { hasClosingSteps: false, anomalies: ["/tmp/executor/x/38/state.json: unreadable"] });
-assert.deepEqual(readClosingSignal([{ path: "/tmp/executor/x/38/state.json", content: "{not json", missing: false }]), { hasClosingSteps: false, anomalies: ["/tmp/executor/x/38/state.json: state.json is not valid JSON"] });
-// A missing sibling never masks a real closing target (scan path).
-assert.equal(readClosingSignal([{ path: "/tmp/executor/x/40/state.json", content: null, missing: true }, { path: "/tmp/executor/x/38/state.json", content: JSON.stringify({ closingStepsDone: false }) }]).hasClosingSteps, true);
-
-// C (pure): the restored run target rides on the persisted state entry.
+// restoreRunTarget: the run target is an opaque non-empty string riding the state entry.
 assert.equal(restoreRunTarget([armedEntry({ runTarget: "#38" })]), "#38", "a restored run keeps its target");
 assert.equal(restoreRunTarget([armedEntry({ runTarget: "#38" }), armedEntry({ runTarget: "#40" })]), "#40", "latest entry wins");
-assert.equal(restoreRunTarget([armedEntry({ runTarget: 38 })]), null, "a non-string target degrades to the scan path");
-assert.equal(restoreRunTarget([armedEntry({ runTarget: "///" })]), null, "an unusable id is not a target");
+assert.equal(restoreRunTarget([armedEntry({ runTarget: 38 })]), null, "a non-string target degrades to null");
+assert.equal(restoreRunTarget([armedEntry({ runTarget: "  " })]), null, "an empty id is not a target");
 assert.equal(restoreRunTarget([]), null);
 assert.equal(restoreRunTarget([{ type: "message", role: "user" }]), null);
 
@@ -1911,84 +1674,16 @@ async function prepAgain(h: Harness, ref: string) {
 	await h.handlers["command:watchdog"]("", h.ctx);
 	await h.tools.watchdog_target!.execute("p1", { issue: ref, tickets: [{ id: "T1" }, { id: "T2", blockedBy: ["T1"] }] }, undefined, undefined, h.ctx);
 	await h.handlers.agent_settled({ aborted: false, messages: [] }, h.ctx);
-	// Drain the tree so the frontier is empty (plain DONE / FINALIZING paths).
 	await h.tools.watchdog_complete!.execute("p2", { id: "T1" }, undefined, undefined, h.ctx);
 	await h.tools.watchdog_complete!.execute("p3", { id: "T2" }, undefined, undefined, h.ctx);
 }
 
-/** Arms through the real production path: /watchdog #38 -> PREP (queue proof) ->
- *  confirm. Returns the harness with an ARMED run, runTarget 38. */
-async function armThroughPrep(cwd: string, entries: unknown[] = []) {
-	const h = makeHarness(cwd);
-	for (const e of entries) h.entries.push(e);
-	h.handlers.session_start({}, h.ctx);
-	await prepAgain(h, "#38");
-	return h;
-}
-
-const liveTickTimers = (timers: { kind: string; cleared: boolean }[]) => timers.filter((t) => t.kind === "interval" && !t.cleared).length;
-
-const executorRootOf = (cwd: string) => join("/tmp", "executor", executorRepoSlug(cwd));
-
-// A (live, AC3): every real /watchdog <ref> run arms with a target set. With no
-// executor state at all the targeted read must be silent — DONE on the empty
-// frontier, no closing-signal-anomaly audit on any tick. This is the production
-// path the restore-only rows above never exercised.
+// Live: a drained ARMED run, idle past the grace gate. The tick NEVER completes it: it
+// sends the closing nudge (breaker/hard-cap still bound it); the run stays ARMED until the
+// model calls watchdog_done. No executor state is read (the fixture dir has none).
 await withNoAmbientSubagent(() =>
 	withFakeTimers(async (timers, flush, clock) => {
 		const cwd = makeFixtureCwd();
-		rmSync(executorRootOf(cwd), { recursive: true, force: true });
-		try {
-			const h = await armThroughPrep(cwd);
-			assert(h.audits.some((a) => a.type === "prep-proof"), "PREP ran through the real command path");
-			assert(h.audits.some((a) => a.type === "armed"), "confirm armed the run (production path, runTarget set)");
-			assert.equal(restoreRunTarget(h.entries), "#38", "the armed run persists its target with the state entry (L1)");
-			clock.advance(IDLE_GRACE_MS + 1000);
-			const tickTimer = timers.find((t) => t.kind === "interval" && !t.cleared)!;
-			tickTimer.fire();
-			await flush();
-			await flush();
-			assert.equal(persistedLatest(h.entries).data.phase, "done", "a plain run still reaches DONE (AC3)");
-			assert.equal(h.audits.filter((a) => a.type === "closing-signal-anomaly").length, 0, "a missing state.json is not an anomaly (AC3)");
-			assert.equal(h.sent.filter((s) => s.content === FINALIZE_NUDGE_TEXT).length, 0, "no FINALIZING nudge without a closing signal");
-		} finally {
-			rmSync(executorRootOf(cwd), { recursive: true, force: true });
-			rmSync(cwd, { recursive: true, force: true });
-		}
-	}),
-);
-
-// A (live, targeted read): a stale SIBLING target's closingStepsDone:false must
-// not drive the armed run — the run target's own absent state.json is the only
-// input. Disabling the direct-read branch (scanning instead) turns this into a
-// FINALIZING nudge and fails the row.
-await withNoAmbientSubagent(() =>
-	withFakeTimers(async (timers, flush, clock) => {
-		const cwd = makeFixtureCwd();
-		const cleanup = makeExecutorFixture(cwd, [{ dir: "40", state: { closingStepsDone: false } }]);
-		try {
-			const h = await armThroughPrep(cwd);
-			clock.advance(IDLE_GRACE_MS + 1000);
-			const tickTimer = timers.find((t) => t.kind === "interval" && !t.cleared)!;
-			tickTimer.fire();
-			await flush();
-			await flush();
-			assert.equal(persistedLatest(h.entries).data.phase, "done", "the run target's own missing state.json means no closing steps");
-			assert.equal(h.sent.filter((s) => s.content === FINALIZE_NUDGE_TEXT).length, 0, "a stale sibling target never nudges this run");
-			assert.equal(h.audits.filter((a) => a.type === "closing-signal-anomaly").length, 0);
-		} finally {
-			cleanup();
-			rmSync(cwd, { recursive: true, force: true });
-		}
-	}),
-);
-
-// C (live): a restored ARMED run keeps its persisted target, so it reads #38
-// and ignores the stale sibling #40 — no spurious FINALIZING nudge after restart.
-await withNoAmbientSubagent(() =>
-	withFakeTimers(async (timers, flush, clock) => {
-		const cwd = makeFixtureCwd();
-		const cleanup = makeExecutorFixture(cwd, [{ dir: "40", state: { closingStepsDone: false } }]);
 		try {
 			const h = makeHarness(cwd);
 			h.entries.push(armedEntry({ runTarget: "#38", tickets: drainedTickets }));
@@ -1999,123 +1694,48 @@ await withNoAmbientSubagent(() =>
 			tickTimer.fire();
 			await flush();
 			await flush();
-			assert.equal(persistedLatest(h.entries).data.phase, "done", "a restored run reads its own target, not every target dir");
-			assert.equal(h.sent.filter((s) => s.content === FINALIZE_NUDGE_TEXT).length, 0);
+			assert.equal(persistedLatest(h.entries).data.phase, "armed", "an empty-frontier idle tick does not complete the run");
+			assert.equal(h.sent.length, 1, "it sends exactly one nudge");
+			assert.equal(h.sent[0]!.customType, "drain-watchdog-nudge");
+			assert.equal(h.sent[0]!.content, buildNudgeText({ target: "#38", pickable: 0 }), "the nudge is the closing text");
+			assert(String(h.sent[0]!.content).includes("finish any closing steps (merge, PR, cleanup), then call watchdog_done; do not open new work"));
+			assert(!h.audits.some((a) => a.type === "done" || a.type === "finalize-nudge" || a.type === "closing-signal-anomaly"));
+			// The cooldown/breaker still bound it: next tick inside the cooldown waits.
+			tickTimer.fire();
+			await flush();
+			assert.equal(h.sent.length, 1, "inside the cooldown no second nudge");
+			// The model decides: watchdog_done completes at once.
+			const res = await h.tools.watchdog_done!.execute("d1", {}, undefined, undefined, h.ctx);
+			assert(!res.isError, "watchdog_done is accepted from ARMED with nothing pickable and no child");
+			assert.equal(persistedLatest(h.entries).data.phase, "done");
+			assert(h.audits.some((a) => a.type === "done"), "the DONE is audited");
+			assert(h.notifications.some((n) => n.message.includes("DONE")), "DONE notifies");
 		} finally {
-			cleanup();
 			rmSync(cwd, { recursive: true, force: true });
 		}
 	}),
 );
 
-// G (live, AC2): /watchdog during FINALIZING must not replace the live closing
-// run. The PREP guard used to list only armed||backoff, so a second /watchdog in
-// the closing window reset state and killed the timer: the closing outcome was
-// never observed, and the persisted entry still said finalizing (divergence).
+// Live (production arm path): the run target is persisted, off/DONE clear it, and an
+// unusable (blank) target id is refused by watchdog_target.
 await withNoAmbientSubagent(() =>
-	withFakeTimers(async (timers, flush, clock) => {
-		const cwd = makeFixtureCwd();
-		const cleanup = makeExecutorFixture(cwd, [{ dir: "38", state: { closingStepsDone: false } }]);
-		try {
-			const h = await armThroughPrep(cwd);
-			clock.advance(IDLE_GRACE_MS + 1000);
-			const tickTimer = timers.find((t) => t.kind === "interval" && !t.cleared)!;
-			tickTimer.fire();
-			await flush();
-			await flush();
-			assert.equal(persistedLatest(h.entries).data.phase, "finalizing", "the empty frontier with closing steps left enters FINALIZING");
-			const armedBefore = h.audits.filter((a) => a.type === "armed").length;
-			const liveTimersBefore = liveTickTimers(timers);
-			await h.handlers["command:watchdog"]("#40", h.ctx);
-			assert(h.notifications.some((n) => n.message.includes("run already active")), "a second /watchdog during FINALIZING is refused as active");
-			assert.equal(h.audits.filter((a) => a.type === "armed").length, armedBefore, "the refused command never arms #40");
-			assert(!h.audits.some((a) => a.type === "prep-proof" && (a.data as { target?: unknown }).target === "#40"), "no PREP started for #40");
-			assert.equal(persistedLatest(h.entries).data.phase, "finalizing", "the closing run is untouched (no silent reset)");
-			assert.equal(persistedLatest(h.entries).data.runTarget, "#38", "the run target is unchanged");
-			assert.equal(liveTickTimers(timers), liveTimersBefore, "the tick timer is still live");
-			// And the untouched run still reaches its own outcome.
-			clock.advance(4 * MIN + 1000);
-			tickTimer.fire();
-			await flush();
-			await flush();
-			assert.equal(persistedLatest(h.entries).data.phase, "paused", "the live run still reaches its finalization outcome");
-			assert(h.audits.some((a) => a.type === "paused"), "that outcome is audited");
-		} finally {
-			cleanup();
-			rmSync(cwd, { recursive: true, force: true });
-		}
-	}),
-);
-
-// L1 (live): run lifecycle resets + persistence. A later run must never read the
-// previous run's target (a stale #38 state.json must not nudge #40), the target
-// must ride the persisted entry, and DONE/off must clear it so /watchdog status
-// does not claim a live run target.
-await withNoAmbientSubagent(() =>
-	withFakeTimers(async (timers, flush, clock) => {
+	withFakeTimers(async () => {
 		const cwd = makeFixtureCwd();
 		try {
-			const h = await armThroughPrep(cwd); // no executor state: plain run
-			assert.equal(restoreRunTarget(h.entries), "#38", "the armed run persists its target");
-			// off must clear a LIVE run's target, not leave it on the status line.
-			await h.handlers["command:watchdog"]("off", h.ctx);
-			h.handlers["command:watchdog"]("status", h.ctx);
-			assert(!h.notifications.at(-1)!.message.includes("run target"), "off clears a live run target (status proves it)");
+			const h = makeHarness(cwd);
+			h.handlers.session_start({}, h.ctx);
 			await prepAgain(h, "#38");
-			assert.equal(restoreRunTarget(h.entries), "#38", "the re-armed run persists its target");
-			clock.advance(IDLE_GRACE_MS + 1000);
-			let tickTimer = timers.filter((t) => t.kind === "interval" && !t.cleared).at(-1)!;
-			tickTimer.fire();
-			await flush();
-			await flush();
-			assert.equal(persistedLatest(h.entries).data.phase, "done", "#38 completes on the empty frontier");
-			// A stale state.json from the finished run must not leak into the next run.
-			const cleanup = makeExecutorFixture(cwd, [{ dir: "38", state: { closingStepsDone: false } }]);
-			try {
-				h.handlers["command:watchdog"]("status", h.ctx);
-				assert(!h.notifications.at(-1)!.message.includes("run target"), "DONE clears the run target (status proves it)");
-				await prepAgain(h, "#40");
-				const armed40 = h.audits.filter((a) => a.type === "armed").at(-1)!;
-				assert.equal(armed40.data.target, "#40", "the new run arms #40");
-				assert.equal(restoreRunTarget(h.entries), "#40", "the new run persists its own target");
-				clock.advance(IDLE_GRACE_MS + 1000);
-				tickTimer = timers.filter((t) => t.kind === "interval" && !t.cleared).at(-1)!;
-				tickTimer.fire();
-				await flush();
-				await flush();
-				assert.equal(persistedLatest(h.entries).data.phase, "done", "#40's empty frontier completes");
-				assert(!h.audits.some((a) => a.type === "finalize-nudge"), "the stale #38 file never nudges #40");
-			} finally {
-				cleanup();
-			}
+			assert(h.audits.some((a) => a.type === "armed"), "confirm armed the run");
+			assert.equal(restoreRunTarget(h.entries), "#38", "the armed run persists its target");
+			const done = await h.tools.watchdog_done!.execute("d1", {}, undefined, undefined, h.ctx);
+			assert(!done.isError, "empty frontier: watchdog_done accepted");
+			h.handlers["command:watchdog"]("status", h.ctx);
+			assert(!h.notifications.at(-1)!.message.includes("run target"), "DONE clears the run target (status proves it)");
+			await h.handlers["command:watchdog"]("", h.ctx);
+			const blank = await h.tools.watchdog_target!.execute("b1", { issue: "   ", tickets: [{ id: "T1" }] }, undefined, undefined, h.ctx);
+			assert.equal(blank.isError, true, "a blank target id is refused");
+			assert(String(blank.content[0].text).includes("not a usable target id"));
 		} finally {
-			rmSync(cwd, { recursive: true, force: true });
-		}
-	}),
-);
-
-// A (live, genuine IO error): a state.json that exists but cannot be read as a
-// file (a directory -> EISDIR) is a real failure, not a missing file: it stays
-// an anomaly. Only ENOENT is silent.
-await withNoAmbientSubagent(() =>
-	withFakeTimers(async (timers, flush, clock) => {
-		const cwd = makeFixtureCwd();
-		const root = executorRootOf(cwd);
-		rmSync(root, { recursive: true, force: true });
-		mkdirSync(join(root, "38", "state.json"), { recursive: true });
-		try {
-			const h = await armThroughPrep(cwd);
-			clock.advance(IDLE_GRACE_MS + 1000);
-			const tickTimer = timers.find((t) => t.kind === "interval" && !t.cleared)!;
-			tickTimer.fire();
-			await flush();
-			await flush();
-			assert.equal(persistedLatest(h.entries).data.phase, "done", "an unreadable state file never blocks the run");
-			const anomaly = h.audits.find((a) => a.type === "closing-signal-anomaly");
-			assert(anomaly !== undefined, "a genuine read error is still audited");
-			assert(String(anomaly!.data.paths).includes("state.json"));
-		} finally {
-			rmSync(root, { recursive: true, force: true });
 			rmSync(cwd, { recursive: true, force: true });
 		}
 	}),

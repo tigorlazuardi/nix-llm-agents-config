@@ -109,9 +109,6 @@ stateDiagram-v2
   ARMED --> BACKOFF: run terakhir berakhir dengan error provider
   BACKOFF --> ARMED: probe sukses
   BACKOFF --> PAUSED: budget outage habis atau auth error
-  ARMED --> DONE: frontier 0 dan child 0
-  ARMED --> FINALIZING: frontier 0, flow punya langkah penutup
-  FINALIZING --> DONE: watchdog_done
   ARMED --> PAUSED: breaker, hard cap, gh gagal, Esc, atau watchdog_stop
   ARMED --> DONE: watchdog_done (queue terverifikasi kosong, tanpa menunggu idle)
   PAUSED --> ARMED: "/drain-watch resume"
@@ -165,10 +162,7 @@ flowchart TD
   G --> H{"gh gagal?"}
   H -- ya --> P1["PAUSED + notify<br/>(tidak menebak)"]
   H -- tidak --> I{"frontier = 0<br/>DAN child = 0?"}
-  I -- ya --> I2{"ada ready terblokir<br/>atau flow punya finalisasi?"}
-  I2 -- "terblokir oleh tiket non-agent" --> DONEB["DONE-dengan-sisa + notify<br/>'B terblokir oleh A (needs-info)'"]
-  I2 -- "flow punya finalisasi" --> FIN["FINALIZING: satu nudge<br/>'selesaikan code-review, PR, cleanup,<br/>lalu watchdog_done'"]
-  I2 -- tidak --> DONE["DONE + notify ringkasan<br/>selesai N, handoff M"]
+  I -- ya --> FIN["nudge penutup (tick tidak pernah DONE):<br/>'selesaikan langkah penutup (merge, PR, cleanup),<br/>lalu watchdog_done'"]
   I -- tidak --> J{"ada child berjalan?"}
   J -- ya --> K{"ada progress<br/>dalam stallLimit?"}
   K -- ya --> E
@@ -232,7 +226,7 @@ flowchart TD
   <div class="card">
     <table>
       <tr><th>State akhir</th><th>Kondisi</th><th>Lanjut?</th></tr>
-      <tr><td class="ok"><b>DONE</b></td><td><b>pickable</b> (hasil <code>drain-queue</code>) = 0 <b>dan</b> tidak ada child berjalan. Mencakup: tiket habis, semua sisa jadi <code>needs-info</code> / <code>ready-for-human</code> / <code>wontfix</code>, atau ditutup. Tiket ready yang terblokir tiket non-agent dilaporkan sebagai sisa, bukan di-nudge. Flow ber-finalisasi (implement-spec) lewat FINALIZING dulu</td><td>Tidak. Selesai</td></tr>
+      <tr><td class="ok"><b>DONE</b></td><td>LLM memanggil <code>watchdog_done</code> dan harness memverifikasi <b>pickable</b> (hasil <code>drain-queue</code>) = 0 <b>dan</b> tidak ada child berjalan. Tick tidak pernah menetapkan DONE: frontier kosong hanya memicu nudge penutup. Mencakup: tiket habis, semua sisa jadi <code>needs-info</code> / <code>ready-for-human</code> / <code>wontfix</code>, atau ditutup. Tiket ready yang terblokir tiket non-agent dilaporkan sebagai sisa, bukan di-nudge</td><td>Tidak. Selesai</td></tr>
       <tr><td class="warn"><b>PAUSED</b> breaker</td><td><code>breakerK</code> nudge tanpa progress, atau <code>hardCap</code> tercapai</td><td><code>/drain-watch resume</code></td></tr>
       <tr><td class="warn"><b>PAUSED</b> user</td><td>Esc / abort / outcome <code>aborted</code></td><td><code>/drain-watch resume</code></td></tr>
       <tr><td class="warn"><b>PAUSED</b> infra</td><td><code>gh</code> gagal, budget outage habis, atau error auth</td><td>Perbaiki lalu <code>resume</code></td></tr>
@@ -402,9 +396,9 @@ flowchart TB
       <b class="warn">2. "Selesai" bukan hanya tiket habis</b>
       <p style="margin:6px 0 0">implement-spec masih punya langkah <b>setelah</b> tiket terakhir: <code>code-review</code> di integration branch, fix, PR ready, cleanup worktree. Kalau DONE ditetapkan saat queue = 0, watchdog berhenti sebelum fase finalisasi.</p>
       <ul>
-        <li>Usul: state <b>FINALIZING</b>. Saat frontier habis, satu nudge khusus: "selesaikan finalisasi lalu panggil <code>watchdog_done</code>".</li>
-        <li>Hanya aktif untuk flow yang punya langkah penutup. Untuk flow per-tiket murni (supervise berulang, /drain) langsung DONE.</li>
-        <li>Ini sedikit melonggarkan prinsip "model tidak menyatakan selesai". Tapi hanya untuk penutup, bukan untuk tiket.</li>
+        <li>Keputusan: tidak ada state FINALIZING. Saat frontier habis, tick mengirim nudge penutup: "selesaikan langkah penutup lalu panggil <code>watchdog_done</code>". Tick tidak pernah menetapkan DONE.</li>
+        <li>Berlaku untuk semua flow; flow per-tiket murni cukup langsung memanggil <code>watchdog_done</code>.</li>
+        <li>LLM yang menyatakan selesai; harness hanya memverifikasi pohon tiket (<code>doneRefusal</code>).</li>
       </ul>
     </div>
     <div class="card">
@@ -490,7 +484,6 @@ gh api graphql ... | jq ...
         <li><b>Cakupan:</b> GitHub label saja dulu, atau <code>/drain</code> dengan ledger juga?</li>
         <li><b>Blocking:</b> terjawab. GitHub pakai dependency native (<code>blocked_by</code>, open saja), Jira link <code>Blocks</code>. Sisa: blok <code>drain-queue</code> di docs (bagian 8) diterima atau tidak?</li>
         <li><b>Sisa risiko (bagian 10):</b> pengukuran durasi review per axis belum ada mekanismenya di harness (perlu diukur sebelum kode).</li>
-        <li><b>Finalisasi:</b> pakai state FINALIZING untuk flow implement-spec, atau cukup DONE saat frontier habis?</li>
         <li><b>Celah di tengah:</b> mau prompt ringan loop-frontier yang memanggil supervise per tiket? Terpisah dari spec ini.</li>
       </ol>
     </div>

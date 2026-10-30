@@ -2421,23 +2421,26 @@ in
           ${./config/prompts}/executor.md
         grep -F '/tmp/executor/<repo-slug>/<target>/state.json' \
           ${./config/prompts}/executor.md
-        # #38: the closing section's two trigger modes agree with the extension's
-        # closing-signal read; each pin fails if its sentence is removed.
-        grep -F 'the watchdog reads `closingStepsDone` from `/tmp/executor/<repo-slug>/<target>/state.json` every tick' \
+        # #38: the LLM decides completion; the watchdog never reads executor state.
+        # Each pin fails if its sentence is removed.
+        grep -F 'the watchdog never reads your `state.json` and never completes the run by itself; you decide' \
           ${./config/prompts}/executor.md
-        grep -F 'sends exactly one FINALIZING nudge' \
+        grep -F 'run the closing steps below, then call `watchdog_done` last' \
           ${./config/prompts}/executor.md
-        grep -F 'Finishing means setting `closingStepsDone: true` in `state.json` and then calling `watchdog_done`: the watchdog re-verifies its ticket tree (nothing pickable), the child count and the flag and completes the run as DONE at once' \
+        grep -F 'completes the run as DONE at once' \
           ${./config/prompts}/executor.md
-        grep -F 'the watchdog pauses the run visibly ("finalization not confirmed") instead of nudging again' \
+        grep -F 'treat that nudge as the same trigger, never as new work' \
           ${./config/prompts}/executor.md
-        grep -F 'your own empty-frontier observation, evaluated in your active turn, is the closing trigger' \
+        grep -F 'your own empty-frontier observation is the closing trigger' \
           ${./config/prompts}/executor.md
-        grep -F 'with no leading or trailing dash' \
-          ${./config/prompts}/executor.md
-        # #38 negative pins: the pre-#38 honesty text claimed the watchdog could
-        # never send FINALIZING. It is now false, and a stale sentence coming back
-        # (merge, revert, copy) would make the prompt contradict the extension.
+        # #38 negative pins: the closing-signal handshake is gone by design; a stale
+        # sentence coming back (merge, revert, copy) would contradict the extension.
+        for stale in 'the watchdog reads `closingStepsDone`' 'sends exactly one FINALIZING nudge' 'finalization not confirmed' 'with no leading or trailing dash'; do
+          if grep -qF "$stale" ${./config/prompts}/executor.md; then
+            echo "executor.md must not contain: $stale" >&2
+            exit 1
+          fi
+        done
         if grep -qF 'hardcodes `hasClosingSteps: false`' ${./config/prompts}/executor.md; then
           echo 'executor.md must not contain: hardcodes `hasClosingSteps: false`' >&2
           exit 1
