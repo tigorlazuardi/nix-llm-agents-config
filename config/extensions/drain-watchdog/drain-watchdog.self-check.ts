@@ -543,7 +543,7 @@ assert.equal(restoreDrainState([null, "x", { type: "custom", customType: "drain-
 // H4: `typeof value === typeof fallback` broke every nullable field, because
 // `typeof null === "object"` never matches a real persisted string/number. A
 // restored PAUSED run must keep its reason.
-const restoredPaused = { phase: "paused", pausedReason: "provider auth error; needs human" };
+const restoredPaused = { phase: "paused", pausedReason: "stopped for test" };
 assert.deepEqual(
 	restoreDrainState([{ type: "custom", customType: "drain-watchdog-state", data: restoredPaused }]),
 	{ ...INITIAL_STATE, ...restoredPaused },
@@ -603,7 +603,7 @@ async function withFakeTimers<T>(
 	// `fire()` starts the async work but does not return its promise. `flush` drains
 	// pending microtasks via one REAL macrotask tick so `await pi.exec(...)` and
 	// everything after it inside `tick` has settled before assertions run.
-	// armed()'s idle-grace gate (`now - idleSinceMs < idleGraceMs`) and the stall/cooldown
+	// armed()'s idle-grace gate (`now - idleSinceMs < IDLE_GRACE_MS`) and the stall/cooldown
 	// windows all read the real wall clock; a handler-driving test cannot wait 3 real
 	// minutes; fake Date.now() too so a test can jump straight past any such gate.
 	const realDateNow = Date.now;
@@ -742,6 +742,23 @@ await withNoAmbientSubagent(() =>
 		assert.equal(live.filter((t) => t.kind === "interval").length, 1, "restoring old backoff starts the tick interval");
 		assert.equal(live.filter((t) => t.kind === "timeout").length, 0, "no probe timer exists any more");
 		assert(h.notifications.some((n) => n.message.includes("restored live run (armed)")), "restored as armed");
+		assert(!h.notifications.some((n) => n.message.includes("PAUSED")), "restored armed run does not notify PAUSED");
+		assert(!h.audits.some((x) => x.data.phase === "paused"), "restored armed run has no paused audit entry");
+	}),
+);
+
+// Restoring a PAUSED run: exactly one warning notify with the reason, one paused audit, no timers.
+await withNoAmbientSubagent(() =>
+	withFakeTimers((timers) => {
+		const h = makeHarness(makeFixtureCwd());
+		h.entries.push({ type: "custom", customType: "drain-watchdog-state", data: { phase: "paused", pausedReason: "stopped for test" } });
+		h.handlers.session_start({}, h.ctx);
+		const pausedNotes = h.notifications.filter((n) => n.message.includes("restored PAUSED"));
+		assert.equal(pausedNotes.length, 1, "restored paused run notifies exactly once");
+		assert(pausedNotes[0]!.message.includes("stopped for test"), "notify carries the pause reason");
+		assert.equal(h.audits.filter((x) => x.type === "restored" && x.data.phase === "paused").length, 1, "one paused restore audit");
+		assert(!h.notifications.some((n) => n.message.includes("restored live run")), "paused run is not restored as live");
+		assert.equal(timers.filter((t) => !t.cleared).length, 0, "paused restore starts no timer");
 	}),
 );
 

@@ -41,7 +41,6 @@
  * an idle run: the nudge ladder, breaker and hard cap handle it.
  */
 
-
 import { StringEnum } from "@earendil-works/pi-ai";
 import type { AgentToolResult, ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
@@ -387,7 +386,6 @@ export function buildNudgeText(p: { target: string | null; pickable: number }): 
 	].join("\n");
 }
 
-
 // --- Operator UI (persistent widget + command completion) --------------------
 
 export type WidgetView = {
@@ -653,7 +651,6 @@ function handleTick(state: DrainState, obs: TickObservation, now: number): Drain
 		return stay(state);
 	}
 
-
 	// Nudge is the last resort.
 	return recordNudge(state, now, { type: "nudge" });
 }
@@ -698,10 +695,6 @@ export function transition(state: DrainState, event: DrainEvent, now: number): D
 			// DONE, so timers stop and the final report is audited.
 			if (doneRefusal(event.obs) !== null) return stay(state);
 			return { state: { ...state, phase: "done", pausedReason: null }, action: { type: "done" }, refusal: null };
-		// L3: `breaker`/`hardCap` DrainEvents (distinct from the tick-internal
-		// noProgressStreak/nudgeCount gates above, which still use PAUSE_REASON.breaker/
-		// hardCap) had no dispatcher anywhere in this file — removed per their own
-		// ponytail note.
 		case "progress":
 			// Ticket-tree changes, child steers and handoffs are progress,
 			// not stalls. One event: callers report all three as `progress`.
@@ -736,7 +729,6 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 
 	// Every tool execute() runs in the same (main-session) process that armed the
 	// watchdog, so these locals ARE the live state; the gate reads them per call.
-
 
 	type Timer = ReturnType<typeof setTimeout>;
 
@@ -810,7 +802,6 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 		// Countdown to the next nudge moves per second; the tick only runs per minute.
 		widgetTimer = setInterval(refreshWidget, WIDGET_REFRESH_MS);
 	};
-
 
 	const WIDGET_KEY = "drain-watchdog";
 	const WIDGET_REFRESH_MS = 1000;
@@ -1295,6 +1286,7 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 			startLoop();
 			refreshWidget();
 			notify(`drain-watchdog: restored live run (${state.phase}) after restart`);
+		} else {
 			// PAUSED stays paused (resume is the only exit from a paused run).
 			audit("restored", { phase: "paused", reason: state.pausedReason }); // L1
 			notify(`drain-watchdog: restored PAUSED — ${state.pausedReason ?? "unknown reason"}. /watchdog resume`, "warning");

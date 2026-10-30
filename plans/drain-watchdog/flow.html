@@ -166,7 +166,7 @@ flowchart TD
   K -- tidak --> N1["notify user: child stall<br/>(JANGAN nudge main)"] --> E
   J -- tidak --> M{"no-progress streak &ge; breakerK<br/>atau nudge total &ge; hardCap?"}
   M -- ya --> P2["PAUSED + notify<br/>stuck di tiket #N"]
-  M -- tidak --> NUDGE["NUDGE<br/>sendMessage triggerTurn, steer<br/>nextAllowedAt += nudge backoff"]
+  M -- tidak --> NUDGE["NUDGE<br/>sendMessage triggerTurn, steer<br/>nextAllowedAt += nudge cooldown"]
   NUDGE --> E
 </pre>
   </div>
@@ -201,7 +201,7 @@ flowchart TD
       <tr><th>Parameter</th><th>Default (usulan)</th><th>Fungsi</th></tr>
       <tr><td><code>tickInterval</code></td><td>15 s</td><td>Seberapa sering watchdog memeriksa</td></tr>
       <tr><td><code>idleGrace</code></td><td>60 s (nudge paling lambat idleGrace + tickInterval = 75 s setelah idle)</td><td>Idle minimal sebelum dianggap perlu nudge. Memberi waktu untuk steer child yang baru masuk</td></tr>
-      <tr><td><code>nudgeBackoff</code></td><td>3 → 6 → 12 → 24 → 30 menit (cap)</td><td>Jarak antar nudge naik tiap nudge tanpa progress</td></tr>
+      <tr><td><code>nudgeLadder</code></td><td>3 → 6 → 12 → 24 → 30 menit (cap)</td><td>Jarak antar nudge naik tiap nudge tanpa progress</td></tr>
       <tr><td><code>stallLimit</code></td><td>45 menit</td><td>Batas tanpa progress saat child berjalan. Lewat batas → hanya notify</td></tr>
       <tr><td><code>breakerK</code></td><td>4</td><td>Nudge berturut-turut tanpa progress sebelum PAUSED</td></tr>
       <tr><td><code>hardCap</code></td><td>30 nudge/sesi</td><td>Pengaman max-iterations ala Ralph</td></tr>
