@@ -23,6 +23,12 @@ import {
 	BREAKER_K,
 	HARD_CAP,
 	IDLE_GRACE_MS,
+	PROBE_TEXT,
+	QUOTA_OUTAGE_BUDGET_MS,
+	TRANSIENT_OUTAGE_BUDGET_MS,
+	classifyProviderError,
+	extractLastError,
+	nextLadderDelayMs,
 	INITIAL_STATE,
 	TICK_MS,
 	STALL_LIMIT_MS,
@@ -120,7 +126,7 @@ assert.equal(transition(armOK.state, { type: "resume" }, 4000).state.phase, "arm
 
 // --- Transition: Esc/abort always wins --------------------------------------------
 
-for (const phase of ["armed"] as const) {
+for (const phase of ["armed", "backoff"] as const) {
 	const s = transition({ ...armed(), phase }, { type: "abort" }, 5000);
 	assert.equal(s.state.phase, "paused", `abort must win from ${phase}`);
 	assert.equal(s.action.type, "pause");
@@ -130,21 +136,125 @@ assert.equal(transition(resumed.state, { type: "abort" }, 6000).state.phase, "pa
 // A paused run never self-resumes: Esc wins, only an explicit resume event continues.
 assert.equal(transition(pausedStuck, { type: "tick", obs: baseObs() }, 6000).state.phase, "paused");
 
-// --- An errored model run is just an idle run ---------------------------------------------
+// --- Provider errors: classification, backoff ladder, probe --------------------------------
 
-// The core has no provider-error event: a failed run reaches the tick like any other idle
-// run and the normal nudge ladder, breaker and hard cap handle it (see the harness rows).
-assert.equal(transition(armed(), { type: "tick", obs: baseObs() }, 8000).action.type, "nudge", "idle tick nudges");
+for (const [text, kind] of [
+	["429 insufficient_quota", "quota"],
+	["You have hit your usage limit", "quota"],
+	["All claude accounts have exhausted their quota", "quota"],
+	["502 Bad Gateway", "transient"],
+	["503 Service Unavailable", "transient"],
+	["429 rate limit exceeded", "transient"],
+	["read ECONNRESET", "transient"],
+	["connect ETIMEDOUT 1.2.3.4:443", "transient"],
+	["401 unauthorized", "auth"],
+	["Invalid API key", "auth"],
+	["status 403 forbidden", "auth"],
+	["the model said something odd", "unknown"],
+	// Order quota -> auth -> transient: texts carrying two markers must resolve to the earlier class.
+	["401 billing problem", "quota"],
+	["503 usage limit reached", "quota"],
+	["503 unauthorized", "auth"],
+	["read ECONNRESET forbidden", "auth"],
+] as const) assert.equal(classifyProviderError(text), kind, `classify ${JSON.stringify(text)}`);
 
-// Restore: an old persisted phase "backoff" maps to "armed" (ponytail note in index.ts).
-assert.equal(
-	restoreDrainState([{ type: "custom", customType: "drain-watchdog-state", data: { phase: "backoff", backoffKind: "quota", backoffRung: 2, backoffStartMs: 5, noProgressStreak: 2 } }])!.phase,
-	"armed",
-	"restored backoff phase becomes armed",
-);
+// extractLastError: only a trailing assistant error counts; aborted/success => null.
+assert.equal(extractLastError([{ role: "assistant", stopReason: "error", errorMessage: "503" }]), "503");
+assert.equal(extractLastError([{ role: "assistant", stopReason: "error" }]), "unknown provider error");
+assert.equal(extractLastError([{ role: "assistant", stopReason: "error", errorMessage: "503" }, { role: "toolResult" }]), "503", "non-assistant tail is skipped");
+assert.equal(extractLastError([{ role: "assistant", stopReason: "error", errorMessage: "503" }, { role: "assistant", stopReason: "stop" }]), null, "recovered inside the run");
+assert.equal(extractLastError([{ role: "assistant", stopReason: "aborted" }]), null, "abort is not a provider error");
+assert.equal(extractLastError([]), null);
+
+// Ladders (minutes) clamp at the last rung.
+assert.deepEqual([0, 1, 2, 3, 4, 5, 6, 99].map((r) => nextLadderDelayMs("transient", r) / MIN), [1, 2, 5, 10, 20, 30, 30, 30]);
+assert.deepEqual([0, 1, 2, 3, 4, 99].map((r) => nextLadderDelayMs("quota", r) / MIN), [30, 60, 120, 180, 180, 180]);
+assert.equal(TRANSIENT_OUTAGE_BUDGET_MS, 6 * HOUR);
+assert.equal(QUOTA_OUTAGE_BUDGET_MS, 12 * HOUR);
+
 {
-	const old = restoreDrainState([{ type: "custom", customType: "drain-watchdog-state", data: { phase: "backoff", backoffKind: "quota", backoffRung: 2, backoffStartMs: 5, noProgressStreak: 2 } }])!;
-	assert.deepEqual(old, { ...INITIAL_STATE, phase: "armed", noProgressStreak: 2 }, "old backoff fields are ignored, the rest restores");
+	const T0 = 1_000_000;
+	// Error from ARMED => BACKOFF at rung 0 + one probe action; backoff never touches the breaker/hard cap.
+	const e1 = transition(armed({ noProgressStreak: 2, nudgeCount: 5 }), { type: "providerError", kind: "transient" }, T0);
+	assert.equal(e1.state.phase, "backoff");
+	assert.equal(e1.state.backoffKind, "transient");
+	assert.equal(e1.state.backoffRung, 0);
+	assert.equal(e1.state.backoffStartMs, T0);
+	assert.deepEqual(e1.action, { type: "probe", delayMs: 1 * MIN });
+	assert.equal(e1.state.noProgressStreak, 2, "provider error does not count toward the breaker");
+	assert.equal(e1.state.nudgeCount, 5, "provider error does not count toward the hard cap");
+	// unknown rides the transient ladder; quota opens the quota ladder.
+	assert.equal(transition(armed(), { type: "providerError", kind: "unknown" }, T0).state.backoffKind, "transient");
+	const q1 = transition(armed(), { type: "providerError", kind: "quota" }, T0);
+	assert.equal(q1.state.backoffKind, "quota");
+	assert.deepEqual(q1.action, { type: "probe", delayMs: 30 * MIN });
+	// Repeated error escalates the rung; the outage start is kept.
+	const e2 = transition(e1.state, { type: "providerError", kind: "transient" }, T0 + MIN);
+	assert.equal(e2.state.backoffRung, 1);
+	assert.equal(e2.state.backoffStartMs, T0);
+	assert.deepEqual(e2.action, { type: "probe", delayMs: 2 * MIN });
+	// A quota error inside a transient outage upgrades to the quota ladder (rung 0), start kept.
+	const up = transition(e2.state, { type: "providerError", kind: "quota" }, T0 + 2 * MIN);
+	assert.equal(up.state.backoffKind, "quota");
+	assert.equal(up.state.backoffRung, 0);
+	assert.equal(up.state.backoffStartMs, T0);
+	// Auth => PAUSED at once with a reason, from ARMED and from BACKOFF.
+	for (const from of [armed(), e1.state]) {
+		const a = transition(from, { type: "providerError", kind: "auth" }, T0);
+		assert.equal(a.state.phase, "paused");
+		assert.equal(a.state.pausedReason, "provider auth error; needs human");
+		assert.equal(a.action.type, "pause");
+	}
+	// Outage budgets (from backoffStartMs): transient 6h, quota 12h; exceeded => PAUSED with reason.
+	assert.equal(transition(e1.state, { type: "providerError", kind: "transient" }, T0 + 6 * HOUR - 1).state.phase, "backoff", "just inside the transient budget");
+	const tOver = transition(e1.state, { type: "providerError", kind: "transient" }, T0 + 6 * HOUR);
+	assert.equal(tOver.state.phase, "paused");
+	assert.equal(tOver.state.pausedReason, "provider outage budget exhausted");
+	assert.equal(transition(q1.state, { type: "providerError", kind: "quota" }, T0 + 12 * HOUR - 1).state.phase, "backoff", "just inside the quota budget");
+	assert.equal(transition(q1.state, { type: "providerError", kind: "quota" }, T0 + 12 * HOUR).state.phase, "paused");
+	assert.equal(transition(q1.state, { type: "providerError", kind: "quota" }, T0 + 7 * HOUR).state.phase, "backoff", "quota outage outlives the transient budget");
+	// Probe ok => ARMED, ladder reset; the no-progress streak survives (not progress).
+	const ok = transition({ ...e2.state, noProgressStreak: 3 }, { type: "probeOk" }, T0 + 3 * MIN);
+	assert.equal(ok.state.phase, "armed");
+	assert.equal(ok.state.backoffKind, null);
+	assert.equal(ok.state.backoffRung, 0);
+	assert.equal(ok.state.backoffStartMs, null);
+	assert.equal(ok.state.noProgressStreak, 3);
+	// Backoff does not nudge: tick is a no-op there; progress keeps BACKOFF and clears the streak.
+	const bt = transition({ ...e1.state, noProgressStreak: 3 }, { type: "tick", obs: baseObs() }, T0 + 10 * HOUR);
+	assert.equal(bt.action.type, "wait");
+	assert.equal(bt.state.phase, "backoff");
+	assert.equal(bt.state.noProgressStreak, 3, "backoff ticks never count toward the breaker");
+	const bp = transition({ ...e1.state, noProgressStreak: 3 }, { type: "progress" }, T0 + MIN);
+	assert.equal(bp.state.phase, "backoff");
+	assert.equal(bp.state.noProgressStreak, 0);
+	// Abort (Esc) during backoff wins => PAUSED; resume starts clean.
+	const ab = transition(e2.state, { type: "abort" }, T0 + 2 * MIN);
+	assert.equal(ab.state.phase, "paused");
+	const rs = transition(ab.state, { type: "resume" }, T0 + 3 * MIN);
+	assert.equal(rs.state.phase, "armed");
+	assert.equal(rs.state.backoffKind, null);
+	assert.equal(rs.state.backoffStartMs, null);
+	// watchdog_done is refused during an outage.
+	assert.equal(transition(e1.state, { type: "llmDone", obs: { queueOk: true, pickable: 0, childCount: 0 } }, T0).state.phase, "backoff");
+}
+
+// Restore: a persisted backoff phase stays backoff with its fields; legacy states without them restore fine.
+{
+	const r = restoreDrainState([{ type: "custom", customType: "drain-watchdog-state", data: { phase: "backoff", backoffKind: "quota", backoffRung: 2, backoffStartMs: 5, noProgressStreak: 2 } }])!;
+	assert.deepEqual(r, { ...INITIAL_STATE, phase: "backoff", backoffKind: "quota", backoffRung: 2, backoffStartMs: 5, noProgressStreak: 2 });
+	const legacy = restoreDrainState([{ type: "custom", customType: "drain-watchdog-state", data: { phase: "armed", noProgressStreak: 1 } }])!;
+	assert.deepEqual(legacy, { ...INITIAL_STATE, phase: "armed", noProgressStreak: 1 }, "legacy state without backoff fields restores");
+	const bad = restoreDrainState([{ type: "custom", customType: "drain-watchdog-state", data: { phase: "backoff", backoffKind: "bogus", backoffRung: "x", backoffStartMs: "y" } }])!;
+	assert.deepEqual(bad, { ...INITIAL_STATE, phase: "backoff" }, "invalid backoff fields fall back");
+}
+
+// Widget: BACKOFF is yellow, shows the kind and the automatic probe hint.
+{
+	const lines = watchdogWidgetLines({ phase: "backoff", prep: null, target: "#35", pickable: 2, children: 0, nudgeCount: 0, noProgressStreak: 0, idleMs: 0, pausedReason: null, backoffKind: "quota", backoffRung: 1 })!;
+	assert(lines[0]!.includes("\x1b[33m"), "backoff is yellow");
+	const txt = lines.join("\n").replace(/\x1b\[[0-9;]*m/g, "");
+	assert(txt.includes("BACKOFF (quota)") && txt.includes("probe otomatis"), "backoff widget names the kind and the probe");
 }
 
 
@@ -280,7 +390,7 @@ assert.deepEqual(
 	{ type: "wait" },
 );
 
-// 9. An errored run is just an idle run: the same tick nudges it (no provider-error path).
+// 9. Without a provider-error event, an idle armed tick nudges.
 assert.deepEqual(transition(armed(), { type: "tick", obs: baseObs() }, T).action, { type: "nudge" });
 
 // 10. Breaker: BREAKER_K consecutive no-progress nudges, then pause — not nudges forever.
@@ -333,13 +443,15 @@ assert.equal(JSON.stringify(snapshot), before);
 
 // 14. Full event × phase matrix: a phase that does not own an event stays put.
 {
-	const phases = ["off", "armed", "paused", "done"] as const;
+	const phases = ["off", "armed", "backoff", "paused", "done"] as const;
 	const events: DrainEvent[] = [
 		{ type: "arm", queueOk: true, pickable: 3 },
 		{ type: "off" },
 		{ type: "resume" },
 		{ type: "abort" },
 		{ type: "tick", obs: baseObs() },
+		{ type: "providerError", kind: "transient" },
+		{ type: "probeOk" },
 		{ type: "llmStop" },
 		{ type: "llmDone", obs: { queueOk: true, pickable: 0, childCount: 0 } },
 		{ type: "progress" },
@@ -347,13 +459,15 @@ assert.equal(JSON.stringify(snapshot), before);
 	// Phases allowed to act per event; everything else must be a pure no-op.
 	const owners: Record<string, readonly string[]> = {
 		arm: ["off"],
-		off: ["armed", "paused"],
+		off: ["armed", "backoff", "paused"],
 		resume: ["paused"],
-		abort: ["armed"],
+		abort: ["armed", "backoff"],
 		tick: ["armed"],
-		llmStop: ["armed"],
+		providerError: ["armed", "backoff"],
+		probeOk: ["backoff"],
+		llmStop: ["armed", "backoff"],
 		llmDone: ["armed"],
-		progress: ["armed"],
+		progress: ["armed", "backoff"],
 	};
 	let checked = 0;
 	for (const phase of phases) {
@@ -484,7 +598,7 @@ assert.equal(targetToolGate(false, false).ok, false, "no pending discovery: the 
 
 
 // Operator UI: widget lines, completion.
-const baseView = { phase: "armed" as const, prep: null, target: "#35", pickable: 2, children: 1, nudgeCount: 3, noProgressStreak: 1, idleMs: 42_000, pausedReason: null };
+const baseView = { phase: "armed" as const, prep: null, target: "#35", pickable: 2, children: 1, nudgeCount: 3, noProgressStreak: 1, idleMs: 42_000, pausedReason: null, backoffKind: null, backoffRung: 0 };
 const plain = (lines: string[] | null) => (lines ?? []).join("\n").replace(/\x1b\[[0-9;]*m/g, "");
 const armedWidget = plain(watchdogWidgetLines(baseView));
 assert(armedWidget.includes("ARMED") && armedWidget.includes("#35"), "armed widget shows the target");
@@ -588,8 +702,8 @@ async function withFakeTimers<T>(
 		else timers.push(t);
 		return t as any;
 	};
-	(globalThis as any).setTimeout = (fn: (...args: unknown[]) => unknown, _delay: number, ...args: unknown[]) => {
-		const t: FakeTimer = { id: nextId++, kind: "timeout", fire: () => fn(...args), cleared: false };
+	(globalThis as any).setTimeout = (fn: (...args: unknown[]) => unknown, delay: number, ...args: unknown[]) => {
+		const t: FakeTimer = { id: nextId++, kind: "timeout", fire: () => fn(...args), cleared: false, delay };
 		timers.push(t);
 		return t as any;
 	};
@@ -729,21 +843,31 @@ const armedEntry = (tweaks: Record<string, unknown> = {}) => ({
 
 // Latest persisted watchdog state entry from a harness run (typed loosely: the
 // harness stores plain records).
+const plainWidget = (h: Harness) => (h.widget() ?? []).join("\n").replace(/\x1b\[[0-9;]*m/g, "");
 const persistedLatest = (entries: unknown[]) =>
 	entries.filter((e: any) => e.customType === "drain-watchdog-state").at(-1) as { data: Record<string, any> };
 
-// Restoring an old persisted "backoff" run: maps to ARMED, tick interval only, no other timer.
+// Restoring a persisted "backoff" run: restored as backoff, ONE probe timer + the tick interval, no nudge.
 await withNoAmbientSubagent(() =>
-	withFakeTimers((timers) => {
+	withFakeTimers(async (timers, flush, clock) => {
 		const h = makeHarness(makeFixtureCwd());
-		h.entries.push({ type: "custom", customType: "drain-watchdog-state", data: { phase: "backoff", backoffKind: "quota", backoffRung: 1, backoffStartMs: 1000 } });
+		h.entries.push(armedEntry({ phase: "backoff", backoffKind: "quota", backoffRung: 1, backoffStartMs: Date.now() }));
 		h.handlers.session_start({}, h.ctx);
 		const live = timers.filter((t) => !t.cleared);
-		assert.equal(live.filter((t) => t.kind === "interval").length, 1, "restoring old backoff starts the tick interval");
-		assert.equal(live.filter((t) => t.kind === "timeout").length, 0, "no probe timer exists any more");
-		assert(h.notifications.some((n) => n.message.includes("restored live run (armed)")), "restored as armed");
-		assert(!h.notifications.some((n) => n.message.includes("PAUSED")), "restored armed run does not notify PAUSED");
-		assert(!h.audits.some((x) => x.data.phase === "paused"), "restored armed run has no paused audit entry");
+		assert.equal(live.filter((t) => t.kind === "timeout").length, 1, "restoring backoff re-arms exactly one probe timer");
+		assert.equal(live.filter((t) => t.kind === "interval").length, 1, "restoring backoff keeps the tick interval");
+		assert(h.audits.some((x) => x.type === "restored" && x.data.phase === "backoff"), "backoff restore is audited");
+		assert(!h.notifications.some((n) => n.message.includes("restored PAUSED")), "backoff is not restored as paused");
+		// Ticks never act in BACKOFF.
+		clock.advance(IDLE_GRACE_MS + 1000);
+		live.find((t) => t.kind === "interval")!.fire();
+		await flush();
+		assert.equal(h.sent.length, 0, "a restored backoff run is not nudged");
+		// The probe fires a steer and only while still in backoff.
+		live.find((t) => t.kind === "timeout")!.fire();
+		assert.equal(h.sent.length, 1);
+		assert.equal(h.sent[0]!.customType, "drain-watchdog-probe");
+		assert.equal(h.sent[0]!.content, PROBE_TEXT);
 	}),
 );
 
@@ -1035,39 +1159,212 @@ await withNoAmbientSubagent(() =>
 	}),
 );
 
-// --- Errored runs: no provider-error path; the nudge ladder + breaker handle them ------------
+// --- Errored runs (harness): agent_end records, agent_settled decides (backoff + probe) -------------------------------
 
-// The factory registers no agent_end listener, so an errored run changes nothing by itself.
-// The next idle tick nudges it like any other idle run; repeated failure (no progress)
-// reaches the breaker and pauses visibly.
+const errEnd = (errorMessage: string) => ({ messages: [{ role: "user" }, { role: "assistant", stopReason: "error", errorMessage }] });
+const okEnd = { messages: [{ role: "assistant", stopReason: "stop" }] };
+// pi emits agent_end per attempt; the decision happens at settle.
+const settle = async (h: Harness, end?: { messages: unknown[] }) => {
+	if (end !== undefined) h.handlers.agent_end(end);
+	await h.handlers.agent_settled({ aborted: false, messages: [] }, h.ctx);
+};
+const liveTimeouts = (timers: FakeTimer[]) => timers.filter((t) => t.kind === "timeout" && !t.cleared);
+// A one-shot timeout is spent once it fires (the fake does not retire it on its own).
+const fireProbe = (timers: FakeTimer[]) => {
+	const t = liveTimeouts(timers)[0]!;
+	t.cleared = true;
+	t.fire();
+};
+
 await withNoAmbientSubagent(() =>
 	withFakeTimers(async (timers, flush, clock) => {
 		const h = makeHarness(makeFixtureCwd());
 		h.entries.push(armedEntry());
 		h.handlers.session_start({}, h.ctx);
-		assert.equal(h.handlers.agent_end, undefined, "no agent_end listener: errored runs are not special");
 		const tickTimer = timers.find((t) => t.kind === "interval" && !t.cleared)!;
+		assert.equal(liveTimeouts(timers).length, 0, "armed: no probe timer yet");
+
+		// 502 => BACKOFF (transient), exactly one probe timer, audited, visible.
+		await settle(h, errEnd("502 Bad Gateway"));
+		assert.equal(persistedLatest(h.entries).data.phase, "backoff");
+		assert.equal(persistedLatest(h.entries).data.backoffKind, "transient");
+		assert.equal(liveTimeouts(timers).length, 1, "backoff arms ONE probe timer");
+		assert(h.audits.some((a) => a.type === "probe-scheduled" && a.data.delayMs === MIN), "probe scheduled on the first rung");
+		assert(h.notifications.some((n) => n.message.includes("BACKOFF")), "backoff is visible");
+		assert(plainWidget(h).includes("BACKOFF"), "widget shows BACKOFF");
+
+		// Ticks in backoff neither nudge nor count toward the breaker / hard cap.
+		for (let i = 0; i < BREAKER_K + 2; i++) {
+			clock.advance(31 * MIN);
+			tickTimer.fire();
+			await flush();
+		}
+		assert.equal(h.sent.length, 0, "no nudge while in backoff");
+		assert.equal(persistedLatest(h.entries).data.noProgressStreak, 0);
+		assert.equal(persistedLatest(h.entries).data.nudgeCount, 0);
+
+		// Probe fires a steer; a second error escalates the rung and re-arms ONE timer.
+		fireProbe(timers);
+		assert.deepEqual(h.sent.map((m) => m.customType), ["drain-watchdog-probe"]);
+		await settle(h, errEnd("503"));
+		assert.equal(persistedLatest(h.entries).data.backoffRung, 1, "probe error escalates the rung");
+		assert.equal(liveTimeouts(timers).length, 1, "still exactly one probe timer");
+
+		// Probe fires again; its successful turn returns to ARMED and resets the ladder.
+		fireProbe(timers);
+		await settle(h, okEnd);
+		const back = persistedLatest(h.entries).data;
+		assert.equal(back.phase, "armed");
+		assert.equal(back.backoffRung, 0);
+		assert.equal(back.backoffStartMs, null);
+		// A success that was NOT a probe does nothing in armed; an error again re-enters backoff.
+		await settle(h, okEnd);
+		assert.equal(persistedLatest(h.entries).data.phase, "armed");
+
+		// Normal nudging works again after recovery.
 		clock.advance(IDLE_GRACE_MS + 1000);
 		tickTimer.fire();
 		await flush();
 		await flush();
-		assert.equal(h.sent.length, 1, "the idle tick after an errored run nudges once");
-		assert.equal(h.sent[0]!.customType, "drain-watchdog-nudge");
-		assert.equal(persistedLatest(h.entries).data.phase, "armed");
-		// Failure repeats: nudge after nudge with no progress until the breaker pauses.
-		for (let i = 0; i < BREAKER_K + 2 && persistedLatest(h.entries).data.phase !== "paused"; i++) {
-			clock.advance(31 * MIN);
-			tickTimer.fire();
-			await flush();
-			await flush();
-		}
-		const latest = persistedLatest(h.entries).data;
-		assert.equal(latest.phase, "paused", "repeated failure pauses via the breaker");
-		assert.equal(latest.pausedReason, "no progress after breaker nudges; run paused");
-		assert.equal(h.sent.length, BREAKER_K, "exactly BREAKER_K nudges went out before the pause");
-		assert(h.notifications.some((n) => n.message.includes("PAUSED")), "the pause is visible");
+		assert.equal(h.sent.filter((m) => m.customType === "drain-watchdog-nudge").length, 1, "nudges resume after the outage");
 	}),
 );
+
+// Any successful settled run in backoff (not only a probe run) returns to ARMED and clears the probe timer.
+await withNoAmbientSubagent(() =>
+	withFakeTimers(async (timers) => {
+		const h = makeHarness(makeFixtureCwd());
+		h.entries.push(armedEntry());
+		h.handlers.session_start({}, h.ctx);
+		await settle(h, errEnd("429 insufficient_quota"));
+		assert.equal(persistedLatest(h.entries).data.backoffKind, "quota");
+		assert.equal(liveTimeouts(timers).length, 1);
+		await settle(h, okEnd);
+		assert.equal(persistedLatest(h.entries).data.phase, "armed", "a non-probe success ends the outage");
+		assert.equal(persistedLatest(h.entries).data.backoffRung, 0);
+		assert.equal(persistedLatest(h.entries).data.backoffStartMs, null);
+		assert.equal(liveTimeouts(timers).length, 0, "the probe timer is cleared");
+	}),
+);
+
+// pi emits agent_end per retried attempt: 4 failed attempts + 1 settle = ONE escalation (rung 0);
+// a retry that succeeds (last agent_end ok) is not an error; agent_start / abort drop a recorded error.
+await withNoAmbientSubagent(() =>
+	withFakeTimers(async (timers) => {
+		const h = makeHarness(makeFixtureCwd());
+		h.entries.push(armedEntry());
+		h.handlers.session_start({}, h.ctx);
+		for (let i = 0; i < 4; i++) h.handlers.agent_end(errEnd("503"));
+		assert.equal(persistedLatest(h.entries).data.phase, "armed", "agent_end alone decides nothing");
+		await settle(h);
+		assert.equal(persistedLatest(h.entries).data.phase, "backoff");
+		assert.equal(persistedLatest(h.entries).data.backoffRung, 0, "one escalation, not four");
+		assert.equal(liveTimeouts(timers).length, 1);
+
+		// Failed attempt then successful retry in one run: the last attempt wins.
+		h.handlers.agent_end(errEnd("503"));
+		await settle(h, okEnd);
+		assert.equal(persistedLatest(h.entries).data.phase, "armed", "successful retry ends the outage");
+
+		// A recorded error does not leak into the next run (agent_start) or past an abort.
+		h.handlers.agent_end(errEnd("503"));
+		h.handlers.agent_start();
+		await settle(h);
+		assert.equal(persistedLatest(h.entries).data.phase, "armed", "agent_start clears the recorded error");
+		h.handlers.agent_end(errEnd("503"));
+		await h.handlers.agent_settled({ aborted: true, messages: [] }, h.ctx);
+		await settle(h);
+		assert.equal(persistedLatest(h.entries).data.phase, "paused", "abort pauses; the cleared error never escalates");
+		assert.equal(persistedLatest(h.entries).data.backoffRung, 0);
+	}),
+);
+
+// Probe fires but no run starts (no agent_end): a fallback probe at the CURRENT rung keeps exactly one timer pending.
+await withNoAmbientSubagent(() =>
+	withFakeTimers(async (timers) => {
+		const h = makeHarness(makeFixtureCwd());
+		h.entries.push(armedEntry());
+		h.handlers.session_start({}, h.ctx);
+		await settle(h, errEnd("503"));
+		await settle(h, errEnd("503"));
+		assert.equal(persistedLatest(h.entries).data.backoffRung, 1);
+		fireProbe(timers);
+		assert.equal(h.sent.length, 1);
+		assert.equal(liveTimeouts(timers).length, 1, "fallback probe pending after an unanswered probe");
+		assert.equal(persistedLatest(h.entries).data.backoffRung, 1, "fallback does not escalate");
+		assert.equal(liveTimeouts(timers)[0]!.delay, 2 * MIN, "fallback uses the current rung delay");
+		fireProbe(timers);
+		assert.equal(h.sent.length, 2, "the fallback probe fires again");
+		assert.equal(liveTimeouts(timers).length, 1);
+	}),
+);
+
+// Auth => PAUSED immediately with a reason; no probe timer.
+await withNoAmbientSubagent(() =>
+	withFakeTimers(async (timers) => {
+		const h = makeHarness(makeFixtureCwd());
+		h.entries.push(armedEntry());
+		h.handlers.session_start({}, h.ctx);
+		await settle(h, errEnd("401 unauthorized"));
+		const latest = persistedLatest(h.entries).data;
+		assert.equal(latest.phase, "paused");
+		assert.equal(latest.pausedReason, "provider auth error; needs human");
+		assert.equal(timers.filter((t) => !t.cleared).length, 0, "auth pause clears every timer");
+		assert(h.notifications.some((n) => n.message.includes("PAUSED")));
+	}),
+);
+
+// Outage budget exceeded => PAUSED with reason, probe timer gone.
+await withNoAmbientSubagent(() =>
+	withFakeTimers(async (timers, _flush, clock) => {
+		const h = makeHarness(makeFixtureCwd());
+		h.entries.push(armedEntry());
+		h.handlers.session_start({}, h.ctx);
+		await settle(h, errEnd("503"));
+		clock.advance(TRANSIENT_OUTAGE_BUDGET_MS);
+		await settle(h, errEnd("503"));
+		const latest = persistedLatest(h.entries).data;
+		assert.equal(latest.phase, "paused");
+		assert.equal(latest.pausedReason, "provider outage budget exhausted");
+		assert.equal(liveTimeouts(timers).length, 0);
+	}),
+);
+
+// Abort during backoff => PAUSED (probe timer cleared); resume => ARMED; off / stop / shutdown also clear the probe timer.
+for (const how of ["abort", "off", "stop", "shutdown", "resume-path"] as const) {
+	await withNoAmbientSubagent(() =>
+		withFakeTimers(async (timers) => {
+			const h = makeHarness(makeFixtureCwd());
+			h.entries.push(armedEntry());
+			h.handlers.session_start({}, h.ctx);
+			await settle(h, errEnd("503"));
+			assert.equal(liveTimeouts(timers).length, 1, `${how}: probe timer armed`);
+			if (how === "abort") {
+				await h.handlers.agent_settled({ aborted: true, messages: [] }, h.ctx);
+				assert.equal(persistedLatest(h.entries).data.phase, "paused", "abort during backoff pauses");
+			} else if (how === "off") {
+				await h.handlers["command:watchdog"]("off", h.ctx);
+				assert.equal(persistedLatest(h.entries).data.phase, "off");
+			} else if (how === "stop") {
+				await h.tools.watchdog_stop!.execute("s", { reason: "env broke" }, undefined, undefined, h.ctx);
+				assert.equal(persistedLatest(h.entries).data.phase, "paused");
+			} else if (how === "shutdown") {
+				h.handlers.session_shutdown();
+			} else {
+				await h.handlers.agent_settled({ aborted: true, messages: [] }, h.ctx);
+				await h.handlers["command:watchdog"]("resume", h.ctx);
+				assert.equal(persistedLatest(h.entries).data.phase, "armed");
+				assert.equal(persistedLatest(h.entries).data.backoffKind, null, "resume clears the outage");
+			}
+			assert.equal(liveTimeouts(timers).length, 0, `${how}: probe timer cleared`);
+			if (how === "shutdown") {
+				// A late agent_end after teardown must not re-arm anything.
+				await settle(h, errEnd("503"));
+				assert.equal(liveTimeouts(timers).length, 0, "no probe timer after shutdown");
+			}
+		}),
+	);
+}
 
 
 // --- #38 the LLM decides completion: no executor state, no FINALIZING -------------------------
@@ -1199,7 +1496,7 @@ assert(mainPi.commands.includes("watchdog"), "main factory registers /watchdog")
 assert.deepEqual(mainPi.tools.sort(), ["watchdog_complete", "watchdog_done", "watchdog_handoff", "watchdog_stop", "watchdog_sync", "watchdog_target"], "main factory registers exactly the ticket-tree tools");
 assert(mainPi.events.includes("session_start"), "main factory restores state");
 assert(mainPi.events.includes("agent_settled"), "main factory handles Esc and the arm confirm");
-assert(!mainPi.events.includes("agent_end"), "main factory has no provider-error listener");
+assert(mainPi.events.includes("agent_end"), "main factory watches run outcomes for provider errors");
 assert(!mainPi.events.includes("tick"), "no timer surfaces: ticks are setInterval-internal and only started on arm");
 
 if (ambientSubagentId === undefined) delete process.env.PI_SUBAGENT_ID;

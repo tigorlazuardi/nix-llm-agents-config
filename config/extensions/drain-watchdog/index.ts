@@ -8,7 +8,7 @@
  * extension factory: the `/watchdog` command, the watchdog_target/complete/handoff/sync/done/stop
  * model tools (main sessions only), the ARMED tick loop, nudges via steer,
  * state/audit session entries, and every timer. Timers are created only
- * on arm (never in the factory body), and child sessions never reach any of it.
+ * on arm, provider error, or restore (never in the factory body), and child sessions never reach any of it.
  *
  * Semantics locked by the design:
  *  - Esc/abort moves a running phase to PAUSED; PAUSED only leaves via `resume`
@@ -30,24 +30,30 @@
  * (watchdog_done) is accepted from ARMED only when the ticket tree proves
  * nothing is left (`doneRefusal`).
  *
- * Imports `StringEnum` from @earendil-works/pi-ai, so the module
+ * Imports `StringEnum` and `isRetryableAssistantError` from @earendil-works/pi-ai, so the module
  * needs pi-ai resolvable (checks.nix symlinks it from the pi runtime into the
  * copy's node_modules; a real session resolves it itself). It is not loadable
  * from a bare directory.
  *
  * ponytail: ladder lengths, breaker/hard-cap thresholds, and tick/stall/idle
  * budgets are fixed design defaults baked in below; make them configurable
- * when a second consumer needs different values. A failed model run is just
- * an idle run: the nudge ladder, breaker and hard cap handle it.
+ * when a second consumer needs different values. Provider errors (429 / 5xx /
+ * network / quota) enter BACKOFF: a fixed minute ladder per kind, one probe timer,
+ * an outage budget; auth errors PAUSE at once. No reset-time parsing, no jitter;
+ * make either configurable when a real provider needs it.
  */
 
-import { StringEnum } from "@earendil-works/pi-ai";
+import { isRetryableAssistantError, StringEnum } from "@earendil-works/pi-ai";
 import type { AgentToolResult, ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 
 // --- Types -------------------------------------------------------------------
 
-export type DrainPhase = "off" | "armed" | "paused" | "done";
+type RuntimeMessage = Parameters<typeof isRetryableAssistantError>[0];
+
+export type DrainPhase = "off" | "armed" | "backoff" | "paused" | "done";
+
+type ProviderErrorKind = "transient" | "quota" | "auth" | "unknown";
 
 export type DrainState = {
 	phase: DrainPhase;
@@ -58,6 +64,10 @@ export type DrainState = {
 	/** Earliest wall-clock ms the next nudge may fire (3/6/12/24/30 min ladder). */
 	nextAllowedAt: number;
 	pausedReason: string | null;
+	/** Provider outage in progress (BACKOFF): ladder kind, rung (index into the ladder) and outage start. */
+	backoffKind: "transient" | "quota" | null;
+	backoffRung: number;
+	backoffStartMs: number | null;
 	/** M4: wall-clock ms of the last stallNotify; gates re-notifying every tick. */
 	lastStallNotifyAt: number | null;
 	/** The run's ticket tree (model-declared, persisted with the run). */
@@ -111,6 +121,7 @@ export type DrainAction =
 	| { type: "stallNotify" }
 	| { type: "pause"; reason: string }
 	| { type: "done" }
+	| { type: "probe"; delayMs: number };
 
 export type DrainEvent =
 	| { type: "arm"; queueOk: boolean; pickable: number }
@@ -118,6 +129,8 @@ export type DrainEvent =
 	| { type: "resume" }
 	| { type: "abort" }
 	| { type: "tick"; obs: TickObservation }
+	| { type: "providerError"; kind: ProviderErrorKind }
+	| { type: "probeOk" }
 	| { type: "llmStop"; reason?: string }
 	// watchdog_done: the model's "promise". Carries the effect layer's live
 	// observation; the core accepts it only when `doneRefusal` finds nothing left.
@@ -140,9 +153,15 @@ export const TICK_MS = 15_000;
 export const STALL_LIMIT_MS = 45 * 60_000;
 export const BREAKER_K = 4;
 export const HARD_CAP = 30;
+/** Outage budgets: a provider outage longer than this (from backoffStartMs) PAUSES the run. */
+export const TRANSIENT_OUTAGE_BUDGET_MS = 6 * 3_600_000;
+export const QUOTA_OUTAGE_BUDGET_MS = 12 * 3_600_000;
 
 /** Nudge cooldown ladder in minutes, capped at the last rung. */
 const NUDGE_LADDER_MIN = [3, 6, 12, 24, 30];
+/** Provider-outage probe ladders in minutes, capped at the last rung. */
+const TRANSIENT_LADDER_MIN = [1, 2, 5, 10, 20, 30];
+const QUOTA_LADDER_MIN = [30, 60, 120, 180];
 
 // --- Initial state -----------------------------------------------------------
 
@@ -152,6 +171,9 @@ export const INITIAL_STATE: DrainState = {
 	nudgeCount: 0,
 	nextAllowedAt: 0,
 	pausedReason: null,
+	backoffKind: null,
+	backoffRung: 0,
+	backoffStartMs: null,
 	lastStallNotifyAt: null,
 	tickets: [],
 };
@@ -283,6 +305,74 @@ export function isChildSession(env: Record<string, string | undefined>): boolean
 	return Boolean(env.PI_SUBAGENT_ID);
 }
 
+// --- Provider error classification ---------------------------------------------
+
+/** HTTP status code with context (`status`, `HTTP/x`, `response code`, `code`); a bare number never matches. */
+const statusCode = (codes: string): RegExp =>
+	new RegExp(`\\b(?:status|http(?:/[\\d.]+)?|response code|code)\\W{0,3}(?:${codes})\\b`, "i");
+
+// Quota text is matched BEFORE the runtime retry check: the runtime treats its own
+// quota strings as non-retryable, and a "429 ..." quota body must not ride the
+// transient ladder.
+const QUOTA_PATTERNS = [
+	/usage limit/i,
+	/GoUsageLimitError/,
+	/FreeUsageLimitError/,
+	/subscription_sharing_usage_limit_exceeded/,
+	/subscription_sharing_workplace_individual_usage_limit_exceeded/,
+	/insufficient_quota/i,
+	/available balance/i,
+	/out of budget/i,
+	/quota exceeded/i,
+	/exhausted their quota/i,
+	/cached quota state/i,
+	/billing/i,
+];
+
+const AUTH_PATTERNS = [statusCode("401|403"), /^\s*(?:401|403)\b/, /invalid api key/i, /unauthorized/i, /forbidden/i];
+
+// ponytail: pi-ai's `isRetryableAssistantError` has no bare Node errno codes; this
+// supplement covers them. Drop an entry when pi-ai starts matching it.
+const TRANSIENT_ERRNO = /\b(?:ECONNREFUSED|ECONNRESET|ETIMEDOUT|EPIPE)\b/;
+
+/**
+ * Order is quota -> auth -> transient -> unknown, so a quota/auth text that also
+ * carries a transient-looking marker ("429 insufficient_quota") never rides the
+ * transient ladder. Transient = the runtime's own retry verdict plus errno codes.
+ */
+export function classifyProviderError(message: string): ProviderErrorKind {
+	if (QUOTA_PATTERNS.some((re) => re.test(message))) return "quota";
+	if (AUTH_PATTERNS.some((re) => re.test(message))) return "auth";
+	if (isRetryableAssistantError({ stopReason: "error", errorMessage: message } as RuntimeMessage)) return "transient";
+	if (TRANSIENT_ERRNO.test(message)) return "transient";
+	return "unknown";
+}
+
+type RunMessage = { role?: unknown; stopReason?: unknown; errorMessage?: unknown };
+
+/**
+ * Error text when the LAST assistant message of the run ended with stopReason
+ * "error"; null otherwise (success, or aborted — abort is handled by agent_settled).
+ */
+export function extractLastError(messages: readonly RunMessage[]): string | null {
+	for (let i = messages.length - 1; i >= 0; i--) {
+		const m = messages[i];
+		if (typeof m !== "object" || m === null || m.role !== "assistant") continue;
+		if (m.stopReason !== "error") return null;
+		return typeof m.errorMessage === "string" && m.errorMessage !== "" ? m.errorMessage : "unknown provider error";
+	}
+	return null;
+}
+
+/** Probe delay for a ladder rung in ms; rungs beyond the ladder clamp to the last step. Deterministic (no jitter). */
+export function nextLadderDelayMs(kind: "transient" | "quota", rung: number): number {
+	const ladder = kind === "quota" ? QUOTA_LADDER_MIN : TRANSIENT_LADDER_MIN;
+	return ladder[Math.min(Math.max(rung, 0), ladder.length - 1)]! * 60_000;
+}
+
+/** Probe text: a minimal steer, not a prompt. */
+export const PROBE_TEXT = "drain-watchdog probe: continue the drain flow.";
+
 // NOTE (recorded): the cooldown ladder is keyed on the run's TOTAL nudge
 // count, not the no-progress streak, so after 5 nudges every re-nudge waits 30
 // min even with progress in between. Design wording ("grows per nudge without
@@ -401,6 +491,8 @@ export type WidgetView = {
 	/** Time until the watchdog may nudge (idle grace and cooldown); 0 = due at the next tick. */
 	nudgeInMs?: number;
 	pausedReason: string | null;
+	backoffKind: "transient" | "quota" | null;
+	backoffRung: number;
 };
 
 const ANSI = { reset: "\x1b[0m", bold: "\x1b[1m", dim: "\x1b[2m", red: "\x1b[31m", green: "\x1b[32m", yellow: "\x1b[33m", cyan: "\x1b[36m" } as const;
@@ -414,7 +506,7 @@ function clock(ms: number): string {
 /**
  * The persistent watchdog widget (string[] above the editor), or null when
  * there is nothing to show (OFF without a PREP). Green ARMED, yellow
- * PREP, red PAUSED, dim DONE. Pure: the effect layer
+ * BACKOFF, cyan PREP, red PAUSED, dim DONE. Pure: the effect layer
  * supplies the view and the clock.
  */
 export function watchdogWidgetLines(v: WidgetView): string[] | null {
@@ -426,6 +518,9 @@ export function watchdogWidgetLines(v: WidgetView): string[] | null {
 	switch (v.phase) {
 		case "armed":
 			[head, color, hint] = ["\u25cf ARMED", "green", "/watchdog status \u00b7 Esc jeda \u00b7 /watchdog off"];
+			break;
+		case "backoff":
+			[head, color, hint] = [`\u25d0 BACKOFF${v.backoffKind === null ? "" : ` (${v.backoffKind})`}`, "yellow", "probe otomatis \u00b7 Esc jeda \u00b7 /watchdog off"];
 			break;
 		case "paused":
 			[head, color, hint] = ["\u25cb PAUSED", "red", "/watchdog resume \u00b7 /watchdog off"];
@@ -439,6 +534,7 @@ export function watchdogWidgetLines(v: WidgetView): string[] | null {
 	const ref = v.target === null ? "(target belum dipilih)" : v.target;
 	if (v.phase === "paused") body = `${v.pausedReason ?? "alasan tidak tercatat"}`;
 	else if (v.phase === "off" || v.phase === "done") body = `${v.pickable} pickable terakhir`;
+	else if (v.phase === "backoff") body = `error provider \u00b7 ${v.pickable} pickable \u00b7 ${v.children} jalan \u00b7 probe otomatis, percobaan ke-${v.backoffRung + 1}`;
 	else body = `${v.pickable} pickable \u00b7 ${v.children} jalan \u00b7 nudge ${v.nudgeCount}/${HARD_CAP} \u00b7 idle ${clock(v.idleMs)} \u00b7 ${v.nudgeInMs === undefined ? "" : v.nudgeInMs > 0 ? `nudge dalam ${clock(v.nudgeInMs)} \u00b7 ` : "nudge di tick berikut \u00b7 "}breaker ${v.noProgressStreak}/${BREAKER_K}`;
 	return [
 		`${paint(color, "\u250c")} watchdog ${paint("bold", paint(color, head))} ${paint(color, "\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500")}`,
@@ -469,16 +565,16 @@ export function watchdogCompletions(prefix: string): { value: string; label: str
 const STATE_ENTRY_TYPE = "drain-watchdog-state";
 
 /** Valid DrainPhase values, for restoring persisted state without trusting it. */
-const DRAIN_PHASES: readonly DrainPhase[] = ["off", "armed", "paused", "done"];
+const DRAIN_PHASES: readonly DrainPhase[] = ["off", "armed", "backoff", "paused", "done"];
 
 /**
- * A live run a new PREP must not replace (the run is being observed).
- * `/watchdog off` is the way out; PAUSED has
+ * A live run a new PREP must not replace (the run is being observed: work,
+ * backoff probe). `/watchdog off` is the way out; PAUSED has
  * its own resume path. One definition, used by the PREP guard and the status
  * detail line, so a phase added to the live loop cannot silently miss a guard
  * again.
  */
-export const isActivePhase = (phase: DrainPhase): boolean => phase === "armed";
+export const isActivePhase = (phase: DrainPhase): boolean => phase === "armed" || phase === "backoff";
 
 /**
  * Latest valid persisted watchdog state from session entries (null when the
@@ -501,7 +597,11 @@ function isValidDrainField(key: string, value: unknown): boolean {
 		case "noProgressStreak":
 		case "nudgeCount":
 		case "nextAllowedAt":
+		case "backoffRung":
 			return typeof value === "number" && Number.isFinite(value);
+		case "backoffKind":
+			return value === null || value === "transient" || value === "quota";
+		case "backoffStartMs":
 		case "lastStallNotifyAt":
 			return value === null || (typeof value === "number" && Number.isFinite(value));
 		case "pausedReason":
@@ -526,8 +626,7 @@ export function restoreDrainState(entries: readonly unknown[]): DrainState | nul
 		if (entry.type !== "custom" || entry.customType !== STATE_ENTRY_TYPE) continue;
 		if (typeof entry.data !== "object" || entry.data === null) continue;
 		const data = entry.data as Record<string, unknown>;
-		// ponytail: old persisted runs may carry phase "backoff" (removed); restore them as armed. Remove this line later.
-		const phase = data.phase === "backoff" ? "armed" : data.phase;
+		const phase = data.phase;
 		if (typeof phase !== "string" || !DRAIN_PHASES.includes(phase as DrainPhase)) continue;
 		const merged: Record<string, unknown> = { ...INITIAL_STATE };
 		for (const key of Object.keys(INITIAL_STATE)) {
@@ -567,6 +666,8 @@ const stay = (state: DrainState): DrainTransition => ({ state, action: WAIT, ref
 
 const PAUSE_REASON = {
 	queue: "no tickets declared in the watchdog ticket tree",
+	auth: "provider auth error; needs human",
+	outage: "provider outage budget exhausted",
 	breaker: "no progress after breaker nudges; run paused",
 	hardCap: "hard nudge cap reached; run paused",
 	abort: "aborted (Esc/abort)",
@@ -591,18 +692,53 @@ const toPaused = (state: DrainState, reason: string): DrainTransition => ({
  * `llmDone` (watchdog_done) is accepted from ARMED only, and only with a live
  * observation that `doneRefusal` clears (no pickable ticket, no children); a
  * refused claim is a no-op that keeps the run going, and the tool reports the
- * reason back to the model.
+ * reason back to the model. BACKOFF never accepts it: a provider outage is not
+ * a finished run.
  */
 const EVENT_PHASES: Record<DrainEvent["type"], readonly DrainPhase[]> = {
 	arm: ["off"],
-	off: ["armed", "paused"],
+	off: ["armed", "backoff", "paused"],
 	resume: ["paused"],
-	abort: ["armed"],
+	abort: ["armed", "backoff"],
 	tick: ["armed"],
-	llmStop: ["armed"],
+	providerError: ["armed", "backoff"],
+	probeOk: ["backoff"],
+	llmStop: ["armed", "backoff"],
 	llmDone: ["armed"],
-	progress: ["armed"],
+	progress: ["armed", "backoff"],
 };
+
+/**
+ * Provider error from the last ended run. Auth pauses at once. Otherwise enter
+ * BACKOFF at rung 0 (quota -> quota ladder, everything else incl. unknown ->
+ * transient ladder) or, already in BACKOFF, escalate one rung; a quota error
+ * upgrades a transient outage to the quota ladder (rung 0). The outage budget
+ * of the outage kind is measured from backoffStartMs; exceeded => PAUSED.
+ * Backoff never counts toward the breaker or hard cap (only nudges do).
+ * ponytail: unknown errors are not breaker-counted; the outage budget bounds them.
+ */
+function onProviderError(state: DrainState, kind: ProviderErrorKind, now: number): DrainTransition {
+	if (kind === "auth") return toPaused(state, PAUSE_REASON.auth);
+	const inBackoff = state.phase === "backoff";
+	const upgrade = inBackoff && kind === "quota" && state.backoffKind !== "quota";
+	const outageKind: "transient" | "quota" = inBackoff && !upgrade ? (state.backoffKind ?? "transient") : kind === "quota" ? "quota" : "transient";
+	const budget = outageKind === "quota" ? QUOTA_OUTAGE_BUDGET_MS : TRANSIENT_OUTAGE_BUDGET_MS;
+	if (state.backoffStartMs !== null && now - state.backoffStartMs >= budget) return toPaused(state, PAUSE_REASON.outage);
+	const rung = inBackoff && !upgrade ? state.backoffRung + 1 : 0;
+	return {
+		state: {
+			...state,
+			phase: "backoff",
+			backoffKind: outageKind,
+			backoffRung: rung,
+			backoffStartMs: state.backoffStartMs ?? now,
+			pausedReason: null,
+			nextAllowedAt: now,
+		},
+		action: { type: "probe", delayMs: nextLadderDelayMs(outageKind, rung) },
+		refusal: null,
+	};
+}
 
 /**
  * The only place a nudge is recorded: breaker and hard-cap
@@ -679,12 +815,22 @@ export function transition(state: DrainState, event: DrainEvent, now: number): D
 				...state,
 				phase: "armed",
 				noProgressStreak: 0,
+				backoffKind: null,
+				backoffRung: 0,
+				backoffStartMs: null,
 				pausedReason: null,
 			});
 		case "abort":
 			return toPaused(state, PAUSE_REASON.abort);
 		case "tick":
 			return handleTick(state, event.obs, now);
+		case "providerError":
+			return onProviderError(state, event.kind, now);
+		case "probeOk":
+			// One successful turn ends the outage and resets the ladder. It is NOT
+			// progress: the no-progress streak survives, so a stuck run still reaches
+			// the breaker/hard cap through a provider blip.
+			return stay({ ...state, phase: "armed", backoffKind: null, backoffRung: 0, backoffStartMs: null });
 		case "llmStop":
 			// watchdog_stop is an explicit pause: the model named environment-level breakage,
 			// and its reason travels into pausedReason/audit/notify verbatim.
@@ -698,6 +844,7 @@ export function transition(state: DrainState, event: DrainEvent, now: number): D
 		case "progress":
 			// Ticket-tree changes, child steers and handoffs are progress,
 			// not stalls. One event: callers report all three as `progress`.
+			if (state.phase === "backoff") return stay({ ...state, noProgressStreak: 0 });
 			return stay({ ...state, noProgressStreak: 0, nextAllowedAt: now });
 	}
 }
@@ -709,6 +856,7 @@ export function transition(state: DrainState, event: DrainEvent, now: number): D
 
 const AUDIT_ENTRY_TYPE = "drain-watchdog-audit";
 const NUDGE_MESSAGE_TYPE = "drain-watchdog-nudge";
+const PROBE_MESSAGE_TYPE = "drain-watchdog-probe";
 
 const PREP_INSTRUCTION = (target: string, pickable: number): string =>
 	`drain-watchdog PREP for ${target}: the declared ticket tree has ${pickable} pickable ticket(s). End your turn now; the operator is asked to confirm arming.\n${SYNC_REMINDER}`;
@@ -735,10 +883,14 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 	let latestCtx: ExtensionContext | null = null;
 	let state: DrainState = { ...INITIAL_STATE };
 	let timer: Timer | null = null;
+	let probeTimer: Timer | null = null;
 	let tickInFlight = false;
 	let widgetTimer: Timer | null = null;
 	let uiPromptDepth = 0;
 	let childCount = 0;
+	// Last assistant error of the current run; pi emits agent_end per retry attempt, so
+	// only agent_settled decides (the last attempt wins).
+	let lastRunError: string | null = null;
 	let idleSinceMs = Date.now();
 	let progressSinceMs = idleSinceMs;
 	let runTarget: string | null = null;
@@ -754,7 +906,7 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 
 	// M1: set true in session_shutdown, reset false in session_start. Checked after every
 	// await that precedes a state mutation or timer creation (tick, agent_settled's
-	// ui.confirm, runPrep's awaits) so no in-flight
+	// ui.confirm, runPrep's awaits, the probe timer) so no in-flight
 	// async work can arm/nudge/persist/start a timer after teardown.
 	let closed = false;
 	const clearTickTimer = () => {
@@ -767,8 +919,15 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 			widgetTimer = null;
 		}
 	};
+	const clearProbeTimer = () => {
+		if (probeTimer !== null) {
+			clearTimeout(probeTimer);
+			probeTimer = null;
+		}
+	};
 	const clearTimers = () => {
 		clearTickTimer();
+		clearProbeTimer();
 	};
 
 	const notify = (message: string, level: "info" | "warning" | "error" = "info") => {
@@ -803,6 +962,24 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 		widgetTimer = setInterval(refreshWidget, WIDGET_REFRESH_MS);
 	};
 
+	/**
+	 * Arms the ONE probe timer (replaces any pending one). On fire, while still in
+	 * BACKOFF, it steers a minimal probe message and re-arms a fallback probe at the
+	 * CURRENT rung (so a failed delivery cannot wedge BACKOFF); a settled error
+	 * replaces it with the escalated one, a successful settle clears it.
+	 */
+	const scheduleProbe = (delayMs: number) => {
+		if (closed) return; // M1: never arm a timer after session_shutdown.
+		clearProbeTimer();
+		probeTimer = setTimeout(() => {
+			probeTimer = null;
+			if (closed || state.phase !== "backoff") return; // M1: shutdown may land mid-delay.
+			audit("probe-delivered", {});
+			deliver(PROBE_MESSAGE_TYPE, PROBE_TEXT);
+			scheduleProbe(nextLadderDelayMs(state.backoffKind ?? "transient", state.backoffRung));
+		}, delayMs);
+	};
+
 	const WIDGET_KEY = "drain-watchdog";
 	const WIDGET_REFRESH_MS = 1000;
 
@@ -823,6 +1000,8 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 				idleMs: Date.now() - idleSinceMs,
 				nudgeInMs: Math.max(0, IDLE_GRACE_MS - (Date.now() - idleSinceMs), state.nextAllowedAt - Date.now()),
 				pausedReason: state.pausedReason,
+				backoffKind: state.backoffKind,
+				backoffRung: state.backoffRung,
 			});
 			ctx.ui.setWidget(WIDGET_KEY, lines === null ? undefined : lines);
 		} catch {
@@ -853,6 +1032,7 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 		const previous = state;
 		state = t.state;
 		if (state !== previous) persist();
+		if (state.phase !== "backoff") clearProbeTimer(); // probeOk/leaving BACKOFF leaves no stale probe.
 		// L1: resume/off/restored-paused change phase but
 		// previously wrote no audit entry at all (only the persisted state entry); the
 		// ticket requires an audit trail for every state change, not just the subset of
@@ -880,6 +1060,11 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 				notify(`drain-watchdog ${doneReport(state.tickets)}`, "info");
 				runTarget = null;
 				break;
+			case "probe":
+				audit("probe-scheduled", { kind: state.backoffKind, rung: state.backoffRung, delayMs: t.action.delayMs });
+				notify(`drain-watchdog BACKOFF (${state.backoffKind}): provider error; probe in ${Math.round(t.action.delayMs / 60_000)}m.`, "warning");
+				scheduleProbe(t.action.delayMs);
+				break;
 		}
 	};
 
@@ -895,6 +1080,7 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 			return;
 		}
 		if (state.phase !== "armed") {
+			if (state.phase === "backoff") return; // only the probe ladder drives BACKOFF
 			clearTimers();
 			return;
 		}
@@ -934,6 +1120,7 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 		const bits = [`phase ${state.phase}`];
 		if (state.pausedReason !== null) bits.push(`reason: ${state.pausedReason}`);
 		if (runTarget !== null) bits.push(`run target ${runTarget}`);
+		if (state.phase === "backoff") bits.push(`backoff ${state.backoffKind ?? "transient"} rung ${state.backoffRung + 1}`);
 		if (isActivePhase(state.phase)) {
 			bits.push(`nudges ${state.nudgeCount}`, `no-progress ${state.noProgressStreak}`, `pickable ${pickableIds(state.tickets).length}`, `children ${childCount}`);
 		}
@@ -1286,6 +1473,14 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 			startLoop();
 			refreshWidget();
 			notify(`drain-watchdog: restored live run (${state.phase}) after restart`);
+		} else if (state.phase === "backoff") {
+			audit("restored", { phase: "backoff", kind: state.backoffKind, rung: state.backoffRung });
+			// The outage budget still measures from the restored backoffStartMs. The
+			// tick loop stays alive for the widget; ticks never act in BACKOFF.
+			scheduleProbe(nextLadderDelayMs(state.backoffKind ?? "transient", state.backoffRung));
+			startLoop();
+			refreshWidget();
+			notify(`drain-watchdog: restored BACKOFF (${state.backoffKind ?? "transient"}) after restart; probing automatically`);
 		} else {
 			// PAUSED stays paused (resume is the only exit from a paused run).
 			audit("restored", { phase: "paused", reason: state.pausedReason }); // L1
@@ -1305,7 +1500,10 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 		idleSinceMs = Date.now();
 	};
 
-	pi.on("agent_start", () => bumpIdle());
+	pi.on("agent_start", () => {
+		lastRunError = null;
+		bumpIdle();
+	});
 	pi.on("turn_start", () => bumpIdle());
 	pi.on("input", () => bumpIdle());
 	pi.on("ui_prompt_start", () => {
@@ -1334,9 +1532,17 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 		}
 	});
 
+	pi.on("agent_end", (event) => {
+		// Record only: pi emits agent_end for every attempt it retries itself.
+		if (closed) return;
+		lastRunError = extractLastError(event.messages as readonly RunMessage[]);
+	});
+
 	pi.on("agent_settled", async (event, ctx) => {
 		latestCtx = ctx;
 		refreshWidget();
+		const runError = lastRunError;
+		lastRunError = null;
 		if (event.aborted) {
 			// Esc always wins: a live run PAUSEs and stays paused; PREP proof dies.
 			readyDeclared = false;
@@ -1346,6 +1552,13 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 			apply(transition(state, { type: "abort" }, Date.now()), "abort");
 			refreshWidget();
 			return;
+		}
+		if (!closed) {
+			if (runError !== null) {
+				apply(transition(state, { type: "providerError", kind: classifyProviderError(runError) }, Date.now()), "provider-error");
+			} else if (state.phase === "backoff") {
+				apply(transition(state, { type: "probeOk" }, Date.now()), "probe-ok");
+			}
 		}
 		if (readyDeclared && prepTarget !== null) {
 			const target = prepTarget;

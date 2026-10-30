@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>drain-watchdog — flow, parameter, stop, handoff, error provider</title>
+<title>drain-watchdog — flow, parameter, stop, handoff, backoff</title>
 <style>
   :root { --bg:#0f1218; --panel:#171c26; --line:#2a3242; --fg:#d7dde8; --dim:#8b95a8; --ac:#7aa2f7; --ok:#9ece6a; --warn:#e0af68; --bad:#f7768e; }
   * { box-sizing:border-box }
@@ -43,7 +43,7 @@
   <a href="#s3">3 Parameter</a>
   <a href="#s4">4 Stop</a>
   <a href="#s5">5 Exit untuk human</a>
-  <a href="#s6">6 Error provider</a>
+  <a href="#s6">6 Backoff provider</a>
   <a href="#s7">7 Banding</a>
   <a href="#s8">8 Sumber queue</a>
   <a href="#s9">9 Terbuka</a>
@@ -107,6 +107,9 @@ stateDiagram-v2
   OFF --> ARMED: "/drain-watch on" atau auto saat /supervise /drain mulai
   ARMED --> ARMED: tick (cek idle)
   ARMED --> PAUSED: breaker, hard cap, gh gagal, Esc, atau watchdog_stop
+  ARMED --> BACKOFF: run terakhir berakhir dengan error provider
+  BACKOFF --> ARMED: probe sukses
+  BACKOFF --> PAUSED: budget outage habis, auth error, Esc, atau watchdog_stop
   ARMED --> DONE: watchdog_done (queue terverifikasi kosong, tanpa menunggu idle)
   PAUSED --> ARMED: "/drain-watch resume"
   ARMED --> OFF: "/drain-watch off"
@@ -202,6 +205,9 @@ flowchart TD
       <tr><td><code>tickInterval</code></td><td>15 s</td><td>Seberapa sering watchdog memeriksa</td></tr>
       <tr><td><code>idleGrace</code></td><td>60 s (nudge paling lambat idleGrace + tickInterval = 75 s setelah idle)</td><td>Idle minimal sebelum dianggap perlu nudge. Memberi waktu untuk steer child yang baru masuk</td></tr>
       <tr><td><code>nudgeLadder</code></td><td>3 → 6 → 12 → 24 → 30 menit (cap)</td><td>Jarak antar nudge naik tiap nudge tanpa progress</td></tr>
+      <tr><td><code>transientLadder</code></td><td>1, 2, 5, 10, 20, 30 menit (cap)</td><td>Jarak probe untuk error transien provider (429, 5xx, network)</td></tr>
+      <tr><td><code>quotaLadder</code></td><td>30 m, 1 j, 2 j, 3 j (cap)</td><td>Jarak probe untuk kuota/billing habis</td></tr>
+      <tr><td><code>outageBudget</code></td><td>6 jam transien, 12 jam kuota</td><td>Total waktu BACKOFF (dari error pertama) sebelum PAUSED + notify</td></tr>
       <tr><td><code>stallLimit</code></td><td>45 menit</td><td>Batas tanpa progress saat child berjalan. Lewat batas → hanya notify</td></tr>
       <tr><td><code>breakerK</code></td><td>4</td><td>Nudge berturut-turut tanpa progress sebelum PAUSED</td></tr>
       <tr><td><code>hardCap</code></td><td>30 nudge/sesi</td><td>Pengaman max-iterations ala Ralph</td></tr>
@@ -221,7 +227,7 @@ flowchart TD
       <tr><td class="ok"><b>DONE</b></td><td>LLM memanggil <code>watchdog_done</code> dan harness memverifikasi <b>pickable</b> (hasil <code>drain-queue</code>) = 0 <b>dan</b> tidak ada child berjalan. Tick tidak pernah menetapkan DONE: frontier kosong hanya memicu nudge penutup. Mencakup: tiket habis, semua sisa jadi <code>needs-info</code> / <code>ready-for-human</code> / <code>wontfix</code>, atau ditutup. Tiket ready yang terblokir tiket non-agent dilaporkan sebagai sisa, bukan di-nudge</td><td>Tidak. Selesai</td></tr>
       <tr><td class="warn"><b>PAUSED</b> breaker</td><td><code>breakerK</code> nudge tanpa progress, atau <code>hardCap</code> tercapai</td><td><code>/drain-watch resume</code></td></tr>
       <tr><td class="warn"><b>PAUSED</b> user</td><td>Esc / abort / outcome <code>aborted</code></td><td><code>/drain-watch resume</code></td></tr>
-      <tr><td class="warn"><b>PAUSED</b> infra</td><td><code>gh</code> gagal, budget outage habis, atau error auth</td><td>Perbaiki lalu <code>resume</code></td></tr>
+      <tr><td class="warn"><b>PAUSED</b> infra</td><td><code>gh</code> gagal, budget outage provider habis (6 j transien / 12 j kuota), atau error auth provider (401/403)</td><td>Perbaiki lalu <code>resume</code></td></tr>
       <tr><td class="warn"><b>PAUSED</b> LLM</td><td>LLM memanggil <code>watchdog_stop(reason)</code> (lingkungan rusak, bukan soal satu tiket)</td><td>Human menangani lalu <code>resume</code></td></tr>
       <tr><td class="dim"><b>OFF</b></td><td><code>/drain-watch off</code></td><td>Manual <code>on</code></td></tr>
     </table>
@@ -280,20 +286,50 @@ sequenceDiagram
 </section>
 
 <section id="s6">
-  <h2>6. Error provider = run idle biasa</h2>
-  <p class="lead">Watchdog tidak mengklasifikasi error provider, tidak punya fase backoff, dan tidak mengirim probe. Run yang berakhir <code>error</code> hanya membuat main idle. Tick berikutnya memperlakukannya seperti idle lain: nudge dengan ladder 3 → 6 → 12 → 24 → 30 menit. Error yang berulang tanpa progress menyentuh breaker (<code>breakerK</code>) atau hard cap, lalu PAUSED terlihat di widget dan notify. Operator atau LLM yang memutuskan langkah berikutnya (<code>/watchdog resume</code>, ganti model, <code>watchdog_stop</code>).</p>
+  <h2>6. Backoff: error provider (kuota, 429/5xx, network)</h2>
+  <p class="lead">Retry bawaan pi hanya 3 kali (maks 60 s); error kuota/billing bahkan tidak di-retry. Setelah itu run berakhir <code>error</code> dan main idle. Run unattended harus selamat dari ini tanpa manusia, jadi watchdog mengambil alih dengan ladder yang lebih panjang: fase <b>BACKOFF</b>, satu timer probe, dan budget outage.</p>
+  <div class="card">
+<pre class="mermaid">
+flowchart TD
+  E["agent_end: pesan assistant terakhir<br/>stopReason = error (bukan aborted)"] --> C{"klasifikasi errorMessage<br/>urutan: quota, auth, transient, unknown"}
+  C -- "quota / billing / usage limit /<br/>insufficient_quota" --> QL["QUOTA: ladder 30 m, 1 j, 2 j, 3 j"]
+  C -- "401 / 403 / invalid key / unauthorized" --> PA["PAUSED + notify<br/>butuh human. tidak ada retry"]
+  C -- "429, 5xx, overloaded, timeout,<br/>network, ECONNRESET" --> TL["TRANSIENT: ladder 1, 2, 5, 10, 20, 30 m"]
+  C -- "lainnya" --> UL["UNKNOWN: pakai ladder TRANSIENT"]
+  TL --> B
+  QL --> B
+  UL --> B
+  B{"total waktu BACKOFF<br/>&ge; outageBudget?"} -- sudah --> PB["PAUSED + notify<br/>'provider outage budget exhausted'"]
+  B -- belum --> P["BACKOFF: pasang SATU timer probe<br/>(rung naik tiap error, cap di rung terakhir)"]
+  P --> S["probe: steer minimal<br/>'drain-watchdog probe: continue the drain flow.'"]
+  S --> R{"turn probe sukses?"}
+  R -- ya --> OK["reset ladder dan outage<br/>kembali ARMED"]
+  R -- error lagi --> E
+</pre>
+  </div>
   <div class="grid" style="margin-top:16px">
     <div class="card">
-      <b>Aturan</b>
+      <b>Aturan penting</b>
       <ul>
-        <li>Esc/abort tetap PAUSED, resume tetap lewat <code>/watchdog resume</code>.</li>
-        <li>Child yang gagal datang ke main sebagai steer. Itu terhitung <b>progress</b>, bukan stall.</li>
-        <li>State lama dengan fase <code>backoff</code> dipulihkan sebagai ARMED.</li>
+        <li><b>Backoff tidak menghitung breaker maupun hard cap.</b> Outage bukan "agent buntu". Ia punya budget sendiri: 6 jam transien, 12 jam kuota, diukur dari error pertama (<code>backoffStartMs</code>).</li>
+        <li>Selama BACKOFF, tick <b>tidak</b> memicu nudge. Hanya timer probe yang jalan.</li>
+        <li>Error kuota di tengah outage transien menaikkan ke ladder kuota (rung 0); budget 12 jam tetap diukur dari awal outage.</li>
+        <li>Probe sukses satu kali cukup untuk kembali ARMED. Ladder di-reset; streak no-progress tidak (outage bukan progress).</li>
+        <li>Esc/abort tetap PAUSED, juga saat BACKOFF. <code>off</code>, <code>watchdog_stop</code>, dan shutdown mematikan timer probe.</li>
+        <li>Restart: fase <code>backoff</code> tersimpan dipulihkan sebagai BACKOFF dan timer probe dipasang ulang pada rung tersimpan; budget tetap dihitung dari awal outage.</li>
+      </ul>
+    </div>
+    <div class="card">
+      <b>Ketika child yang kena error</b>
+      <ul>
+        <li>Child gagal → completion failure datang ke main sebagai steer. Itu terhitung <b>progress</b>, bukan stall.</li>
+        <li>Main memutuskan sesuai flow (retry pass, atau <code>watchdog_handoff</code>).</li>
+        <li>Kalau <i>semua</i> child kena kuota yang sama, main akan kena juga → jalur BACKOFF di atas.</li>
       </ul>
     </div>
   </div>
   <div class="note">
-    Ceiling (ponytail): tidak ada penanganan khusus kuota, auth, atau jaringan. Tambahkan hanya kalau ada kebutuhan nyata yang tidak bisa diputuskan operator atau LLM.
+    Ceiling (ponytail): ladder tetap, deterministik, tanpa jitter dan tanpa membaca waktu reset dari pesan error; semua konstanta di source (tanpa env var atau opsi Nix). Jadikan configurable hanya kalau ada kebutuhan nyata. Error UNKNOWN tidak dihitung ke breaker; budget outage yang membatasinya.
   </div>
 </section>
 
