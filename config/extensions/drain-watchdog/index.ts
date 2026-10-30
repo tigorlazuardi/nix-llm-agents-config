@@ -1852,6 +1852,10 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 		],
 		parameters: Type.Object({}),
 		async execute(_id, _params, _signal, _update, toolCtx) {
+			// A tick may have reached DONE before the model called: not an error, hand back the report.
+			if (state.phase === "done" && !isChildSession(process.env)) {
+				return textResult(`Run already complete. The watchdog is DONE; include this report in your final report:\n${doneReport(state.tickets)}`, false, { phase: state.phase });
+			}
 			const gate = watchdogToolGate("done", isChildSession(process.env), state.phase);
 			if (!gate.ok) return textResult(gate.error, true);
 			if (closed) return textResult("watchdog_done ignored: session is shutting down", true);

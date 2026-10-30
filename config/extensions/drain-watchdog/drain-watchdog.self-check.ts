@@ -1491,7 +1491,9 @@ await withNoAmbientSubagent(() =>
 		assert.equal(timers.filter((t) => !t.cleared).length, 0, "DONE clears every timer");
 		assert.equal(liveWidgetTimers(), 0, "DONE also stops the widget countdown");
 		const again = await h.tools.watchdog_done!.execute("d3", {}, undefined, undefined, h.ctx);
-		assert.equal(again.isError, true, "a finished run cannot be completed twice");
+		assert(!again.isError, "watchdog_done after DONE (a tick got there first) is not an error");
+		assert(String(again.content[0].text).includes("already complete") && String(again.content[0].text).includes("DONE: 1 done, 1 limbo"), "it returns the report and says the run is complete");
+		assert.equal(persistedLatest(h.entries).data.phase, "done", "the repeat call changes nothing");
 	}),
 );
 

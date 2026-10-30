@@ -111,4 +111,5 @@ Run — one final reply once closing is done or the run cannot continue; any `ES
 `SUMMARY: <one sentence>`
 `TARGET: #<n>; INTEGRATION: <branch>@<lastGreenIntegrationSha>; STATE: <state.json path>; PR: <url|none>`
 `TICKETS: passed=<list>; failed=<list>; blocked=<list with reasons>; escalated=<list>; leftover=<list with blockers>`
+`WATCHDOG: <limbo / blocked-by-limbo block copied from watchdog_done; omit when not watchdog-managed>`
 `ATTRIBUTES: failedPasses=<n>; handovers=<n>; splits=<n>; merges=<n>; mergeReverts=<n>; standardsReviews=<n>; specReviews=<n>`

@@ -2427,7 +2427,7 @@ in
           ${./config/prompts}/executor.md
         grep -F 'sends exactly one FINALIZING nudge' \
           ${./config/prompts}/executor.md
-        grep -F 'Finishing means setting `closingStepsDone: true` in `state.json` and then calling `watchdog_done`: the watchdog re-reads the queue and the flag and completes the run as DONE at once' \
+        grep -F 'Finishing means setting `closingStepsDone: true` in `state.json` and then calling `watchdog_done`: the watchdog re-verifies its ticket tree (nothing pickable), the child count and the flag and completes the run as DONE at once' \
           ${./config/prompts}/executor.md
         grep -F 'the watchdog pauses the run visibly ("finalization not confirmed") instead of nudging again' \
           ${./config/prompts}/executor.md
@@ -2523,7 +2523,7 @@ in
           ${./config/prompts}/executor.md
         grep -F 'issues/<n> --jq '"'"'select(.state=="open" and (.assignees|length)==0 and .issue_dependencies_summary.blocked_by==0 and ([.labels[].name] | (index("ready-for-agent") != null and index("needs-info") == null and index("ready-for-human") == null and index("wontfix") == null))) | .number' \
           ${./config/prompts}/executor.md
-        grep -F '(open, `ready-for-agent`, no assignee, none of `needs-info` / `ready-for-human` / `wontfix`, no open native blockers)' \
+        grep -F 'pickable predicate: open, `ready-for-agent`, no assignee, none of `needs-info` / `ready-for-human` / `wontfix`, no open native blockers.' \
           ${./config/prompts}/executor.md
         grep -F 'git branch --no-track integration/<slug> origin/<default-branch>' \
           ${./config/prompts}/executor.md
