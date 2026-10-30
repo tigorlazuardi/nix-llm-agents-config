@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>drain-watchdog — flow, parameter, stop, handoff, backoff</title>
+<title>drain-watchdog — flow, parameter, stop, handoff, error provider</title>
 <style>
   :root { --bg:#0f1218; --panel:#171c26; --line:#2a3242; --fg:#d7dde8; --dim:#8b95a8; --ac:#7aa2f7; --ok:#9ece6a; --warn:#e0af68; --bad:#f7768e; }
   * { box-sizing:border-box }
@@ -43,7 +43,7 @@
   <a href="#s3">3 Parameter</a>
   <a href="#s4">4 Stop</a>
   <a href="#s5">5 Exit untuk human</a>
-  <a href="#s6">6 Backoff provider</a>
+  <a href="#s6">6 Error provider</a>
   <a href="#s7">7 Banding</a>
   <a href="#s8">8 Sumber queue</a>
   <a href="#s9">9 Terbuka</a>
@@ -106,9 +106,6 @@ stateDiagram-v2
   [*] --> OFF
   OFF --> ARMED: "/drain-watch on" atau auto saat /supervise /drain mulai
   ARMED --> ARMED: tick (cek idle)
-  ARMED --> BACKOFF: run terakhir berakhir dengan error provider
-  BACKOFF --> ARMED: probe sukses
-  BACKOFF --> PAUSED: budget outage habis atau auth error
   ARMED --> PAUSED: breaker, hard cap, gh gagal, Esc, atau watchdog_stop
   ARMED --> DONE: watchdog_done (queue terverifikasi kosong, tanpa menunggu idle)
   PAUSED --> ARMED: "/drain-watch resume"
@@ -167,9 +164,7 @@ flowchart TD
   J -- ya --> K{"ada progress<br/>dalam stallLimit?"}
   K -- ya --> E
   K -- tidak --> N1["notify user: child stall<br/>(JANGAN nudge main)"] --> E
-  J -- tidak --> L{"error provider<br/>di run terakhir?"}
-  L -- ya --> BO["jalur BACKOFF<br/>(bagian 6)"]
-  L -- tidak --> M{"no-progress streak &ge; breakerK<br/>atau nudge total &ge; hardCap?"}
+  J -- tidak --> M{"no-progress streak &ge; breakerK<br/>atau nudge total &ge; hardCap?"}
   M -- ya --> P2["PAUSED + notify<br/>stuck di tiket #N"]
   M -- tidak --> NUDGE["NUDGE<br/>sendMessage triggerTurn, steer<br/>nextAllowedAt += nudge backoff"]
   NUDGE --> E
@@ -200,7 +195,7 @@ flowchart TD
 
 <section id="s3">
   <h2>3. Parameter yang bisa berubah</h2>
-  <p class="lead">Default dari env (pola yang sama dengan <code>pi-idle-compact</code>, di-wire lewat opsi Nix <code>drainWatch.*</code> → <code>sessionVariables</code>). Flag di <code>/drain-watch on</code> menimpa untuk sesi itu dan ikut tersimpan di entry state.</p>
+  <p class="lead">Semua nilai konstanta tetap di extension (tidak ada env var atau opsi Nix). Ubah di source kalau butuh nilai lain.</p>
   <div class="card">
     <table>
       <tr><th>Parameter</th><th>Default (usulan)</th><th>Fungsi</th></tr>
@@ -210,9 +205,6 @@ flowchart TD
       <tr><td><code>stallLimit</code></td><td>45 menit</td><td>Batas tanpa progress saat child berjalan. Lewat batas → hanya notify</td></tr>
       <tr><td><code>breakerK</code></td><td>4</td><td>Nudge berturut-turut tanpa progress sebelum PAUSED</td></tr>
       <tr><td><code>hardCap</code></td><td>30 nudge/sesi</td><td>Pengaman max-iterations ala Ralph</td></tr>
-      <tr><td><code>transientLadder</code></td><td>1, 2, 5, 10, 20, 30 menit + jitter</td><td>Jarak probe untuk error transien provider</td></tr>
-      <tr><td><code>quotaLadder</code></td><td>30 m, 1 j, 2 j, 3 j (cap)</td><td>Jarak probe untuk kuota/billing habis</td></tr>
-      <tr><td><code>outageBudget</code></td><td>6 jam transien, 12 jam kuota</td><td>Total waktu BACKOFF sebelum PAUSED + notify</td></tr>
       <tr><td><code>drain-queue</code></td><td>blok di <code>docs/agents/issue-tracker.md</code></td><td>Perintah yang mencetak jumlah tiket pickable. Menggantikan <code>readyLabel</code>. Tidak ada blok = tolak arm. Lihat bagian 8</td></tr>
             <tr><td><code>notify</code></td><td><code>ui.notify</code></td><td>Unattended perlu kanal di luar sesi <span class="tag">keputusan #3</span></td></tr>
     </table>
@@ -288,66 +280,20 @@ sequenceDiagram
 </section>
 
 <section id="s6">
-  <h2>6. Backoff: kuota habis &amp; provider penuh/network</h2>
-  <p class="lead">Fakta dari source pi: retry bawaan hanya 3 kali (2 s, 4 s, 8 s, maks 60 s). Setelah itu run berakhir <code>error</code> dan main idle. Error kuota/billing ditandai <i>non-retryable</i>, jadi pi menyerah <b>langsung</b>. Di titik itulah watchdog mengambil alih dengan ladder yang jauh lebih panjang.</p>
-  <div class="card">
-<pre class="mermaid">
-flowchart TD
-  E["agent_end: stopReason = error<br/>simpan errorMessage"] --> C{"klasifikasi errorMessage"}
-  C -- "isRetryableAssistantError = true<br/>429, 5xx, overloaded, timeout,<br/>network, stream ended" --> T
-  C -- "quota / billing / usage limit /<br/>insufficient_quota / balance" --> Q
-  C -- "401 / 403 / invalid key / unauthorized" --> A
-  C -- "lainnya" --> U
-
-  T["TRANSIENT<br/>pi sudah retry 3x lalu menyerah"] --> TL["ladder 1, 2, 5, 10, 20, 30 m<br/>+ jitter &plusmn;20%"]
-  Q["QUOTA<br/>pi tidak retry sama sekali"] --> QL["ladder 30 m, 1 j, 2 j, 3 j<br/>pakai waktu reset dari pesan bila ada"]
-  A["AUTH"] --> PA["PAUSED + notify<br/>butuh human. tidak ada retry"]
-  U["UNKNOWN"] --> UL["perlakukan seperti TRANSIENT<br/>tapi tetap dihitung ke breaker"]
-
-  TL --> P
-  QL --> P
-  UL --> P
-  P["PROBE: nudge minimal<br/>'lanjutkan flow' tanpa daftar panjang"] --> R{"turn probe sukses?<br/>assistant tanpa stopReason=error"}
-  R -- ya --> OK["reset ladder<br/>kembali ARMED (normal)"]
-  R -- gagal lagi --> N{"total waktu BACKOFF<br/>&gt; outageBudget?"}
-  N -- belum --> NX["naik satu rung ladder<br/>set nextAllowedAt"] --> P
-  N -- sudah --> PB["PAUSED + notify<br/>'provider down / kuota habis X jam'"]
-</pre>
-  </div>
+  <h2>6. Error provider = run idle biasa</h2>
+  <p class="lead">Watchdog tidak mengklasifikasi error provider, tidak punya fase backoff, dan tidak mengirim probe. Run yang berakhir <code>error</code> hanya membuat main idle. Tick berikutnya memperlakukannya seperti idle lain: nudge dengan ladder 3 → 6 → 12 → 24 → 30 menit. Error yang berulang tanpa progress menyentuh breaker (<code>breakerK</code>) atau hard cap, lalu PAUSED terlihat di widget dan notify. Operator atau LLM yang memutuskan langkah berikutnya (<code>/watchdog resume</code>, ganti model, <code>watchdog_stop</code>).</p>
   <div class="grid" style="margin-top:16px">
     <div class="card">
-      <b>Aturan penting</b>
+      <b>Aturan</b>
       <ul>
-        <li><b>Backoff tidak menambah breaker</b> (kecuali UNKNOWN). Outage bukan "agent buntu". Ia punya budget sendiri (<code>outageBudget</code>).</li>
-        <li><b>Probe = nudge minimal.</b> Satu request murah, bukan prompt panjang yang akan gagal berulang.</li>
-        <li><b>Jitter</b> supaya beberapa sesi tidak menembak provider bersamaan saat pulih.</li>
-        <li>Selama BACKOFF, idle <b>tidak</b> memicu nudge normal. Hanya ladder yang jalan.</li>
-        <li>Probe sukses satu kali cukup untuk kembali ARMED. Ladder di-reset.</li>
+        <li>Esc/abort tetap PAUSED, resume tetap lewat <code>/watchdog resume</code>.</li>
+        <li>Child yang gagal datang ke main sebagai steer. Itu terhitung <b>progress</b>, bukan stall.</li>
+        <li>State lama dengan fase <code>backoff</code> dipulihkan sebagai ARMED.</li>
       </ul>
-    </div>
-    <div class="card">
-      <b>Ketika child yang kena error</b>
-      <ul>
-        <li>Child gagal → completion failure datang ke main sebagai steer. Itu terhitung <b>progress</b> (ada event), bukan stall.</li>
-        <li>Main memutuskan sesuai flow (retry pass, atau <code>watchdog_handoff</code> kalau habis budget).</li>
-        <li>Watchdog tidak menyentuh child dan tidak mem-poll transcript.</li>
-        <li>Kalau <i>semua</i> child kena kuota yang sama, main akan kena juga → jalur BACKOFF di atas.</li>
-      </ul>
-    </div>
-    <div class="card">
-      <b>Tabel ringkas</b>
-      <table style="margin-top:8px">
-        <tr><th>Kelas</th><th>pi native</th><th>Watchdog</th></tr>
-        <tr><td>TRANSIENT</td><td>3 retry, ≤ 60 s</td><td>ladder ≤ 30 m, budget 6 j</td></tr>
-        <tr><td>QUOTA</td><td>0 retry</td><td>ladder ≤ 3 j, budget 12 j</td></tr>
-        <tr><td>AUTH</td><td>0 retry</td><td>PAUSED langsung</td></tr>
-        <tr><td>UNKNOWN</td><td>0 retry</td><td>ladder transien + breaker</td></tr>
-        <tr><td>Context overflow</td><td>compaction</td><td>tidak ikut campur</td></tr>
-      </table>
     </div>
   </div>
   <div class="note">
-    Ceiling (ponytail): klasifikasi memakai <code>isRetryableAssistantError</code> dari pi-ai (tidak menyalin regex) plus satu regex kecil untuk quota dan auth. Fallback model/provider lain (ganti model saat kuota habis) sengaja belum dimasukkan. Tambahkan saat ada kebutuhan nyata. Parameter ladder disimpan di state supaya bisa disesuaikan per sesi.
+    Ceiling (ponytail): tidak ada penanganan khusus kuota, auth, atau jaringan. Tambahkan hanya kalau ada kebutuhan nyata yang tidak bisa diputuskan operator atau LLM.
   </div>
 </section>
 
@@ -493,7 +439,6 @@ gh api graphql ... | jq ...
         <li>Deteksi "ada child berjalan" dari extension lain. <code>runningSubagents</code> milik runtime pi-herdr-subagents; belum tentu bisa dibaca. Fallback: hitung dari <code>tool_call subagent</code> dan steer completion (rapuh setelah restart).</li>
         <li><code>pi.sendMessage(..., {triggerTurn:true})</code> dari timer saat idle benar-benar memulai turn. Perlu diuji.</li>
         <li>Tiket yang sedang dikerjakan masih berlabel <code>ready-for-agent</code>? Kalau ya, promise "queue = 0" hanya bisa benar bersama "child = 0".</li>
-        <li>Teks error kuota dari provider yang dipakai (apakah cocok regex quota).</li>
       </ol>
     </div>
   </div>

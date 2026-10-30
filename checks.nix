@@ -41,14 +41,7 @@ let
   disabled = evaluate { programs.pi-coding-agent.enable = false; };
   localUpdaterEnabled = evaluate { programs.pi-coding-agent.localUpdater.enable = true; };
   watchdogDisabled = evaluate { programs.pi-coding-agent.watchdog.enable = false; };
-  watchdogEnabled = evaluate {
-    programs.pi-coding-agent.watchdog = {
-      enable = true;
-      tickMs = 30000;
-      idleGraceMs = 120000;
-      stallLimitMs = 900000;
-    };
-  };
+  watchdogEnabled = evaluate { programs.pi-coding-agent.watchdog.enable = true; };
   planningModelConfigured = evaluate {
     programs.pi-coding-agent.planningModel = "omniroute/personal/worker";
   };
@@ -814,9 +807,6 @@ in
     assert
       default.config.programs.pi-coding-agent.extensions.drain-watchdog
       == ./config/extensions/drain-watchdog;
-    assert default.config.home.sessionVariables.PI_WATCHDOG_TICK_MS == "15000";
-    assert default.config.home.sessionVariables.PI_WATCHDOG_IDLE_GRACE_MS == "60000";
-    assert default.config.home.sessionVariables.PI_WATCHDOG_STALL_LIMIT_MS == "2700000";
     assert !watchdogDisabled.config.programs.pi-coding-agent.watchdog.enable;
     assert !(watchdogDisabled.config.programs.pi-coding-agent.extensions or { } ? drain-watchdog);
     assert
@@ -824,9 +814,6 @@ in
         watchdogDisabled.config.home.file
           ? "${watchdogDisabled.config.programs.pi-coding-agent.configDir}/extensions/drain-watchdog"
       );
-    assert !(watchdogDisabled.config.home.sessionVariables ? PI_WATCHDOG_TICK_MS);
-    assert !(watchdogDisabled.config.home.sessionVariables ? PI_WATCHDOG_IDLE_GRACE_MS);
-    assert !(watchdogDisabled.config.home.sessionVariables ? PI_WATCHDOG_STALL_LIMIT_MS);
     assert
       watchdogEnabled.config.programs.pi-coding-agent.extensions.drain-watchdog
       == ./config/extensions/drain-watchdog;
@@ -835,9 +822,6 @@ in
       == ./config/extensions/drain-watchdog;
     assert
       watchdogEnabled.config.home.file."${watchdogEnabled.config.programs.pi-coding-agent.configDir}/extensions/drain-watchdog".force;
-    assert watchdogEnabled.config.home.sessionVariables.PI_WATCHDOG_TICK_MS == "30000";
-    assert watchdogEnabled.config.home.sessionVariables.PI_WATCHDOG_IDLE_GRACE_MS == "120000";
-    assert watchdogEnabled.config.home.sessionVariables.PI_WATCHDOG_STALL_LIMIT_MS == "900000";
     assert !default.config.programs.pi-coding-agent.plugins.pi-messaging-relay.enable;
     assert !(default.config.home.sessionVariables ? PI_MESSAGING_RELAY_URL);
     assert !default.config.home.activation ? messagingRelayConfig;

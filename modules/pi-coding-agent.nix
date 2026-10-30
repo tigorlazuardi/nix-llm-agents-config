@@ -612,34 +612,6 @@ in
 
   options.programs.pi-coding-agent.watchdog = {
     enable = lib.mkEnableOption "the unattended drain live loop via the drain-watchdog extension (/watchdog)";
-
-    tickMs = lib.mkOption {
-      type = lib.types.int;
-      default = 15000;
-      description = ''
-        Interval between armed ticks that check idle/children/queue state.
-        A nudge fires at most idleGraceMs + tickMs after main goes idle.
-        Exported to the extension as PI_WATCHDOG_TICK_MS.
-      '';
-    };
-
-    idleGraceMs = lib.mkOption {
-      type = lib.types.int;
-      default = 60000;
-      description = ''
-        Idle time required after the last activity before a tick may nudge.
-        Exported as PI_WATCHDOG_IDLE_GRACE_MS.
-      '';
-    };
-
-    stallLimitMs = lib.mkOption {
-      type = lib.types.int;
-      default = 45 * 60000;
-      description = ''
-        How long children may run with no queue progress before a stall
-        notify (never a nudge) fires. Exported as PI_WATCHDOG_STALL_LIMIT_MS.
-      '';
-    };
   };
 
   options.programs.pi-coding-agent.plugins =
@@ -1020,11 +992,6 @@ in
         // lib.optionalAttrs idleCompact.enable {
           PI_IDLE_COMPACT_THRESHOLD_TOKENS = lib.mkDefault (toString idleCompact.thresholdTokens);
           PI_IDLE_COMPACT_DELAY_MS = lib.mkDefault (toString idleCompact.delayMs);
-        }
-        // lib.optionalAttrs watchdog.enable {
-          PI_WATCHDOG_TICK_MS = lib.mkDefault (toString watchdog.tickMs);
-          PI_WATCHDOG_IDLE_GRACE_MS = lib.mkDefault (toString watchdog.idleGraceMs);
-          PI_WATCHDOG_STALL_LIMIT_MS = lib.mkDefault (toString watchdog.stallLimitMs);
         }
         // lib.optionalAttrs cfg.plugins.browser-goblin.enable {
           # ponytail: reuse browser-goblin's Nix Chromium for project Playwright; override per project when needed.

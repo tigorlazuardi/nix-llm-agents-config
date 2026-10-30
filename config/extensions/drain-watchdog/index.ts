@@ -30,40 +30,34 @@
  * (watchdog_done) is accepted from ARMED only when the ticket tree proves
  * nothing is left (`doneRefusal`).
  *
- * Imports `isRetryableAssistantError` from @earendil-works/pi-ai, so the module
+ * Imports `StringEnum` from @earendil-works/pi-ai, so the module
  * needs pi-ai resolvable (checks.nix symlinks it from the pi runtime into the
  * copy's node_modules; a real session resolves it itself). It is not loadable
  * from a bare directory.
  *
- * ponytail: ladder lengths, breaker/hard-cap thresholds, and stall/idle
- * budgets are fixed design defaults baked in below; the factory reads
- * PI_WATCHDOG_* env overrides wired from the Nix module as session variables.
+ * ponytail: ladder lengths, breaker/hard-cap thresholds, and tick/stall/idle
+ * budgets are fixed design defaults baked in below; make them configurable
+ * when a second consumer needs different values. A failed model run is just
+ * an idle run: the nudge ladder, breaker and hard cap handle it.
  */
 
 
-import { isRetryableAssistantError, StringEnum } from "@earendil-works/pi-ai";
+import { StringEnum } from "@earendil-works/pi-ai";
 import type { AgentToolResult, ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-type RuntimeMessage = Parameters<typeof isRetryableAssistantError>[0];
 
 // --- Types -------------------------------------------------------------------
 
-export type DrainPhase = "off" | "armed" | "backoff" | "paused" | "done";
-
-export type ProviderErrorKind = "transient" | "quota" | "auth" | "unknown";
+export type DrainPhase = "off" | "armed" | "paused" | "done";
 
 export type DrainState = {
 	phase: DrainPhase;
-	/** Consecutive nudges/unknown errors without any progress event. */
+	/** Consecutive nudges without any progress event. */
 	noProgressStreak: number;
 	/** Total nudges this run — hard-cap budget. */
 	nudgeCount: number;
 	/** Earliest wall-clock ms the next nudge may fire (3/6/12/24/30 min ladder). */
 	nextAllowedAt: number;
-	backoffKind: "transient" | "quota" | null;
-	backoffRung: number;
-	/** When the current outage (BACKOFF stretch) started, for the outage budget. */
-	backoffStartMs: number | null;
 	pausedReason: string | null;
 	/** M4: wall-clock ms of the last stallNotify; gates re-notifying every tick. */
 	lastStallNotifyAt: number | null;
@@ -91,8 +85,6 @@ export type TickObservation = {
 	pickable: number;
 	/** Time since the last counted progress event (ticket change, steer, handoff). */
 	progressAgeMs: number;
-	/** Error message from the last ended run, if it ended in error. */
-	lastError: string | null;
 };
 
 /** What the effect layer saw when the model called watchdog_done. */
@@ -120,7 +112,6 @@ export type DrainAction =
 	| { type: "stallNotify" }
 	| { type: "pause"; reason: string }
 	| { type: "done" }
-	| { type: "probe"; delayMs: number; jitter: ProbeJitter };
 
 export type DrainEvent =
 	| { type: "arm"; queueOk: boolean; pickable: number }
@@ -128,9 +119,6 @@ export type DrainEvent =
 	| { type: "resume" }
 	| { type: "abort" }
 	| { type: "tick"; obs: TickObservation }
-	// `message` is the raw provider error text; the #32 reset-time honor parses it at the probe seam.
-	| { type: "providerError"; kind: ProviderErrorKind; message?: string }
-	| { type: "probeOk" }
 	| { type: "llmStop"; reason?: string }
 	// watchdog_done: the model's "promise". Carries the effect layer's live
 	// observation; the core accepts it only when `doneRefusal` finds nothing left.
@@ -153,16 +141,9 @@ export const TICK_MS = 15_000;
 export const STALL_LIMIT_MS = 45 * 60_000;
 export const BREAKER_K = 4;
 export const HARD_CAP = 30;
-export const TRANSIENT_OUTAGE_BUDGET_MS = 6 * 3_600_000;
-export const QUOTA_OUTAGE_BUDGET_MS = 12 * 3_600_000;
-/** Backoff jitter half-width: delays land within +-20% of the ladder step. */
-const JITTER_FRACTION = 0.2;
 
-/** Nudge backoff ladder in minutes, capped at the last rung. */
+/** Nudge cooldown ladder in minutes, capped at the last rung. */
 const NUDGE_LADDER_MIN = [3, 6, 12, 24, 30];
-/** Provider backoff ladders in minutes, capped at the last rung. */
-const TRANSIENT_LADDER_MIN = [1, 2, 5, 10, 20, 30];
-const QUOTA_LADDER_MIN = [30, 60, 120, 180];
 
 // --- Initial state -----------------------------------------------------------
 
@@ -171,9 +152,6 @@ export const INITIAL_STATE: DrainState = {
 	noProgressStreak: 0,
 	nudgeCount: 0,
 	nextAllowedAt: 0,
-	backoffKind: null,
-	backoffRung: 0,
-	backoffStartMs: null,
 	pausedReason: null,
 	lastStallNotifyAt: null,
 	tickets: [],
@@ -306,203 +284,6 @@ export function isChildSession(env: Record<string, string | undefined>): boolean
 	return Boolean(env.PI_SUBAGENT_ID);
 }
 
-// --- Provider error classification ---------------------------------------------
-
-/**
- * HTTP status code with context: the number must follow `status`, `HTTP[/x.y]`,
- * `response code` or `code`. A bare number ("512 tokens", "request 503") never
- * matches.
- */
-const statusCode = (codes: string): RegExp =>
-	new RegExp(`\\b(?:status|http(?:/[\\d.]+)?|response code|code)\\W{0,3}(?:${codes})\\b`, "i");
-
-// Quota text must be matched BEFORE the runtime's retry check: the runtime
-// treats its own quota strings as non-retryable, and a "429 ..." quota body
-// must not ride the transient ladder. Superset of pi-ai's non-retryable list
-// (GoUsageLimitError, FreeUsageLimitError, subscription_sharing_*).
-const QUOTA_PATTERNS = [
-	/usage limit/i,
-	/GoUsageLimitError/,
-	/FreeUsageLimitError/,
-	/subscription_sharing_usage_limit_exceeded/,
-	/subscription_sharing_workplace_individual_usage_limit_exceeded/,
-	/insufficient_quota/i,
-	/available balance/i,
-	/out of budget/i,
-	/quota exceeded/i,
-	// Real stack text: "All claude accounts have exhausted their quota (cached quota
-	// state, no upstream attempt; ...)" — without these it classified unknown and
-	// the breaker paused the run mid quota window.
-	/exhausted their quota/i,
-	/cached quota state/i,
-	/billing/i,
-];
-
-const AUTH_PATTERNS = [
-	statusCode("401|403"),
-	/^\s*(?:401|403)\b/,
-	/invalid api key/i,
-	/unauthorized/i,
-	/forbidden/i,
-];
-
-// ponytail: the runtime's `isRetryableAssistantError` has no bare Node errno
-// codes (it matches "connection refused", not "ECONNREFUSED"); this tiny
-// supplement covers them. Drop an entry when pi-ai starts matching it.
-const TRANSIENT_ERRNO = /\b(?:ECONNREFUSED|ECONNRESET|ETIMEDOUT|EPIPE)\b/;
-
-/**
- * Check order is quota -> auth -> transient -> unknown, so a quota or auth text
- * that also carries a transient-looking marker ("429 insufficient_quota",
- * "403 ... network policy") never rides the transient ladder. Transient is the
- * runtime's own retryability verdict (`isRetryableAssistantError`, reused so the
- * watchdog and the agent retry loop agree) plus the errno supplement above.
- * Auth pauses immediately; unknown rides the transient ladder but counts toward
- * the breaker. Accepted consequence of reusing the runtime regex: a bare 429/5xx
- * number anywhere in the text ("request id 503") counts as transient, as it does
- * for the runtime retry loop.
- */
-export function classifyProviderError(message: string): ProviderErrorKind {
-	if (QUOTA_PATTERNS.some((re) => re.test(message))) return "quota";
-	if (AUTH_PATTERNS.some((re) => re.test(message))) return "auth";
-	if (isRetryableAssistantError({ stopReason: "error", errorMessage: message } as RuntimeMessage)) return "transient";
-	if (TRANSIENT_ERRNO.test(message)) return "transient";
-	return "unknown";
-}
-
-// --- Backoff ladders -----------------------------------------------------------
-
-/**
- * Base delay for a backoff rung in ms; rungs beyond the ladder clamp to the
- * last step. Deterministic: apply `jitteredDelayMs` at the point of use.
- */
-export function nextLadderDelayMs(kind: "transient" | "quota", rung: number): number {
-	const ladder = kind === "quota" ? QUOTA_LADDER_MIN : TRANSIENT_LADDER_MIN;
-	return ladder[Math.min(Math.max(rung, 0), ladder.length - 1)] * 60_000;
-}
-
-/**
- * Probe-jitter policy for the #32 backoff effect path.
- *
- * - `symmetric` (±20%, `jitteredDelayMs`): default for pure ladder steps, so
- *   parallel sessions wake the provider apart on recovery.
- * - `after` (0…+20%, `jitterAfterMs`): a reset-time-driven probe may only fire
- *   AT or AFTER the advertised reset instant — an early wake fails for certain
- *   and would burn the one probe the ladder bought.
- */
-export type ProbeJitter = "symmetric" | "after";
-
-/** Minute/hour/second unit table for REL_RESET_RE capture 2 (keyed by first letter). */
-const RESET_UNITS: Record<string, number> = { m: 60_000, h: 3_600_000, s: 1_000 };
-
-/** Probe text: a minimal nudge, not a prompt (flow.html section 6). */
-export const PROBE_TEXT = "drain-watchdog probe: continue the drain flow.";
-
-/** Any "reset/retry/try again ... at/after/in" hint — cheap pre-filter before the precise parses. */
-const RESET_HINT = /\b(?:resets?|try again|retry)\b[^.\n]*\b(?:at|after|in)\b/i;
-/** Relative reset: "reset after 5m", "resets in 30 minutes", "retry after 300 seconds". */
-const REL_RESET_RE = /\b(?:reset|resets|retry|try again)[^\d\n]{0,20}(\d{1,4})\s*(m(?:in(?:ute)?)?s?|h(?:our)?s?|s(?:econd)?s?)\b/i;
-/** Absolute ISO-ish reset: "reset at 2026-01-31T14:32" (date required — "at 14:32" is the clock form). */
-const ISO_RESET_RE = /\b\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(?::\d{2})?\b/;
-/** Clock-time reset: "resets at 14:32" / "reset at 2:07:00 PM" (pad via 24h conversion). */
-const CLOCK_RESET_RE = /\b(?:reset|resets|retry|try again)[^.\n]{0,20}at\s+(\d{1,2}:\d{2}(?::\d{2})?)\s*(AM|PM)?/i;
-
-/** Probe text goes to the model as a steer; keep it structurally minimal and distinct. */
-export function isProbeText(content: string): boolean {
-	return content === PROBE_TEXT;
-}
-
-/**
- * Reset time carried by a provider error, as a delay in ms from `now`.
- *
- * Accepted (loose, English provider texts; case-insensitive):
- *   "reset after 5m" / "resets in 5 minutes" / "retry after 300 seconds"
- *   "try again after 90m" — a window over MAX_RESET_DELAY_MS is unusable (null);
- *   "resets at 14:32"           — clock time (HH:MM or HH:MM:SS), today or +1 day, LOCAL
- *   "reset at 2026-01-31T14:32" — ISO-ish date-time (offset-less forms parse LOCAL)
- *
- * Returns null when the text carries no usable reset time (caller keeps the
- * ladder step): no hint, a window over MAX_RESET_DELAY_MS (any form), or a
- * relative window of 0. An absolute instant that already passed (clock skew,
- * provider slack) is usable and clamps to 0, so it probes immediately. A reset
- * inside the window is honored as-is.
- *
- * MAX_RESET_DELAY_MS ceiling (ponytail: fixed to 30 min; raise toward the 3 h
- * quota rung when a real provider advertises a longer window): a longer window
- * is not honored and the ladder step applies instead (extra early probes, never
- * a probe that out-waits the run). The outage budget stays the long-horizon
- * bound and pauses loudly.
- * Clock form: built with local `setHours`, so a DST transition can skew it by
- * +-1 h; the cap check bounds that harm (delay lands in [0, cap] or null).
- */
-export const MAX_RESET_DELAY_MS = 30 * 60_000;
-export function parseResetTimeMs(message: string, now: number): number | null {
-	if (!RESET_HINT.test(message)) return null;
-	const rel = REL_RESET_RE.exec(message);
-	if (rel !== null) {
-		const n = Number.parseInt(rel[1]!, 10);
-		const ms = n * RESET_UNITS[rel[2]![0]!.toLowerCase()]!;
-		if (ms <= 0 || ms > MAX_RESET_DELAY_MS) return null;
-		return ms;
-	}
-	const iso = ISO_RESET_RE.exec(message);
-	if (iso !== null) {
-		const t = Date.parse(iso[0]!);
-		if (Number.isNaN(t)) return null;
-		const delay = Math.max(t - now, 0);
-		return delay > MAX_RESET_DELAY_MS ? null : delay;
-	}
-	const clock = CLOCK_RESET_RE.exec(message);
-	if (clock === null) return null;
-	const [hh, mm, ss] = clock[1]!.split(":").map(Number);
-	if (!Number.isFinite(hh) || !Number.isFinite(mm)) return null;
-	const ampm = clock[2]?.toUpperCase();
-	const hour24 = ampm === "PM" && hh < 12 ? hh + 12 : ampm === "AM" && hh === 12 ? 0 : hh;
-	const target = new Date(now);
-	target.setHours(hour24, mm!, ss ?? 0, 0);
-	if (target.getTime() <= now) target.setDate(target.getDate() + 1);
-	const delay = target.getTime() - now;
-	return delay > MAX_RESET_DELAY_MS ? null : delay;
-}
-
-/**
- * Probe delay for a provider error at `now`, on `kind`'s ladder at `rung`.
- * A parsed reset time overrides (clamped) the ladder step; a plain ladder
- * step comes back symmetric-jitter, a reset-driven step `after`-jitter.
- */
-export function probeDelayForError(
-	message: string,
-	now: number,
-	kind: "transient" | "quota",
-	rung: number,
-): { delayMs: number; jitter: ProbeJitter } {
-	const reset = parseResetTimeMs(message, now);
-	if (reset !== null) return { delayMs: reset, jitter: "after" };
-	return { delayMs: nextLadderDelayMs(kind, rung), jitter: "symmetric" };
-}
-
-/**
- * Jittered delay: `baseMs` scaled into ±20% by an injected `r` in [0, 1)
- * (the caller passes Math.random(); the core stays pure). r outside [0, 1] is
- * clamped and NaN is treated as the midpoint, so a bad source never widens the
- * band.
- */
-export function jitteredDelayMs(baseMs: number, r: number): number {
-	const unit = Number.isNaN(r) ? 0.5 : Math.min(Math.max(r, 0), 1);
-	return Math.round(baseMs * (1 - JITTER_FRACTION + 2 * JITTER_FRACTION * unit));
-}
-
-/**
- * Upward-only jitter for reset-driven probes: `baseMs` scaled into [baseMs,
- * baseMs*1.2] by an injected `r` in [0, 1). A probe waiting out a provider's
- * reset instant may fire AT or AFTER the advertised time — never before it,
- * or the wake fails for certain. Bounds/clamp/NaN follow `jitteredDelayMs`.
- */
-export function jitterAfterMs(baseMs: number, r: number): number {
-	const unit = Number.isNaN(r) ? 0.5 : Math.min(Math.max(r, 0), 1);
-	return Math.round(baseMs * (1 + JITTER_FRACTION * unit));
-}
-
 // NOTE (recorded): the cooldown ladder is keyed on the run's TOTAL nudge
 // count, not the no-progress streak, so after 5 nudges every re-nudge waits 30
 // min even with progress in between. Design wording ("grows per nudge without
@@ -537,16 +318,6 @@ export function watchdogToolGate(kind: WatchdogToolKind, childSession: boolean, 
 // #30's factory consumes these; all decisions stay pure and asserted here so the
 // ONE test seam of #27 holds. No pi API types appear above the factory below.
 
-/** Positive-int env var reader; non-numeric or <=0 values fall back. Same
- *  naming contract as pi-idle-compact's readIntEnv, but env is passed in so
- *  the self-check can assert it without touching process state. */
-export function readIntEnv(env: Record<string, string | undefined>, name: string, fallback: number): number {
-	const raw = env[name];
-	if (!raw) return fallback;
-	const parsed = Number.parseInt(raw, 10);
-	return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
-}
-
 export type WatchdogSubcommand = { sub: "prep" | "resume" | "off" | "status"; ref: string | null };
 
 /**
@@ -577,23 +348,6 @@ export function targetToolGate(childSession: boolean, discovering: boolean): Too
 	if (childSession) return { ok: false, error: "watchdog_target is main-session only; child sessions cannot invoke it" };
 	if (!discovering) return { ok: false, error: "watchdog_target ignored: no target selection is pending; the operator starts one with /watchdog" };
 	return { ok: true };
-}
-
-export type RunMessage = { role?: unknown; stopReason?: unknown; errorMessage?: unknown };
-
-/**
- * Error text of the last assistant message in the run that ended with
- * stopReason "error" (scanned from the end); null when the run had no error.
- * Aborted runs report `aborted` and are handled by the abort event instead.
- */
-export function extractLastError(messages: readonly RunMessage[]): string | null {
-	for (let i = messages.length - 1; i >= 0; i--) {
-		const m = messages[i];
-		if (typeof m !== "object" || m === null) continue;
-		if (m.role !== "assistant" || m.stopReason !== "error") continue;
-		return typeof m.errorMessage === "string" && m.errorMessage !== "" ? m.errorMessage : "unknown provider error";
-	}
-	return null;
 }
 
 export const SUBAGENT_SPAWN_TOOLS = ["subagent", "subagent_resume"] as const;
@@ -649,7 +403,6 @@ export type WidgetView = {
 	/** Time until the watchdog may nudge (idle grace and cooldown); 0 = due at the next tick. */
 	nudgeInMs?: number;
 	pausedReason: string | null;
-	backoffKind: "transient" | "quota" | null;
 };
 
 const ANSI = { reset: "\x1b[0m", bold: "\x1b[1m", dim: "\x1b[2m", red: "\x1b[31m", green: "\x1b[32m", yellow: "\x1b[33m", cyan: "\x1b[36m" } as const;
@@ -663,7 +416,7 @@ function clock(ms: number): string {
 /**
  * The persistent watchdog widget (string[] above the editor), or null when
  * there is nothing to show (OFF without a PREP). Green ARMED, yellow
- * BACKOFF/PREP, red PAUSED, dim DONE. Pure: the effect layer
+ * PREP, red PAUSED, dim DONE. Pure: the effect layer
  * supplies the view and the clock.
  */
 export function watchdogWidgetLines(v: WidgetView): string[] | null {
@@ -675,9 +428,6 @@ export function watchdogWidgetLines(v: WidgetView): string[] | null {
 	switch (v.phase) {
 		case "armed":
 			[head, color, hint] = ["\u25cf ARMED", "green", "/watchdog status \u00b7 Esc jeda \u00b7 /watchdog off"];
-			break;
-		case "backoff":
-			[head, color, hint] = [`\u25d0 BACKOFF${v.backoffKind === null ? "" : ` (${v.backoffKind})`}`, "yellow", "probe otomatis \u00b7 Esc jeda \u00b7 /watchdog off"];
 			break;
 		case "paused":
 			[head, color, hint] = ["\u25cb PAUSED", "red", "/watchdog resume \u00b7 /watchdog off"];
@@ -721,16 +471,16 @@ export function watchdogCompletions(prefix: string): { value: string; label: str
 const STATE_ENTRY_TYPE = "drain-watchdog-state";
 
 /** Valid DrainPhase values, for restoring persisted state without trusting it. */
-const DRAIN_PHASES: readonly DrainPhase[] = ["off", "armed", "backoff", "paused", "done"];
+const DRAIN_PHASES: readonly DrainPhase[] = ["off", "armed", "paused", "done"];
 
 /**
- * A live run a new PREP must not replace (the run is being observed: work,
- * backoff probe). `/watchdog off` is the way out; PAUSED has
+ * A live run a new PREP must not replace (the run is being observed).
+ * `/watchdog off` is the way out; PAUSED has
  * its own resume path. One definition, used by the PREP guard and the status
  * detail line, so a phase added to the live loop cannot silently miss a guard
  * again.
  */
-export const isActivePhase = (phase: DrainPhase): boolean => phase === "armed" || phase === "backoff";
+export const isActivePhase = (phase: DrainPhase): boolean => phase === "armed";
 
 /**
  * Latest valid persisted watchdog state from session entries (null when the
@@ -753,11 +503,7 @@ function isValidDrainField(key: string, value: unknown): boolean {
 		case "noProgressStreak":
 		case "nudgeCount":
 		case "nextAllowedAt":
-		case "backoffRung":
 			return typeof value === "number" && Number.isFinite(value);
-		case "backoffKind":
-			return value === null || value === "transient" || value === "quota";
-		case "backoffStartMs":
 		case "lastStallNotifyAt":
 			return value === null || (typeof value === "number" && Number.isFinite(value));
 		case "pausedReason":
@@ -782,22 +528,18 @@ export function restoreDrainState(entries: readonly unknown[]): DrainState | nul
 		if (entry.type !== "custom" || entry.customType !== STATE_ENTRY_TYPE) continue;
 		if (typeof entry.data !== "object" || entry.data === null) continue;
 		const data = entry.data as Record<string, unknown>;
-		if (typeof data.phase !== "string" || !DRAIN_PHASES.includes(data.phase as DrainPhase)) continue;
+		// ponytail: old persisted runs may carry phase "backoff" (removed); restore them as armed. Remove this line later.
+		const phase = data.phase === "backoff" ? "armed" : data.phase;
+		if (typeof phase !== "string" || !DRAIN_PHASES.includes(phase as DrainPhase)) continue;
 		const merged: Record<string, unknown> = { ...INITIAL_STATE };
 		for (const key of Object.keys(INITIAL_STATE)) {
 			if (!Object.hasOwn(data, key)) continue;
 			const value = data[key];
 			// H4: `typeof value === typeof fallback` broke every nullable field
-			// (backoffKind/backoffStartMs/pausedReason default to `null`, and
-			// `typeof null === "object"`), so any real persisted value — a string or
-			// number — never matched and silently fell back to null. That dropped a
-			// restored BACKOFF's kind/start time, so session_start fell back to the
-			// transient ladder (`backoffKind ?? "transient"`) and the outage budget
-			// restarted (`backoffStartMs !== null && ...` always read as a fresh
-			// outage) even when the real outage was a 12h quota backoff already
-			// hours in. Validate each key by its real shape instead.
+			// (`typeof null === "object"`), so validate each key by its real shape.
 			if (isValidDrainField(key, value)) merged[key] = value;
 		}
+		merged.phase = phase;
 		return merged as DrainState;
 	}
 	return null;
@@ -827,11 +569,8 @@ const stay = (state: DrainState): DrainTransition => ({ state, action: WAIT, ref
 
 const PAUSE_REASON = {
 	queue: "no tickets declared in the watchdog ticket tree",
-	auth: "provider auth error; needs human",
-	unknown: "repeated unknown provider errors with no progress",
 	breaker: "no progress after breaker nudges; run paused",
 	hardCap: "hard nudge cap reached; run paused",
-	outage: "provider outage budget exhausted",
 	abort: "aborted (Esc/abort)",
 	llmStop: "watchdog_stop",
 } as const;
@@ -854,51 +593,18 @@ const toPaused = (state: DrainState, reason: string): DrainTransition => ({
  * `llmDone` (watchdog_done) is accepted from ARMED only, and only with a live
  * observation that `doneRefusal` clears (no pickable ticket, no children); a
  * refused claim is a no-op that keeps the run going, and the tool reports the
- * reason back to the model. BACKOFF never accepts it: a provider outage is not
- * a finished run.
+ * reason back to the model.
  */
 const EVENT_PHASES: Record<DrainEvent["type"], readonly DrainPhase[]> = {
 	arm: ["off"],
-	off: ["armed", "backoff", "paused"],
+	off: ["armed", "paused"],
 	resume: ["paused"],
-	abort: ["armed", "backoff"],
+	abort: ["armed"],
 	tick: ["armed"],
-	providerError: ["armed", "backoff"],
-	probeOk: ["backoff"],
-	llmStop: ["armed", "backoff"],
+	llmStop: ["armed"],
 	llmDone: ["armed"],
-	progress: ["armed", "backoff"],
+	progress: ["armed"],
 };
-
-/**
- * Enter/escalate BACKOFF and emit the probe action. #32: when the error text
- * carries a reset time, `probeDelayForError` overrides (clamped) the ladder
- * step; a reset-driven probe is flagged `after`-jitter so the effect layer
- * never schedules it before the advertised reset instant.
- */
-function enterBackoff(
-	state: DrainState,
-	kind: "transient" | "quota",
-	now: number,
-	escalate: boolean,
-	message: string | undefined,
-): DrainTransition {
-	const rung = escalate ? state.backoffRung + 1 : 0;
-	const probe = probeDelayForError(message ?? "", now, kind, rung);
-	return {
-		state: {
-			...state,
-			phase: "backoff",
-			backoffKind: kind,
-			backoffRung: rung,
-			backoffStartMs: state.backoffStartMs ?? now,
-			pausedReason: null,
-			nextAllowedAt: now,
-		},
-		action: { type: "probe", delayMs: probe.delayMs, jitter: probe.jitter },
-		refusal: null,
-	};
-}
 
 /**
  * The only place a nudge is recorded: breaker and hard-cap
@@ -925,23 +631,11 @@ function recordNudge(
 	};
 }
 
-/**
- * M2: idleGraceMs/stallLimitMs are configurable (PI_WATCHDOG_IDLE_GRACE_MS /
- * PI_WATCHDOG_STALL_LIMIT_MS, Nix module options) but the decision used to
- * always read the frozen IDLE_GRACE_MS/STALL_LIMIT_MS constants — the options
- * only changed notify/audit text, never the actual threshold. Default to the
- * constants so every pre-#30-M2 call site (including every self-check row)
- * keeps its exact behavior; only the factory's live tick() passes the
- * configured values through.
- */
-export type TickConfig = { idleGraceMs: number; stallLimitMs: number };
-export const DEFAULT_TICK_CONFIG: TickConfig = { idleGraceMs: IDLE_GRACE_MS, stallLimitMs: STALL_LIMIT_MS };
-
-function handleTick(state: DrainState, obs: TickObservation, now: number, config: TickConfig): DrainTransition {
+function handleTick(state: DrainState, obs: TickObservation, now: number): DrainTransition {
 	// Cycle-start activity: legitimately busy; the effect layer resets the idle clock.
 	if (obs.running || obs.pendingMessages) return stay(state);
 	// Idle grace shields steer deliveries that just landed.
-	if (obs.allIdleForMs < config.idleGraceMs) return stay(state);
+	if (obs.allIdleForMs < IDLE_GRACE_MS) return stay(state);
 	// Nudge cooldown (design order: cooldown gate sits before the queue observation).
 	if (now < state.nextAllowedAt) return stay(state);
 
@@ -953,45 +647,19 @@ function handleTick(state: DrainState, obs: TickObservation, now: number, config
 		// without a cooldown this re-notified (and would re-run any future queue
 		// re-check tied to it) on EVERY tick of an already-reported stall. Only
 		// re-notify once another full stall window has passed since the last one.
-		if (obs.progressAgeMs >= config.stallLimitMs && (state.lastStallNotifyAt === null || now - state.lastStallNotifyAt >= config.stallLimitMs)) {
+		if (obs.progressAgeMs >= STALL_LIMIT_MS && (state.lastStallNotifyAt === null || now - state.lastStallNotifyAt >= STALL_LIMIT_MS)) {
 			return { state: { ...state, lastStallNotifyAt: now }, action: { type: "stallNotify" }, refusal: null };
 		}
 		return stay(state);
 	}
 
-	// Provider error on the last ended run hands over to the backoff path.
-	if (obs.lastError !== null) return onProviderError(state, classifyProviderError(obs.lastError), now, obs.lastError);
 
 	// Nudge is the last resort.
 	return recordNudge(state, now, { type: "nudge" });
 }
 
-function onProviderError(state: DrainState, kind: ProviderErrorKind, now: number, message: string | undefined): DrainTransition {
-	if (kind === "auth") return toPaused(state, PAUSE_REASON.auth);
-	const inBackoff = state.phase === "backoff";
-	// Unknown errors count toward the breaker.
-	const streak = kind === "unknown" ? state.noProgressStreak + 1 : state.noProgressStreak;
-	if (streak >= BREAKER_K) return toPaused({ ...state, noProgressStreak: streak }, PAUSE_REASON.unknown);
-	if (inBackoff) {
-		// A quota error upgrades a transient-opened outage to the quota ladder (rung
-		// 0 = 30 min) and the 12 h budget, still measured from the outage start.
-		// Transient/unknown errors keep the kind that opened the outage: unknown
-		// inside a quota outage deliberately stays on the (longer) quota ladder, a
-		// conservative deviation from "unknown -> transient ladder".
-		const upgrade = kind === "quota" && state.backoffKind !== "quota";
-		const outageKind = upgrade ? "quota" : (state.backoffKind ?? "transient");
-		const budget = outageKind === "quota" ? QUOTA_OUTAGE_BUDGET_MS : TRANSIENT_OUTAGE_BUDGET_MS;
-		if (state.backoffStartMs !== null && now - state.backoffStartMs >= budget) {
-			return toPaused(state, PAUSE_REASON.outage);
-		}
-		return enterBackoff({ ...state, noProgressStreak: streak }, outageKind, now, !upgrade, message);
-	}
-	// Outside backoff: enter at rung 0. Unknown rides the transient ladder.
-	return enterBackoff({ ...state, noProgressStreak: streak }, kind === "quota" ? "quota" : "transient", now, false, message);
-}
-
 /** Fixed tick order per the design; the nudge is always the last resort. */
-export function transition(state: DrainState, event: DrainEvent, now: number, config: TickConfig = DEFAULT_TICK_CONFIG): DrainTransition {
+export function transition(state: DrainState, event: DrainEvent, now: number): DrainTransition {
 	if (!EVENT_PHASES[event.type].includes(state.phase)) {
 		// arm from OFF is the only place a refusal is reported; a no-op event never is.
 		return stay(state);
@@ -1014,22 +682,12 @@ export function transition(state: DrainState, event: DrainEvent, now: number, co
 				...state,
 				phase: "armed",
 				noProgressStreak: 0,
-				backoffKind: null,
-				backoffRung: 0,
-				backoffStartMs: null,
 				pausedReason: null,
 			});
 		case "abort":
 			return toPaused(state, PAUSE_REASON.abort);
 		case "tick":
-			return handleTick(state, event.obs, now, config);
-		case "providerError":
-			return onProviderError(state, event.kind, now, event.message);
-		case "probeOk":
-			// One successful probe restores normal behavior and resets the ladder. It is
-			// NOT progress, so the no-progress streak survives: a stuck run must still
-			// reach the breaker/hard cap through a provider blip.
-			return stay({ ...state, phase: "armed", backoffKind: null, backoffRung: 0, backoffStartMs: null });
+			return handleTick(state, event.obs, now);
 		case "llmStop":
 			// watchdog_stop is an explicit pause: the model named environment-level breakage,
 			// and its reason travels into pausedReason/audit/notify verbatim.
@@ -1047,7 +705,6 @@ export function transition(state: DrainState, event: DrainEvent, now: number, co
 		case "progress":
 			// Ticket-tree changes, child steers and handoffs are progress,
 			// not stalls. One event: callers report all three as `progress`.
-			if (state.phase === "backoff") return stay({ ...state, noProgressStreak: 0 });
 			return stay({ ...state, noProgressStreak: 0, nextAllowedAt: now });
 	}
 }
@@ -1059,7 +716,6 @@ export function transition(state: DrainState, event: DrainEvent, now: number, co
 
 const AUDIT_ENTRY_TYPE = "drain-watchdog-audit";
 const NUDGE_MESSAGE_TYPE = "drain-watchdog-nudge";
-const PROBE_MESSAGE_TYPE = "drain-watchdog-probe";
 
 const PREP_INSTRUCTION = (target: string, pickable: number): string =>
 	`drain-watchdog PREP for ${target}: the declared ticket tree has ${pickable} pickable ticket(s). End your turn now; the operator is asked to confirm arming.\n${SYNC_REMINDER}`;
@@ -1081,29 +737,16 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 	// Every tool execute() runs in the same (main-session) process that armed the
 	// watchdog, so these locals ARE the live state; the gate reads them per call.
 
-	const env = process.env as Record<string, string | undefined>;
-	const tickMs = readIntEnv(env, "PI_WATCHDOG_TICK_MS", TICK_MS);
-	// M2: handleTick now takes these two as a TickConfig param (passed at the
-	// tick() call site below), so both can move freely in either direction —
-	// previously only handleTick's own frozen IDLE_GRACE_MS/STALL_LIMIT_MS
-	// constants decided, and these env values only changed notify/audit text.
-	const idleGraceMs = readIntEnv(env, "PI_WATCHDOG_IDLE_GRACE_MS", IDLE_GRACE_MS);
-	const stallLimitMs = readIntEnv(env, "PI_WATCHDOG_STALL_LIMIT_MS", STALL_LIMIT_MS);
-	// ponytail: only the three timing knobs are env-wired; BREAKER_K and HARD_CAP
-	// live inside the core's recordNudge and wiring them would mean a core change.
-	// Make them env-tunable when a second consumer boots with different thresholds.
 
 	type Timer = ReturnType<typeof setTimeout>;
 
 	let latestCtx: ExtensionContext | null = null;
 	let state: DrainState = { ...INITIAL_STATE };
 	let timer: Timer | null = null;
-	let probeTimer: Timer | null = null;
 	let tickInFlight = false;
 	let widgetTimer: Timer | null = null;
 	let uiPromptDepth = 0;
 	let childCount = 0;
-	let probeInFlight = false;
 	let idleSinceMs = Date.now();
 	let progressSinceMs = idleSinceMs;
 	let runTarget: string | null = null;
@@ -1119,7 +762,7 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 
 	// M1: set true in session_shutdown, reset false in session_start. Checked after every
 	// await that precedes a state mutation or timer creation (tick, agent_settled's
-	// ui.confirm, runPrep's awaits, scheduleProbe's delayed delivery) so no in-flight
+	// ui.confirm, runPrep's awaits) so no in-flight
 	// async work can arm/nudge/persist/start a timer after teardown.
 	let closed = false;
 	const clearTickTimer = () => {
@@ -1132,15 +775,8 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 			widgetTimer = null;
 		}
 	};
-	const clearProbeTimer = () => {
-		if (probeTimer !== null) {
-			clearTimeout(probeTimer);
-			probeTimer = null;
-		}
-	};
 	const clearTimers = () => {
 		clearTickTimer();
-		clearProbeTimer();
 	};
 
 	const notify = (message: string, level: "info" | "warning" | "error" = "info") => {
@@ -1167,36 +803,12 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 
 	const startLoop = () => {
 		if (closed) return; // M1: never start a timer after session_shutdown.
-		// H3: only the tick interval is (re)created here. Clearing the probe timer too
-		// used to wedge a restored BACKOFF run: session_start calls scheduleProbe(...)
-		// then startLoop() to keep ticks alive for probeOk, and this killed the probe
-		// it had just scheduled a line above, so BACKOFF never woke up again.
 		clearTickTimer();
 		timer = setInterval(() => {
 			void tick();
-		}, tickMs);
+		}, TICK_MS);
 		// Countdown to the next nudge moves per second; the tick only runs per minute.
 		widgetTimer = setInterval(refreshWidget, WIDGET_REFRESH_MS);
-	};
-
-	/**
-	 * Probe timer at the effect boundary (#32): the core's probe action carries the
-	 * base delay plus a jitter policy — `symmetric` for ladder steps (±20%,
-	 * parallel wakes hit the provider apart), `after` for reset-time-driven probes
-	 * (0…+20%, never before the advertised reset instant). On a failed probe
-	 * delivery BACKOFF can wedge; the next real event or /watchdog resume recovers it.
-	 */
-	const scheduleProbe = (baseDelayMs: number, jitter: ProbeJitter = "symmetric") => {
-		if (closed) return; // M1: never arm a timer after session_shutdown.
-		clearProbeTimer();
-		const delay = jitter === "after" ? jitterAfterMs(baseDelayMs, Math.random()) : jitteredDelayMs(baseDelayMs, Math.random());
-		probeTimer = setTimeout(() => {
-			probeTimer = null;
-			if (closed || state.phase !== "backoff") return; // M1: shutdown may land mid-delay.
-			probeInFlight = true;
-			audit("probe-delivered", {});
-			deliver(PROBE_MESSAGE_TYPE, PROBE_TEXT);
-		}, delay);
 	};
 
 
@@ -1218,9 +830,8 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 				nudgeCount: state.nudgeCount,
 				noProgressStreak: state.noProgressStreak,
 				idleMs: Date.now() - idleSinceMs,
-				nudgeInMs: Math.max(0, idleGraceMs - (Date.now() - idleSinceMs), state.nextAllowedAt - Date.now()),
+				nudgeInMs: Math.max(0, IDLE_GRACE_MS - (Date.now() - idleSinceMs), state.nextAllowedAt - Date.now()),
 				pausedReason: state.pausedReason,
-				backoffKind: state.backoffKind,
 			});
 			ctx.ui.setWidget(WIDGET_KEY, lines === null ? undefined : lines);
 		} catch {
@@ -1240,11 +851,10 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 		runTarget = target;
 		idleSinceMs = progressSinceMs = Date.now();
 		childCount = 0;
-		probeInFlight = false;
 		persist();
 		audit("armed", { target, pickable, tickets: tickets.length });
 		startLoop();
-		notify(`drain-watchdog ARMED on ${target}: tick every ${Math.round(tickMs / 1000)}s.`, "info");
+		notify(`drain-watchdog ARMED on ${target}: tick every ${Math.round(TICK_MS / 1000)}s.`, "info");
 		return true;
 	};
 
@@ -1252,7 +862,7 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 		const previous = state;
 		state = t.state;
 		if (state !== previous) persist();
-		// L1: resume/off/probeOk/restored-paused/provider-error-to-backoff change phase but
+		// L1: resume/off/restored-paused change phase but
 		// previously wrote no audit entry at all (only the persisted state entry); the
 		// ticket requires an audit trail for every state change, not just the subset of
 		// actions below that already happen to audit something.
@@ -1265,8 +875,8 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 				deliver(NUDGE_MESSAGE_TYPE, buildNudgeText({ target: runTarget, pickable: pickableIds(state.tickets).length }));
 				break;
 			case "stallNotify":
-				audit("stall-notify", { children: childCount, stallLimitMs });
-				notify(`drain-watchdog: children are running but no progress for ${Math.round(stallLimitMs / 60_000)}m — inspect the herdr panes; no nudge sent.`, "warning");
+				audit("stall-notify", { children: childCount, stallLimitMs: STALL_LIMIT_MS });
+				notify(`drain-watchdog: children are running but no progress for ${Math.round(STALL_LIMIT_MS / 60_000)}m — inspect the herdr panes; no nudge sent.`, "warning");
 				break;
 			case "pause":
 				clearTimers();
@@ -1278,10 +888,6 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 				audit("done", { target: runTarget, report: doneReport(state.tickets) });
 				notify(`drain-watchdog ${doneReport(state.tickets)}`, "info");
 				runTarget = null;
-				break;
-			case "probe":
-				audit("probe-scheduled", { rung: state.backoffRung, delayMs: t.action.delayMs, jitter: t.action.jitter });
-				scheduleProbe(t.action.delayMs, t.action.jitter);
 				break;
 		}
 	};
@@ -1298,11 +904,10 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 			return;
 		}
 		if (state.phase !== "armed") {
-			if (state.phase === "backoff") return; // only the probe ladder drives BACKOFF
 			clearTimers();
 			return;
 		}
-		if (now - idleSinceMs < idleGraceMs) return;
+		if (now - idleSinceMs < IDLE_GRACE_MS) return;
 		if (now < state.nextAllowedAt) return;
 		tickInFlight = true;
 		try {
@@ -1316,16 +921,8 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 				queueOk: q.ok,
 				pickable: q.pickable,
 				progressAgeMs: observedAt - progressSinceMs,
-				// Provider errors are reported once, from the run outcome, via the
-				// providerError event — re-reporting the same failure every tick would
-				// escalate the ladder without probes.
-				lastError: null,
 			};
-			// M2: idleGraceMs/stallLimitMs are the configured (env/module) values — the
-			// core's own threshold must match the one already gating the pre-filter
-			// below and the notify/audit text, or shortening either option silently
-			// does nothing.
-			apply(transition(state, { type: "tick", obs }, observedAt, { idleGraceMs, stallLimitMs }), "tick");
+			apply(transition(state, { type: "tick", obs }, observedAt), "tick");
 		} catch (e) {
 			// H2: `startLoop` fires `void tick()` with no caller-side catch, so any throw
 			// here (apply/appendEntry/sendMessage can throw) becomes an unhandled
@@ -1388,7 +985,6 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 		state = { ...INITIAL_STATE };
 		clearTimers();
 		childCount = 0;
-		probeInFlight = false;
 		readyDeclared = false;
 		prepTarget = null;
 		prepTickets = [];
@@ -1422,7 +1018,6 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 				prepTickets = [];
 				clearTimers();
 				childCount = 0;
-				probeInFlight = false;
 				notify("drain-watchdog: off");
 				refreshWidget();
 				return;
@@ -1681,7 +1276,6 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 		closed = false; // M1: a fresh session may create timers again.
 		clearTimers();
 		childCount = 0;
-		probeInFlight = false;
 		uiPromptDepth = 0;
 		prepTarget = null;
 		prepTickets = [];
@@ -1701,16 +1295,6 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 			startLoop();
 			refreshWidget();
 			notify(`drain-watchdog: restored live run (${state.phase}) after restart`);
-		} else if (state.phase === "backoff") {
-			audit("restored", { phase: "backoff", kind: state.backoffKind, rung: state.backoffRung });
-			// #32: the raw error text is not persisted, so a restored BACKOFF re-probes on
-			// the ladder step (symmetric jitter); only the live outage that just parsed a
-			// reset time gets the reset-driven `after` jitter. The outage budget still
-			// measures from the restored backoffStartMs, so no budget time is lost.
-			scheduleProbe(nextLadderDelayMs(state.backoffKind ?? "transient", state.backoffRung));
-			// The probe timer also needs the tick loop alive for probeOk restoration.
-			startLoop();
-		} else {
 			// PAUSED stays paused (resume is the only exit from a paused run).
 			audit("restored", { phase: "paused", reason: state.pausedReason }); // L1
 			notify(`drain-watchdog: restored PAUSED — ${state.pausedReason ?? "unknown reason"}. /watchdog resume`, "warning");
@@ -1755,22 +1339,6 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 			progressSinceMs = Date.now();
 			// A completion steer is progress; the run stays live (nextAllowedAt reset).
 			apply(transition(state, { type: "progress" }, Date.now()), "child-completion");
-		}
-	});
-
-	pi.on("agent_end", (event) => {
-		// Reset before classifying: a probe that itself errors must not leave a stale
-		// flag that launders an unrelated later run into a false probeOk.
-		const wasProbe = probeInFlight;
-		probeInFlight = false;
-		const err = extractLastError(event.messages);
-		if (err !== null) {
-			// One providerError per failed run; ticks never re-report it (tick
-			// observations carry lastError: null on purpose). The raw text rides along:
-			// the #32 probe seam parses a carried reset time out of it.
-			apply(transition(state, { type: "providerError", kind: classifyProviderError(err), message: err }, Date.now()), "provider-error");
-		} else if (wasProbe) {
-			apply(transition(state, { type: "probeOk" }, Date.now()), "probe-ok");
 		}
 	});
 
