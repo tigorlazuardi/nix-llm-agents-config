@@ -259,7 +259,7 @@ export function upsertTickets(current: readonly Ticket[], inputs: readonly Ticke
 		const same = next.state === old.state && next.reason === old.reason && next.blockedBy.length === old.blockedBy.length && next.blockedBy.every((b, i) => b === old.blockedBy[i]);
 		if (same) continue;
 		bump(next.state !== old.state ? `${old.state}->${next.state}` : "updated");
-		if (next.state !== old.state && next.state !== "open") closed.push(next.id);
+		if (next.state !== "open") closed.push(next.id);
 		tickets[idx] = next;
 	}
 	const parts = [...tally].map(([label, n]) => `${n} ${label}`);
@@ -1273,7 +1273,7 @@ const DISCOVER_INSTRUCTION = (ref: string | null): string =>
 		"drain-watchdog PREP: the operator did not pick the run target yet" + (ref !== null && ref.trim() !== "" ? ` (they wrote: ${JSON.stringify(ref.trim())})` : "") + ".",
 		"Find the candidate run targets yourself: the map, spec, epic, or ticket(s) this work is about, in whatever tracker this project uses. Use this conversation first, then the tracker. Never ask the operator to look anything up.",
 		"Then ask the operator to choose with ask_user_question: 2-4 candidates, each labelled with its id and title, the most likely one first marked (Recommended). If exactly one candidate is clearly right, still confirm it.",
-		"Call the watchdog_target tool with the chosen id (`issue`, any opaque string such as KRIPT-222 or #38) and `tickets`: the target's ticket tree, each { id, blockedBy?, state? } read from the tracker. It continues PREP for you. If no candidate exists, tell the operator and stop; do not guess.",
+		"Call the watchdog_target tool with the chosen id (`issue`, any opaque string such as KRIPT-222 or #38) and `tickets`: the target's ticket tree, each { id, blockedBy?, state?, reason? } read from the tracker. It continues PREP for you. If no candidate exists, tell the operator and stop; do not guess.",
 		SYNC_REMINDER,
 	].join("\n");
 
@@ -1811,7 +1811,7 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 			const parsed = parseTicketInputs(params.tickets);
 			if (!parsed.ok) return textResult(`watchdog_sync: ${parsed.error}`, true);
 			const result = upsertTickets(state.tickets, parsed.tickets);
-			if (result.changed === 0) return textResult(`watchdog_sync: 0 changed. ${pickableText(state.tickets)}`, false, { changed: 0 });
+			if (result.changed === 0) return textResult(`watchdog_sync: 0 changed. ${pickableText(state.tickets)} ${SYNC_REMINDER}`, false, { changed: 0 });
 			commitTickets(result.tickets, "sync", { summary: result.summary });
 			const stopNote = result.closed.length > 0 ? ` Ticket(s) ${result.closed.join(", ")} are now done/limbo: stop any live child still working on them.` : "";
 			return textResult(`watchdog_sync: ${result.summary}. ${pickableText(result.tickets)}${stopNote} ${SYNC_REMINDER}`, false, { changed: result.changed });

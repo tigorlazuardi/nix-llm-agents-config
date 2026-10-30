@@ -112,7 +112,7 @@ assert.equal(armOK.refusal, null);
 assert.equal(armOK.state.nudgeCount, 0);
 assert.equal(armOK.state.noProgressStreak, 0);
 
-// Arm refusal: pickable 0 and failed queue command both refuse; refusal never arms.
+// Arm refusal: pickable 0 and no tickets declared both refuse; refusal never arms.
 assert.equal(armRefusal(0, true), "no pickable work (pickable = 0); refusing to arm");
 assert.equal(armRefusal(0, false), "no tickets declared; refusing to arm");
 assert.equal(armRefusal(7, true), null);
@@ -636,6 +636,8 @@ const tk = (id: string, state: Ticket["state"] = "open", blockedBy: string[] = [
 	assert.deepEqual(sync.tickets.find((t) => t.id === "C"), tk("C", "open", ["A"]), "an unsent field keeps its stored value");
 	assert.deepEqual(sync.closed, ["A"], "only a ticket that went limbo/done is flagged for stopping a live child");
 	assert.equal(sync.tickets.length, 4, "nothing is deleted");
+	assert.deepEqual(upsertTickets([tk("A", "limbo")], [{ id: "A", reason: "edited" }]).closed, ["A"], "a reason edit on an already-limbo ticket still flags the live child");
+	assert.deepEqual(upsertTickets([tk("A")], [{ id: "A", reason: "edited" }]).closed, [], "an open ticket edit flags nothing");
 	assert.equal(upsertTickets(base, [{ id: "A" }]).changed, 0, "a no-op sync changes nothing");
 	assert.deepEqual(base.map((t) => t.state), ["open", "done", "open"], "upsert does not mutate its input");
 	assert.deepEqual(upsertTickets(base, [{ id: "C", blockedBy: ["B"] }]).tickets.find((t) => t.id === "C"), tk("C", "open", ["B"]), "blockers can be replaced");
@@ -1406,6 +1408,7 @@ await withNoAmbientSubagent(() =>
 		assert((await h.tools.watchdog_sync!.execute("s3", { tickets: [] }, undefined, undefined, h.ctx)).isError, "empty sync is refused");
 		const noop = await h.tools.watchdog_sync!.execute("s4", { tickets: [{ id: "A" }] }, undefined, undefined, h.ctx);
 		assert(!noop.isError && String(noop.content[0].text).startsWith("watchdog_sync: 0 changed"), "a no-op sync is reported as such");
+		assert(String(noop.content[0].text).includes(SYNC_REMINDER), "a no-op sync carries the reminder");
 		assert.equal(h.execCalls.length, 0, "no tracker call anywhere");
 	}),
 );
@@ -1971,7 +1974,7 @@ const liveTickTimers = (timers: { kind: string; cleared: boolean }[]) => timers.
 
 const executorRootOf = (cwd: string) => join("/tmp", "executor", executorRepoSlug(cwd));
 
-// A (live, AC3): every real /watchdog #N run arms with a target set. With no
+// A (live, AC3): every real /watchdog <ref> run arms with a target set. With no
 // executor state at all the targeted read must be silent — DONE on the empty
 // frontier, no closing-signal-anomaly audit on any tick. This is the production
 // path the restore-only rows above never exercised.
