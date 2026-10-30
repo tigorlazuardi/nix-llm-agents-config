@@ -458,7 +458,7 @@ export function isSubagentCompletionNotice(customType: unknown): boolean {
  * Nudge text (flow.html section 2): tell the model to never stop with a
  * question, continue its flow, and hand off what it may not work on.
  */
-export function buildNudgeText(p: { target: string | null; pickable: number }): string {
+export function buildNudgeText(p: { target: string | null; pickable: number; checkCommand?: string | null }): string {
 	const target = p.target === null ? "the accepted tickets" : p.target;
 	if (p.pickable <= 0) {
 		// Empty frontier, no child: the LLM decides it is finished (the tick never completes the run).
@@ -468,9 +468,10 @@ export function buildNudgeText(p: { target: string | null; pickable: number }): 
 			SYNC_REMINDER,
 		].join("\n");
 	}
+	const checkClause = p.checkCommand ? `the operator's checkCommand \`${p.checkCommand}\` exactly as written` : "the exact checkCommand";
 	return [
 		`drain-watchdog: unattended run on ${target}; you are idle with ${p.pickable} pickable ticket(s) in the watchdog ticket tree. Do not ask the user — continue the drain flow you are running now. Work in parallel, not one ticket at a time: read the frontier fresh and, while slots are free (PARALLEL_WIDTH), start every independent pickable ticket at once, each in its own worktree. All work merges into the target's integration/<slug> branch, so parallel tickets stay close to the same base and conflicts stay small.`,
-		"Do not implement a ticket yourself: stay source-read-only and run the supervise pipeline per ticket, as child agents. Fresh implementer in the ticket's worktree, then fresh standards-reviewer, then you run the exact checkCommand, then fresh deep-reviewer (spec). A FAIL goes back to a fresh implementer with the findings pointer. The pipelines of different tickets overlap: when one ticket's child finishes, advance that ticket at once and keep the other tickets' implementers and reviewers running; never wait for one ticket's whole pipeline before starting the next ticket's.",
+		`Do not implement a ticket yourself: stay source-read-only and run the supervise pipeline per ticket, as child agents. Fresh implementer in the ticket's worktree, then fresh standards-reviewer, then you run ${checkClause}, then fresh deep-reviewer (spec). A FAIL goes back to a fresh implementer with the findings pointer. The pipelines of different tickets overlap: when one ticket's child finishes, advance that ticket at once and keep the other tickets' implementers and reviewers running; never wait for one ticket's whole pipeline before starting the next ticket's.`,
 		"Ambiguous or product-question tickets, and low-tolerance work (auth/authz, secrets/credentials, DB migrations, public API contracts, money/billing, data deletion, irreversible operations), must leave the tree through watchdog_handoff (limbo, human review) instead of waiting; finished tickets go through watchdog_complete.",
 		SYNC_REMINDER,
 		"When no pickable ticket is left and no child is running, finish any closing steps (merge, PR, cleanup), then call watchdog_done; do not open new work.",
@@ -656,6 +657,20 @@ export function restoreRunTarget(entries: readonly unknown[]): string | null {
 		if (entry.type !== "custom" || entry.customType !== STATE_ENTRY_TYPE) continue;
 		if (typeof entry.data !== "object" || entry.data === null) continue;
 		const value = (entry.data as { runTarget?: unknown }).runTarget;
+		return typeof value === "string" && value.trim() !== "" ? value : null;
+	}
+	return null;
+}
+
+/** The run's operator-declared checkCommand rides the state entry like runTarget; invalid -> null. */
+export function restoreRunCheck(entries: readonly unknown[]): string | null {
+	for (let i = entries.length - 1; i >= 0; i--) {
+		const e = entries[i];
+		if (typeof e !== "object" || e === null) continue;
+		const entry = e as { type?: unknown; customType?: unknown; data?: unknown };
+		if (entry.type !== "custom" || entry.customType !== STATE_ENTRY_TYPE) continue;
+		if (typeof entry.data !== "object" || entry.data === null) continue;
+		const value = (entry.data as { runCheck?: unknown }).runCheck;
 		return typeof value === "string" && value.trim() !== "" ? value : null;
 	}
 	return null;
@@ -867,7 +882,7 @@ const DISCOVER_INSTRUCTION = (ref: string | null): string =>
 		"drain-watchdog PREP: the operator did not pick the run target yet" + (ref !== null && ref.trim() !== "" ? ` (they wrote: ${JSON.stringify(ref.trim())})` : "") + ".",
 		"Find the candidate run targets yourself: the map, spec, epic, or ticket(s) this work is about, in whatever tracker this project uses. Use this conversation first, then the tracker. Never ask the operator to look anything up.",
 		"Then ask the operator to choose with ask_user_question: 2-4 candidates, each labelled with its id and title, the most likely one first marked (Recommended). If exactly one candidate is clearly right, still confirm it.",
-		"Call the watchdog_target tool with the chosen id (`issue`, any opaque string such as KRIPT-222 or #38) and `tickets`: the target's ticket tree, each { id, blockedBy?, state?, reason? } read from the tracker. It continues PREP for you. If no candidate exists, tell the operator and stop; do not guess.",
+		"Call the watchdog_target tool with the chosen id (`issue`, any opaque string such as KRIPT-222 or #38) and `tickets`: the target's ticket tree, each { id, blockedBy?, state?, reason? } read from the tracker. If the operator named a check command (build/test/lint), pass it verbatim as the optional `checkCommand`; never invent one. It continues PREP for you. If no candidate exists, tell the operator and stop; do not guess.",
 		SYNC_REMINDER,
 	].join("\n");
 
@@ -895,6 +910,9 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 	let idleSinceMs = Date.now();
 	let progressSinceMs = idleSinceMs;
 	let runTarget: string | null = null;
+	// Optional operator-declared checkCommand: PREP proof -> run; rides the state entry.
+	let runCheck: string | null = null;
+	let prepCheck: string | null = null;
 	// PREP bookkeeping is deliberately not persisted: PREP is interactive, and an
 	// unconfirmed readiness dies with the session or the next command.
 	let prepTarget: string | null = null;
@@ -949,7 +967,7 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 	const persist = () => {
 		// runTarget rides along so a restored run keeps its target label.
 		// restoreDrainState ignores the extra key; restoreRunTarget reads it back.
-		pi.appendEntry(STATE_ENTRY_TYPE, { ...state, runTarget });
+		pi.appendEntry(STATE_ENTRY_TYPE, { ...state, runTarget, runCheck });
 		refreshWidget();
 	};
 
@@ -1010,7 +1028,7 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 		}
 	};
 
-	const armRun = (target: string, tickets: Ticket[]) => {
+	const armRun = (target: string, tickets: Ticket[], check: string | null) => {
 		const pickable = pickableIds(tickets).length;
 		const t = transition(state, { type: "arm", queueOk: tickets.length > 0, pickable }, Date.now());
 		if (t.refusal !== null) {
@@ -1020,6 +1038,7 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 		}
 		state = { ...t.state, tickets };
 		runTarget = target;
+		runCheck = check;
 		idleSinceMs = progressSinceMs = Date.now();
 		childCount = 0;
 		persist();
@@ -1044,7 +1063,7 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 				break;
 			case "nudge":
 				audit("nudge", { source, streak: state.noProgressStreak, nudgeCount: state.nudgeCount, pickable: pickableIds(state.tickets).length });
-				deliver(NUDGE_MESSAGE_TYPE, buildNudgeText({ target: runTarget, pickable: pickableIds(state.tickets).length }));
+				deliver(NUDGE_MESSAGE_TYPE, buildNudgeText({ target: runTarget, pickable: pickableIds(state.tickets).length, checkCommand: runCheck }));
 				break;
 			case "stallNotify":
 				audit("stall-notify", { children: childCount, stallLimitMs: STALL_LIMIT_MS });
@@ -1060,6 +1079,7 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 				audit("done", { target: runTarget, report: doneReport(state.tickets) });
 				notify(`drain-watchdog ${doneReport(state.tickets)}`, "info");
 				runTarget = null;
+				runCheck = null;
 				break;
 			case "probe":
 				audit("probe-scheduled", { kind: state.backoffKind, rung: state.backoffRung, delayMs: t.action.delayMs });
@@ -1129,7 +1149,7 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 	};
 
 	/** Ticket-tree proof for a chosen target (watchdog_target hand-back); the model proves readiness next. */
-	const prepProof = (target: string, tickets: Ticket[]): string | null => {
+	const prepProof = (target: string, tickets: Ticket[], check: string | null): string | null => {
 		const pickable = pickableIds(tickets).length;
 		const refusal = armRefusal(pickable, tickets.length > 0);
 		if (refusal !== null) {
@@ -1139,6 +1159,7 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 		}
 		prepTarget = target;
 		prepTickets = tickets;
+		prepCheck = check;
 		readyDeclared = true; // the confirm runs at agent_settled, after this turn really ends.
 		refreshWidget();
 		audit("prep-proof", { target, pickable, tickets: tickets.length });
@@ -1167,8 +1188,10 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 		readyDeclared = false;
 		prepTarget = null;
 		prepTickets = [];
+		prepCheck = null;
 		discovering = false;
 		runTarget = null;
+		runCheck = null;
 
 		// The extension never reads a tracker: the model finds the target and its
 		// ticket tree and hands both back through watchdog_target.
@@ -1192,9 +1215,11 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 					apply(transition(state, { type: "off" }, Date.now()), "off");
 				}
 				runTarget = null;
+				runCheck = null;
 				discovering = false;
 				prepTarget = null;
 				prepTickets = [];
+				prepCheck = null;
 				clearTimers();
 				childCount = 0;
 				notify("drain-watchdog: off");
@@ -1421,6 +1446,7 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 		parameters: Type.Object({
 			issue: Type.String({ description: "Opaque id of the run target the operator chose (map, spec, epic or ticket)" }),
 			tickets: Type.Array(ticketSchema, { description: "The ticket tree to drain: id, blockedBy, optional state" }),
+			checkCommand: Type.Optional(Type.String({ description: "Optional: the exact command that verifies a ticket (build/test/lint). Only when the operator named one; never invent it." })),
 		}),
 		async execute(_id, params) {
 			const gate = targetToolGate(isChildSession(process.env), discovering);
@@ -1433,7 +1459,8 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 			const tickets = upsertTickets([], parsed.tickets).tickets;
 			discovering = false; // one pick per request; a refused proof needs a fresh /watchdog.
 			audit("prep-target", { target: issue, tickets: tickets.length });
-			const error = prepProof(issue, tickets);
+			const check = typeof params.checkCommand === "string" && params.checkCommand.trim() !== "" ? params.checkCommand.trim() : null;
+			const error = prepProof(issue, tickets, check);
 			if (error !== null) return textResult(`watchdog_target: ${error}`, true);
 			return textResult(`Target ${issue} accepted.\n${PREP_INSTRUCTION(issue, pickableIds(tickets).length)}`, false, { issue });
 		},
@@ -1458,6 +1485,7 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 		uiPromptDepth = 0;
 		prepTarget = null;
 		prepTickets = [];
+		prepCheck = null;
 		discovering = false;
 		readyDeclared = false;
 		idleSinceMs = progressSinceMs = Date.now();
@@ -1469,6 +1497,7 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 		state = restored;
 		// #38 C: keep the run target across a restart (targeted state read).
 		runTarget = restoreRunTarget(ctx.sessionManager.getEntries());
+		runCheck = restoreRunCheck(ctx.sessionManager.getEntries());
 		if (state.phase === "armed") {
 			audit("restored", { phase: state.phase });
 			startLoop();
@@ -1549,6 +1578,7 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 			readyDeclared = false;
 			prepTarget = null;
 			prepTickets = [];
+			prepCheck = null;
 			discovering = false;
 			apply(transition(state, { type: "abort" }, Date.now()), "abort");
 			refreshWidget();
@@ -1564,6 +1594,7 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 		if (readyDeclared && prepTarget !== null) {
 			const target = prepTarget;
 			const tickets = prepTickets;
+			const check = prepCheck;
 			readyDeclared = false;
 			if (!ctx.hasUI) {
 				notify("drain-watchdog: no UI to confirm arming; run /watchdog again", "warning");
@@ -1572,7 +1603,7 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 			}
 			const go = await ctx.ui.confirm(
 				"Arm unattended drain?",
-				`Target ${target} (${pickableIds(tickets).length} pickable of ${tickets.length}). Arm the watchdog for an unattended run?`,
+				`Target ${target} (${pickableIds(tickets).length} pickable of ${tickets.length}${check === null ? "" : `; check: ${check}`}). Arm the watchdog for an unattended run?`,
 			);
 			prepTarget = null;
 			refreshWidget();
@@ -1582,13 +1613,13 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 				notify("drain-watchdog: operator declined; nothing armed");
 				return;
 			}
-			if (!armRun(target, tickets)) return;
+			if (!armRun(target, tickets, check)) return;
 			// Kick-off: the operator just confirmed, the turn has settled, and the queue
 			// is non-empty — start the first pass now instead of waiting a full idle
 			// grace for the first nudge. Not a core nudge: no nudgeCount, no cooldown.
 			const pickable = pickableIds(tickets).length;
 			audit("kickoff", { target, pickable });
-			deliver(NUDGE_MESSAGE_TYPE, buildNudgeText({ target, pickable }));
+			deliver(NUDGE_MESSAGE_TYPE, buildNudgeText({ target, pickable, checkCommand: check }));
 		}
 	});
 }

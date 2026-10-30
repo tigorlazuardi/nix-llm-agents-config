@@ -55,6 +55,7 @@ import {
 	targetToolGate,
 	restoreDrainState,
 	restoreRunTarget,
+	restoreRunCheck,
 
 // The default export is the #30 factory; imported separately so the named list
 // above stays comparable to the core's export list.
@@ -644,6 +645,8 @@ assert(nudge.includes(SYNC_REMINDER), "nudge carries the keep-in-sync reminder")
 assert(!nudge.includes("ready-for-human"), "nudge no longer names tracker labels");
 assert(nudge.includes("in parallel") && nudge.includes("integration/<slug>"), "nudge pushes parallel worktrees on the integration branch");
 assert(buildNudgeText({ target: null, pickable: 1 }).includes("the accepted tickets"));
+assert(buildNudgeText({ target: "T", pickable: 1, checkCommand: "make test" }).includes("`make test` exactly as written"), "nudge carries the operator checkCommand");
+assert(buildNudgeText({ target: "T", pickable: 1 }).includes("the exact checkCommand") && !buildNudgeText({ target: "T", pickable: 1 }).includes("exactly as written"), "no checkCommand: neutral wording");
 assert(nudge.includes("Do not implement a ticket yourself") && nudge.includes("standards-reviewer") && nudge.includes("deep-reviewer") && nudge.includes("overlap"), "nudge demands the per-ticket implementer/reviewer pipeline, overlapping across tickets");
 
 // Restore: latest valid entry wins, garbage never half-applies.
@@ -1378,6 +1381,9 @@ assert.equal(restoreRunTarget([armedEntry({ runTarget: "#38" }), armedEntry({ ru
 assert.equal(restoreRunTarget([armedEntry({ runTarget: 38 })]), null, "a non-string target degrades to null");
 assert.equal(restoreRunTarget([armedEntry({ runTarget: "  " })]), null, "an empty id is not a target");
 assert.equal(restoreRunTarget([]), null);
+assert.equal(restoreRunCheck([armedEntry({ runCheck: "make test" })]), "make test", "a restored run keeps its checkCommand");
+assert.equal(restoreRunCheck([armedEntry({ runCheck: 5 })]), null);
+assert.equal(restoreRunCheck([armedEntry({})]), null, "no checkCommand stays null");
 assert.equal(restoreRunTarget([{ type: "message", role: "user" }]), null);
 
 /** Runs one PREP -> watchdog_target -> confirm cycle on an existing harness
@@ -1389,6 +1395,24 @@ async function prepAgain(h: Harness, ref: string) {
 	await h.tools.watchdog_complete!.execute("p2", { id: "T1" }, undefined, undefined, h.ctx);
 	await h.tools.watchdog_complete!.execute("p3", { id: "T2" }, undefined, undefined, h.ctx);
 }
+
+// PREP with an operator checkCommand: kick-off nudge and persisted state carry it; without one, neutral.
+await withNoAmbientSubagent(() =>
+	withFakeTimers(async () => {
+		const cwd = makeFixtureCwd();
+		try {
+			const h = makeHarness(cwd);
+			h.handlers.session_start({}, h.ctx);
+			await h.handlers["command:watchdog"]("", h.ctx);
+			await h.tools.watchdog_target!.execute("c1", { issue: "#7", tickets: [{ id: "T1" }], checkCommand: "  make test  " }, undefined, undefined, h.ctx);
+			await h.handlers.agent_settled({ aborted: false, messages: [] }, h.ctx);
+			assert.equal(restoreRunCheck(h.entries), "make test", "the trimmed checkCommand is persisted with the run");
+			assert(String(h.sent[0]!.content).includes("`make test` exactly as written"), "the kick-off nudge carries the checkCommand");
+		} finally {
+			rmSync(cwd, { recursive: true, force: true });
+		}
+	}),
+);
 
 // Live: a drained ARMED run, idle past the grace gate. The tick NEVER completes it: it
 // sends the closing nudge (breaker/hard-cap still bound it); the run stays ARMED until the
