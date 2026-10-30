@@ -644,6 +644,7 @@ assert(nudge.includes(SYNC_REMINDER), "nudge carries the keep-in-sync reminder")
 assert(!nudge.includes("ready-for-human"), "nudge no longer names tracker labels");
 assert(nudge.includes("in parallel") && nudge.includes("integration/<slug>"), "nudge pushes parallel worktrees on the integration branch");
 assert(buildNudgeText({ target: null, pickable: 1 }).includes("the accepted tickets"));
+assert(nudge.includes("Do not implement a ticket yourself") && nudge.includes("standards-reviewer") && nudge.includes("deep-reviewer") && nudge.includes("overlap"), "nudge demands the per-ticket implementer/reviewer pipeline, overlapping across tickets");
 
 // Restore: latest valid entry wins, garbage never half-applies.
 assert.equal(restoreDrainState([]), null);
