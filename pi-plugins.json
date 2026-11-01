@@ -323,9 +323,9 @@
   "pi-herdr-subagents": {
     "strategy": "npm",
     "package": "pi-herdr-subagents",
-    "version": "0.3.0",
-    "src": "https://registry.npmjs.org/pi-herdr-subagents/-/pi-herdr-subagents-0.3.0.tgz",
-    "hash": "sha256-BQMxq1bY4oweQ1iQadV4De2pos1wTrKz+lEW1NTH82k=",
+    "version": "0.3.1",
+    "src": "https://registry.npmjs.org/pi-herdr-subagents/-/pi-herdr-subagents-0.3.1.tgz",
+    "hash": "sha256-1HPRDLQhkG/dLngBUa9mopcl24weIG+c1py7mMbVAYE=",
     "manifestTransform": {
       "delete": [
         "devDependencies",
