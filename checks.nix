@@ -2076,9 +2076,9 @@ in
         test ! -e ${expectedPixToolsRoot}/pix-display
         test -f ${expectedPixToolsRoot}/pix-footer/src/extension.ts
         grep -F 'ctx.ui.setFooter' ${expectedPixToolsRoot}/pix-footer/src/footer.ts
-        grep -E 'import \{ truncateToWidth(, wrapTextWithAnsi)? \} from "@earendil-works/pi-tui";' ${expectedPixToolsRoot}/pix-footer/src/footer.ts
+        grep -E 'import \{[^}]*(truncateToWidth|visibleWidth)[^}]*\} from "@earendil-works/pi-tui";' ${expectedPixToolsRoot}/pix-footer/src/footer.ts
         grep -F 'const line = [' ${expectedPixToolsRoot}/pix-footer/src/footer.ts
-        grep -F '[truncateToWidth(line, width)]' ${expectedPixToolsRoot}/pix-footer/src/footer.ts
+        grep -E '\[truncateToWidth\(line, width\)\]|visibleWidth\(line\) <= width' ${expectedPixToolsRoot}/pix-footer/src/footer.ts
         # pix-todo: default export factory + tool + collapse wiring (load probe
         # does not initialize extensions — grep contracts per version-skew skill).
         test -f ${expectedPixToolsRoot}/pix-todo/src/todo.ts
