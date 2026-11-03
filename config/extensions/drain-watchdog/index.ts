@@ -568,6 +568,9 @@ export function watchdogCompletions(prefix: string): { value: string; label: str
 
 const STATE_ENTRY_TYPE = "drain-watchdog-state";
 
+/** How long the restore dialog waits before the saved run resumes by itself. */
+const RESTORE_CONFIRM_MS = 60_000;
+
 /** Valid DrainPhase values, for restoring persisted state without trusting it. */
 const DRAIN_PHASES: readonly DrainPhase[] = ["off", "armed", "backoff", "paused", "done"];
 
@@ -1534,24 +1537,47 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 		// #38 C: keep the run target across a restart (targeted state read).
 		runTarget = restoreRunTarget(entries);
 		runCheck = restoreRunCheck(entries);
-		if (state.phase === "armed") {
-			audit("restored", { phase: state.phase });
-			startLoop();
-			refreshWidget();
-			notify(`drain-watchdog: restored live run (${state.phase}) after restart`);
-		} else if (state.phase === "backoff") {
-			audit("restored", { phase: "backoff", kind: state.backoffKind, rung: state.backoffRung });
-			// The outage budget still measures from the restored backoffStartMs. The
-			// tick loop stays alive for the widget; ticks never act in BACKOFF.
-			scheduleProbe(nextLadderDelayMs(state.backoffKind ?? "transient", state.backoffRung));
-			startLoop();
-			refreshWidget();
-			notify(`drain-watchdog: restored BACKOFF (${state.backoffKind ?? "transient"}) after restart; probing automatically`);
-		} else {
-			// PAUSED stays paused (resume is the only exit from a paused run).
-			audit("restored", { phase: "paused", reason: state.pausedReason }); // L1
-			notify(`drain-watchdog: restored PAUSED — ${state.pausedReason ?? "unknown reason"}. /watchdog resume`, "warning");
+		const activate = () => {
+			if (state.phase === "armed") {
+				audit("restored", { phase: state.phase });
+				startLoop();
+				refreshWidget();
+				notify(`drain-watchdog: restored live run (${state.phase}) after restart`);
+			} else {
+				audit("restored", { phase: "backoff", kind: state.backoffKind, rung: state.backoffRung });
+				// The outage budget still measures from the restored backoffStartMs. The
+				// tick loop stays alive for the widget; ticks never act in BACKOFF.
+				scheduleProbe(nextLadderDelayMs(state.backoffKind ?? "transient", state.backoffRung));
+				startLoop();
+				refreshWidget();
+				notify(`drain-watchdog: restored BACKOFF (${state.backoffKind ?? "transient"}) after restart; probing automatically`);
+			}
+		};
+		if (state.phase === "armed" || state.phase === "backoff") {
+			// Another pi in this cwd may have found the file by accident: ask first, but an
+			// unattended restart must still recover, so no answer within the window = resume.
+			if (!ctx.hasUI) {
+				activate();
+				return;
+			}
+			const restoredPhase = state.phase;
+			// ponytail: only an explicit "Turn off" stops the restore; Resume, Esc and timeout all resume
+			// (pi gives no way to tell Esc from timeout); make Esc pause when pi exposes the difference.
+			void ctx.ui
+				.select(`Resume unattended drain on ${runTarget ?? "the saved run"}? (auto-resumes in ${RESTORE_CONFIRM_MS / 1000}s)`, ["Resume", "Turn off"], { timeout: RESTORE_CONFIRM_MS })
+				.then((choice) => {
+					if (closed || state.phase !== restoredPhase) return; // reload/shutdown or /watchdog off while asking
+					if (choice === "Turn off") apply(transition(state, { type: "off" }, Date.now()), "off");
+					else activate();
+				})
+				.catch(() => {
+					if (!closed && state.phase === restoredPhase) activate();
+				});
+			return;
 		}
+		// PAUSED stays paused (resume is the only exit from a paused run).
+		audit("restored", { phase: "paused", reason: state.pausedReason }); // L1
+		notify(`drain-watchdog: restored PAUSED — ${state.pausedReason ?? "unknown reason"}. /watchdog resume`, "warning");
 	});
 
 	pi.on("session_shutdown", () => {

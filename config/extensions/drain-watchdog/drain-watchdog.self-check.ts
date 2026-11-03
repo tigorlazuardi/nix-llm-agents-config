@@ -772,6 +772,10 @@ type Harness = {
 	/** The live state-entry list the default sessionManager serves; pre-seed
 	 *  restore state here (persists from handlers land in this same array). */
 	entries: unknown[];
+	/** Restore dialog asks recorded by ctx.ui.select; answerRestore settles the pending ask. */
+	restoreDialogFlag: { restoreDialog: boolean };
+	selectCalls: { title: string; options: string[]; timeout?: number }[];
+	answerRestore: (choice: string | undefined) => void;
 };
 
 /** A fresh factory instance wired to capturing mocks; `pi.exec` records every call (the extension must make none for the queue). */
@@ -791,6 +795,8 @@ function makeHarness(cwd: string): Harness {
 		killed: false,
 	});
 	const execCalls: { command: string; args: string[] }[] = [];
+	const selectCalls: Harness["selectCalls"] = [];
+	let answerRestore: Harness["answerRestore"] = () => {};
 	const pi = {
 		on(name: string, handler: (...args: any[]) => unknown) {
 			handlers[name] = handler;
@@ -825,6 +831,12 @@ function makeHarness(cwd: string): Harness {
 			notify: (message: string, level = "info") => notifications.push({ message, level }),
 			// The PREP -> arm flow asks once; interactive rows need an answer.
 			confirm: async () => true,
+			// Restore dialog: tests answer via h.restoreChoice (default Resume); selectCalls records the asks.
+			select: (title: string, options: string[], opts?: { timeout?: number }) =>
+				new Promise<string | undefined>((resolve) => {
+					selectCalls.push({ title, options, timeout: opts?.timeout });
+					answerRestore = resolve;
+				}),
 			setWidget: (_key: string, lines: string[] | undefined) => {
 				widgetLines = lines;
 			},
@@ -833,7 +845,23 @@ function makeHarness(cwd: string): Harness {
 		hasPendingMessages: () => false,
 		sessionManager: { getEntries: () => entries },
 	};
-	return { handlers, audits, notifications, sent, userMessages, widget: () => widgetLines, execCalls, setExec: (impl) => { execImpl = impl; }, tools, ctx, entries };
+	// Most rows restore a saved run and assert synchronously, so session_start runs without a UI
+	// (restore resumes at once) unless the row sets h.restoreDialog = true to exercise the dialog.
+	const rawSessionStart = handlers.session_start;
+	const state = { restoreDialog: false };
+	if (rawSessionStart) {
+		handlers.session_start = (e: unknown, c: any) => {
+			const last = [...entries].reverse().find((x: any) => x?.customType === "drain-watchdog-state") as { data?: { phase?: string } } | undefined;
+			if (state.restoreDialog || last?.data?.phase === "paused") return rawSessionStart(e, c);
+			c.hasUI = false;
+			try {
+				return rawSessionStart(e, c);
+			} finally {
+				c.hasUI = true;
+			}
+		};
+	}
+	return { handlers, restoreDialogFlag: state, audits, notifications, sent, userMessages, widget: () => widgetLines, execCalls, setExec: (impl) => { execImpl = impl; }, tools, ctx, entries, selectCalls, answerRestore: (c) => answerRestore(c) };
 }
 
 function makeFixtureCwd(): string {
@@ -889,7 +917,7 @@ await withNoAmbientSubagent(() =>
 		assert.equal(readFileSync(join(cwd, ".pi", "watchdog", ".gitignore"), "utf8"), "*\n", "the state dir ignores itself");
 		const h2 = makeHarness(cwd); // restart: no session entries at all
 		h2.handlers.session_start({}, h2.ctx);
-		assert(h2.notifications.some((n) => n.message.includes("restored live run")), "a new session restores the run from disk");
+		assert(h2.audits.some((a) => a.type === "restored"), "a new session restores the run from disk");
 		const saved = JSON.parse(readFileSync(stateFilePath(cwd), "utf8"));
 		assert.equal(saved.runTarget, "#38");
 		assert.deepEqual(saved.tickets.map((t: Ticket) => t.state), ["done", "open"], "the ticket tree survives the restart");
@@ -899,10 +927,37 @@ await withNoAmbientSubagent(() =>
 		writeFileSync(stateFilePath(bad), "{not json");
 		const h4 = makeHarness(bad);
 		h4.handlers.session_start({}, h4.ctx);
-		assert(!h4.notifications.some((n) => n.message.includes("restored")), "a corrupt state file restores nothing");
+		assert(!h4.audits.some((a) => a.type === "restored"), "a corrupt state file restores nothing");
 		rmSync(bad, { recursive: true, force: true });
 	}),
 );
+
+// Restore dialog: an armed run asks first (60 s window); Resume / timeout resume, "Turn off" stops, no UI resumes at once.
+for (const [label, choice, expectPhase] of [["Resume", "Resume", "armed"], ["timeout/Esc", undefined, "armed"], ["Turn off", "Turn off", "off"]] as const) {
+	await withNoAmbientSubagent(() =>
+		withFakeTimers(async () => {
+			const cwd = makeFixtureCwd();
+			const h = makeHarness(cwd);
+			h.restoreDialogFlag.restoreDialog = true;
+			h.entries.push(armedEntry());
+			h.handlers.session_start({}, h.ctx);
+			assert.equal(h.selectCalls.length, 1, `${label}: one restore dialog`);
+			assert.equal(h.selectCalls[0]!.timeout, 60_000, "the dialog auto-answers after one minute");
+			assert.deepEqual(h.selectCalls[0]!.options, ["Resume", "Turn off"]);
+			assert(!h.audits.some((a) => a.type === "restored"), `${label}: nothing is restored before the answer`);
+			h.answerRestore(choice);
+			await Promise.resolve();
+			await Promise.resolve();
+			if (expectPhase === "armed") {
+				assert(h.audits.some((a) => a.type === "restored"), `${label}: run resumed`);
+			} else {
+				assert(!h.audits.some((a) => a.type === "restored"), "Turn off does not resume");
+				assert.equal(persistedLatest(h.entries).data.phase, "off", "Turn off persists OFF");
+			}
+			rmSync(cwd, { recursive: true, force: true });
+		}),
+	);
+}
 
 // Restoring a PAUSED run: exactly one warning notify with the reason, one paused audit, no timers.
 await withNoAmbientSubagent(() =>
