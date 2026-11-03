@@ -15,7 +15,7 @@
  * symlinks them into a node_modules next to the copy).
  */
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { DrainEvent, DrainState, Ticket, TickObservation } from "./index.ts";
@@ -56,6 +56,7 @@ import {
 	restoreDrainState,
 	restoreRunTarget,
 	restoreRunCheck,
+	stateFilePath,
 
 // The default export is the #30 factory; imported separately so the named list
 // above stays comparable to the core's export list.
@@ -872,6 +873,34 @@ await withNoAmbientSubagent(() =>
 		assert.equal(h.sent.length, 1);
 		assert.equal(h.sent[0]!.customType, "drain-watchdog-probe");
 		assert.equal(h.sent[0]!.content, PROBE_TEXT);
+	}),
+);
+
+// Disk state: a tick-time change is written to <cwd>/.pi/watchdog/state.json; a brand-new session
+// (empty session entries) in the same cwd restores the run from it. Corrupt file -> falls back to OFF.
+await withNoAmbientSubagent(() =>
+	withFakeTimers(async () => {
+		const cwd = makeFixtureCwd();
+		const h1 = makeHarness(cwd);
+		h1.entries.push(armedEntry({ tickets: [tk("A"), tk("B", "open", ["A"])] }));
+		h1.handlers.session_start({}, h1.ctx);
+		await h1.tools.watchdog_complete!.execute("d1", { id: "A" }, undefined, undefined, h1.ctx);
+		assert(existsSync(stateFilePath(cwd)), "persist writes .pi/watchdog/state.json");
+		assert.equal(readFileSync(join(cwd, ".pi", "watchdog", ".gitignore"), "utf8"), "*\n", "the state dir ignores itself");
+		const h2 = makeHarness(cwd); // restart: no session entries at all
+		h2.handlers.session_start({}, h2.ctx);
+		assert(h2.notifications.some((n) => n.message.includes("restored live run")), "a new session restores the run from disk");
+		const saved = JSON.parse(readFileSync(stateFilePath(cwd), "utf8"));
+		assert.equal(saved.runTarget, "#38");
+		assert.deepEqual(saved.tickets.map((t: Ticket) => t.state), ["done", "open"], "the ticket tree survives the restart");
+		rmSync(cwd, { recursive: true, force: true });
+		const bad = makeFixtureCwd();
+		mkdirSync(join(bad, ".pi", "watchdog"), { recursive: true });
+		writeFileSync(stateFilePath(bad), "{not json");
+		const h4 = makeHarness(bad);
+		h4.handlers.session_start({}, h4.ctx);
+		assert(!h4.notifications.some((n) => n.message.includes("restored")), "a corrupt state file restores nothing");
+		rmSync(bad, { recursive: true, force: true });
 	}),
 );
 

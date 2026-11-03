@@ -43,6 +43,8 @@
  * make either configurable when a real provider needs it.
  */
 
+import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { isRetryableAssistantError, StringEnum } from "@earendil-works/pi-ai";
 import type { AgentToolResult, ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
@@ -676,6 +678,30 @@ export function restoreRunCheck(entries: readonly unknown[]): string | null {
 	return null;
 }
 
+// --- Disk state (survives pi reload and restart) -----------------------------------
+/** ponytail: one run per cwd, fixed path <cwd>/.pi/watchdog/state.json; add per-session files when parallel runs in one cwd exist. */
+export const stateFilePath = (cwd: string): string => join(cwd, ".pi", "watchdog", "state.json");
+
+/** Atomic write (tmp + rename). The dir carries its own .gitignore so a repo stays clean. */
+export function writeStateFile(cwd: string, data: Record<string, unknown>): void {
+	const file = stateFilePath(cwd);
+	const dir = join(cwd, ".pi", "watchdog");
+	mkdirSync(dir, { recursive: true });
+	writeFileSync(join(dir, ".gitignore"), "*\n");
+	writeFileSync(`${file}.tmp`, JSON.stringify(data));
+	renameSync(`${file}.tmp`, file);
+}
+
+/** The saved state wrapped as a session-style entry list, so the existing restore* readers apply; [] when absent or unreadable. */
+export function readStateFileEntries(cwd: string): unknown[] {
+	try {
+		const data: unknown = JSON.parse(readFileSync(stateFilePath(cwd), "utf8"));
+		return typeof data === "object" && data !== null ? [{ type: "custom", customType: STATE_ENTRY_TYPE, data }] : [];
+	} catch {
+		return [];
+	}
+}
+
 // --- State machine ---------------------------------------------------------------
 const WAIT: DrainAction = { type: "wait" };
 const stay = (state: DrainState): DrainTransition => ({ state, action: WAIT, refusal: null });
@@ -968,6 +994,13 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 		// runTarget rides along so a restored run keeps its target label.
 		// restoreDrainState ignores the extra key; restoreRunTarget reads it back.
 		pi.appendEntry(STATE_ENTRY_TYPE, { ...state, runTarget, runCheck });
+		if (latestCtx) {
+			try {
+				writeStateFile(latestCtx.cwd, { ...state, runTarget, runCheck });
+			} catch (error) {
+				notify(`drain-watchdog: cannot write ${stateFilePath(latestCtx.cwd)} (${error instanceof Error ? error.message : String(error)}); the run will not survive a restart`, "warning");
+			}
+		}
 		refreshWidget();
 	};
 
@@ -1489,15 +1522,18 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 		discovering = false;
 		readyDeclared = false;
 		idleSinceMs = progressSinceMs = Date.now();
-		const restored = restoreDrainState(ctx.sessionManager.getEntries());
+		// Disk wins (survives restart and new sessions in this cwd); session entries are the fallback.
+		const diskEntries = readStateFileEntries(ctx.cwd);
+		const entries = diskEntries.length > 0 ? diskEntries : ctx.sessionManager.getEntries();
+		const restored = restoreDrainState(entries);
 		if (restored === null || restored.phase === "off" || restored.phase === "done") {
 			state = { ...INITIAL_STATE };
 			return;
 		}
 		state = restored;
 		// #38 C: keep the run target across a restart (targeted state read).
-		runTarget = restoreRunTarget(ctx.sessionManager.getEntries());
-		runCheck = restoreRunCheck(ctx.sessionManager.getEntries());
+		runTarget = restoreRunTarget(entries);
+		runCheck = restoreRunCheck(entries);
 		if (state.phase === "armed") {
 			audit("restored", { phase: state.phase });
 			startLoop();
