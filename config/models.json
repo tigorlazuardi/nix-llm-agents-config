@@ -255,6 +255,25 @@
             "supportsDeveloperRole": false,
             "sendSessionAffinityHeaders": true
           }
+        },
+        {
+          "id": "ds/deepseek-flash",
+          "name": "DeepSeek V4.1 Flash (omniroute, direct provider)",
+          "reasoning": true,
+          "contextWindow": 1048576,
+          "maxTokens": 393216,
+          "api": "openai-completions",
+          "input": [
+            "text",
+            "image"
+          ],
+          "compat": {
+            "supportsStore": false,
+            "supportsDeveloperRole": false,
+            "maxTokensField": "max_tokens",
+            "thinkingFormat": "deepseek",
+            "requiresReasoningContentOnAssistantMessages": true
+          }
         }
       ]
     }
