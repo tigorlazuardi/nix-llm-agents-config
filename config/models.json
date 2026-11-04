@@ -142,7 +142,8 @@
           "maxTokens": 128000,
           "api": "openai-completions",
           "input": [
-            "text"
+            "text",
+            "image"
           ],
           "compat": {
             "supportsDeveloperRole": false,
@@ -156,7 +157,8 @@
           "maxTokens": 128000,
           "api": "openai-completions",
           "input": [
-            "text"
+            "text",
+            "image"
           ],
           "compat": {
             "supportsDeveloperRole": false,
@@ -170,7 +172,8 @@
           "maxTokens": 128000,
           "api": "openai-completions",
           "input": [
-            "text"
+            "text",
+            "image"
           ],
           "compat": {
             "supportsDeveloperRole": false,
@@ -184,7 +187,8 @@
           "maxTokens": 128000,
           "api": "openai-completions",
           "input": [
-            "text"
+            "text",
+            "image"
           ],
           "compat": {
             "supportsDeveloperRole": false,
@@ -198,7 +202,8 @@
           "maxTokens": 128000,
           "api": "openai-completions",
           "input": [
-            "text"
+            "text",
+            "image"
           ],
           "compat": {
             "supportsDeveloperRole": false,
@@ -212,7 +217,8 @@
           "maxTokens": 64000,
           "api": "openai-completions",
           "input": [
-            "text"
+            "text",
+            "image"
           ],
           "compat": {
             "supportsDeveloperRole": false,
@@ -226,7 +232,8 @@
           "maxTokens": 64000,
           "api": "openai-completions",
           "input": [
-            "text"
+            "text",
+            "image"
           ],
           "compat": {
             "supportsDeveloperRole": false,
@@ -240,7 +247,8 @@
           "maxTokens": 64000,
           "api": "openai-completions",
           "input": [
-            "text"
+            "text",
+            "image"
           ],
           "compat": {
             "supportsDeveloperRole": false,
@@ -254,7 +262,8 @@
           "maxTokens": 64000,
           "api": "openai-completions",
           "input": [
-            "text"
+            "text",
+            "image"
           ],
           "compat": {
             "supportsDeveloperRole": false,
