@@ -1610,8 +1610,11 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 	// pi-herdr-subagents runs children as separate pi processes that steer their
 	// completion in; the known fallback (observation) is tool_call minus the
 	// subagent_result completion steers. Counts restart at 0 on session_start.
-	pi.on("tool_call", (event) => {
-		if (isSubagentSpawnTool(event.toolName)) childCount++;
+	// Count on tool_result, not tool_call: a spawn that errors (e.g. unsupported thinking
+	// level) never yields a subagent_result, so counting at call time left a phantom child
+	// that blocked every nudge.
+	pi.on("tool_result", (event) => {
+		if (isSubagentSpawnTool(event.toolName) && !event.isError) childCount++;
 	});
 
 	pi.on("message_end", (event) => {

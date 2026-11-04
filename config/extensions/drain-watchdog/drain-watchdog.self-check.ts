@@ -999,6 +999,24 @@ await withNoAmbientSubagent(() =>
 	}),
 );
 
+// A spawn that errors (no subagent_result ever follows) must not count as a live child,
+// or the run never nudges again; a successful spawn still blocks the nudge.
+for (const [isError, expectSent] of [[true, 1], [false, 0]] as const) {
+	await withNoAmbientSubagent(() =>
+		withFakeTimers(async (timers, flush, clock) => {
+			const h = makeHarness(makeFixtureCwd());
+			h.entries.push(armedEntry());
+			h.handlers.session_start({}, h.ctx);
+			h.handlers.tool_result({ toolName: "subagent", isError });
+			clock.advance(IDLE_GRACE_MS + 1000);
+			timers.find((t) => t.kind === "interval" && !t.cleared)!.fire();
+			await flush();
+			await flush();
+			assert.equal(h.sent.length, expectSent, `spawn isError=${isError}: nudges sent`);
+		}),
+	);
+}
+
 // Nudge latency bound: the default grace/tick must put the first nudge within
 // IDLE_GRACE_MS + TICK_MS of going idle, and nothing fires before the grace.
 assert.equal(IDLE_GRACE_MS, 60_000, "default idle grace is 60s");
