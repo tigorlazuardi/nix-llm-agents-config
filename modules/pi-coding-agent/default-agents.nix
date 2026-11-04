@@ -40,7 +40,7 @@
   planner = {
     description = "Planner and SCOPE/ADR drafter";
     prompt = ../../config/agents/planner.md;
-    model = "zai/glm-5.3";
+    model = "omniroute/personal/planner";
     effort = "high";
     tools.allow = [
       "read"
