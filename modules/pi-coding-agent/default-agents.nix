@@ -2,7 +2,7 @@
   deep-reviewer = {
     description = "Deep reviewer; spec axis";
     prompt = ../../config/agents/reviewer.md;
-    model = "omniroute/personal/frontier";
+    model = "omniroute/personal/deep-reviewer";
     effort = "high";
     tools.allow = [
       "read"
@@ -15,7 +15,7 @@
   implementer = {
     description = "Implementation worker";
     prompt = ../../config/agents/implementer.md;
-    model = "omniroute/personal/worker";
+    model = "omniroute/personal/implementer";
     effort = "high";
     tools.allow = [
       "read"
@@ -29,7 +29,7 @@
   orchestrator = {
     description = "Deterministic black-box one-shot state machine";
     prompt = ../../config/agents/orchestrator.md;
-    model = "omniroute/personal/worker";
+    model = "omniroute/personal/main";
     effort = "high";
     tools.allow = [
       "read"
@@ -53,7 +53,7 @@
   standards-reviewer = {
     description = "Standards reviewer; standards axis";
     prompt = ../../config/agents/reviewer.md;
-    model = "omniroute/personal/worker";
+    model = "omniroute/personal/standards-reviewer";
     effort = "high";
     tools.allow = [
       "read"
@@ -66,7 +66,7 @@
   scout = {
     description = "Fast read-only code locator";
     prompt = ../../config/agents/scout.md;
-    model = "omniroute/personal/worker";
+    model = "omniroute/personal/main";
     effort = "high";
     tools.allow = [
       "read"
@@ -78,7 +78,7 @@
   support = {
     description = "Docs, research, and synthesis";
     prompt = ../../config/agents/support.md;
-    model = "omniroute/personal/worker";
+    model = "omniroute/personal/main";
     effort = "high";
     tools.allow = [
       "read"

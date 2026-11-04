@@ -43,7 +43,7 @@ let
   watchdogDisabled = evaluate { programs.pi-coding-agent.watchdog.enable = false; };
   watchdogEnabled = evaluate { programs.pi-coding-agent.watchdog.enable = true; };
   planningModelConfigured = evaluate {
-    programs.pi-coding-agent.planningModel = "omniroute/personal/worker";
+    programs.pi-coding-agent.planningModel = "omniroute/personal/main";
   };
   messagingRelayEnabled = evaluate {
     programs.pi-coding-agent.plugins.pi-messaging-relay.enable = true;
@@ -139,7 +139,7 @@ let
       sessionFallback = true;
       model = {
         provider = "omniroute";
-        id = "personal/worker";
+        id = "personal/main";
         thinking = "low";
       };
       observerModel = {
@@ -155,7 +155,7 @@ let
     sessionFallback = true;
     model = {
       provider = "omniroute";
-      id = "personal/worker";
+      id = "personal/main";
       thinking = "low";
     };
     observerModel = {
@@ -300,7 +300,7 @@ let
     ---
     name: "orchestrator"
     description: "Deterministic black-box one-shot state machine"
-    model: "omniroute/personal/worker"
+    model: "omniroute/personal/main"
     thinking: "high"
     tools: "read, bash, subagent"
     system-prompt: replace
@@ -525,7 +525,7 @@ in
     assert
       default.config.programs.pi-coding-agent.settings == {
         defaultProvider = "omniroute";
-        defaultModel = "personal/worker";
+        defaultModel = "personal/main";
         defaultThinkingLevel = "high";
         quietStartup = true;
         theme = "dark";
@@ -719,7 +719,7 @@ in
       };
     assert
       blackholeConfigured.config.programs.pi-coding-agent.plugins.pi-blackhole.settings.model.id
-      == "personal/worker";
+      == "personal/main";
     assert blackholeConfigSource == expectedBlackholeConfigFile;
     assert
       sensitiveGuardConfigured.config.programs.pi-coding-agent.plugins.pi-sensitive-guard.settings.readRedaction.scope
@@ -928,13 +928,13 @@ in
     assert !(builtins.hasAttr "frontier-reviewer" default.config.programs.pi-coding-agent.agents);
     assert !(builtins.hasAttr "reviewer" default.config.programs.pi-coding-agent.agents);
     assert
-      default.config.programs.pi-coding-agent.agents.implementer.model == "omniroute/personal/worker";
+      default.config.programs.pi-coding-agent.agents.implementer.model == "omniroute/personal/implementer";
     assert
-      default.config.programs.pi-coding-agent.agents.deep-reviewer.model == "omniroute/personal/frontier";
+      default.config.programs.pi-coding-agent.agents.deep-reviewer.model == "omniroute/personal/deep-reviewer";
     assert default.config.programs.pi-coding-agent.agents.deep-reviewer.effort == "high";
     assert
       default.config.programs.pi-coding-agent.agents.standards-reviewer.model
-      == "omniroute/personal/worker";
+      == "omniroute/personal/standards-reviewer";
     assert default.config.programs.pi-coding-agent.agents.standards-reviewer.effort == "high";
     assert
       default.config.home.file."${default.config.programs.pi-coding-agent.configDir}/agents/orchestrator.md".text
@@ -983,22 +983,22 @@ in
       planningTickets = builtins.readFile (expectedPlanningPrompts + "/planning/to-tickets.md");
       planningMocks = builtins.readFile (expectedPlanningPrompts + "/planning/wayfinder-with-mocks.md");
     in
-    assert pkgs.lib.hasInfix "model: omniroute/personal/frontier" planningWayfinder;
+    assert pkgs.lib.hasInfix "model: omniroute/personal/planner" planningWayfinder;
     assert pkgs.lib.hasInfix "skill: wayfinder" planningWayfinder;
-    assert pkgs.lib.hasInfix "model: omniroute/personal/frontier" planningSpec;
+    assert pkgs.lib.hasInfix "model: omniroute/personal/planner" planningSpec;
     assert pkgs.lib.hasInfix "skill: to-spec" planningSpec;
-    assert pkgs.lib.hasInfix "model: omniroute/personal/frontier" planningTickets;
+    assert pkgs.lib.hasInfix "model: omniroute/personal/planner" planningTickets;
     assert pkgs.lib.hasInfix "skill: to-tickets" planningTickets;
-    assert pkgs.lib.hasInfix "model: omniroute/personal/frontier" planningMocks;
+    assert pkgs.lib.hasInfix "model: omniroute/personal/planner" planningMocks;
     assert pkgs.lib.hasInfix "skill: wayfinder-with-mocks" planningMocks;
     let
       planningModelPrompts =
         planningModelConfigured.config.home.file."${planningModelConfigured.config.programs.pi-coding-agent.configDir}/prompts".source;
     in
-    assert pkgs.lib.hasInfix "model: omniroute/personal/worker" (
+    assert pkgs.lib.hasInfix "model: omniroute/personal/main" (
       builtins.readFile (planningModelPrompts + "/planning/wayfinder.md")
     );
-    assert pkgs.lib.hasInfix "model: omniroute/personal/worker" (
+    assert pkgs.lib.hasInfix "model: omniroute/personal/main" (
       builtins.readFile (planningModelPrompts + "/planning/wayfinder-with-mocks.md")
     );
     assert

@@ -136,7 +136,7 @@
           }
         },
         {
-          "id": "personal/worker",
+          "id": "personal/main",
           "reasoning": true,
           "contextWindow": 328000,
           "maxTokens": 128000,
@@ -151,7 +151,52 @@
           }
         },
         {
-          "id": "personal/frontier",
+          "id": "personal/implementer",
+          "reasoning": true,
+          "contextWindow": 328000,
+          "maxTokens": 128000,
+          "api": "openai-completions",
+          "input": [
+            "text",
+            "image"
+          ],
+          "compat": {
+            "supportsDeveloperRole": false,
+            "sendSessionAffinityHeaders": true
+          }
+        },
+        {
+          "id": "personal/standards-reviewer",
+          "reasoning": true,
+          "contextWindow": 328000,
+          "maxTokens": 128000,
+          "api": "openai-completions",
+          "input": [
+            "text",
+            "image"
+          ],
+          "compat": {
+            "supportsDeveloperRole": false,
+            "sendSessionAffinityHeaders": true
+          }
+        },
+        {
+          "id": "personal/deep-reviewer",
+          "reasoning": true,
+          "contextWindow": 328000,
+          "maxTokens": 128000,
+          "api": "openai-completions",
+          "input": [
+            "text",
+            "image"
+          ],
+          "compat": {
+            "supportsDeveloperRole": false,
+            "sendSessionAffinityHeaders": true
+          }
+        },
+        {
+          "id": "personal/planner",
           "reasoning": true,
           "contextWindow": 328000,
           "maxTokens": 128000,
@@ -167,6 +212,36 @@
         },
         {
           "id": "bareksa/main",
+          "reasoning": true,
+          "contextWindow": 328000,
+          "maxTokens": 128000,
+          "api": "openai-completions",
+          "input": [
+            "text",
+            "image"
+          ],
+          "compat": {
+            "supportsDeveloperRole": false,
+            "sendSessionAffinityHeaders": true
+          }
+        },
+        {
+          "id": "bareksa/implementer",
+          "reasoning": true,
+          "contextWindow": 328000,
+          "maxTokens": 128000,
+          "api": "openai-completions",
+          "input": [
+            "text",
+            "image"
+          ],
+          "compat": {
+            "supportsDeveloperRole": false,
+            "sendSessionAffinityHeaders": true
+          }
+        },
+        {
+          "id": "bareksa/planner",
           "reasoning": true,
           "contextWindow": 328000,
           "maxTokens": 128000,

@@ -395,7 +395,7 @@ let
   );
   defaultSettings = {
     defaultProvider = "omniroute";
-    defaultModel = "personal/worker";
+    defaultModel = "personal/main";
     defaultThinkingLevel = "high";
     quietStartup = true;
     theme = "dark";
@@ -585,7 +585,7 @@ in
 
   options.programs.pi-coding-agent.planningModel = lib.mkOption {
     type = lib.types.str;
-    default = "omniroute/personal/frontier";
+    default = "omniroute/personal/planner";
     description = ''
       Model written into the frontmatter of the generated planning prompt
       templates (`/wayfinder`, `/to-spec`, `/to-tickets`). Set to a different
