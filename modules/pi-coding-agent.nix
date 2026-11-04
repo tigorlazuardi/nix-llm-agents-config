@@ -367,8 +367,10 @@ let
     {
       name = "pi-vision-handoff";
       package = "${visionHandoff}/lib/node_modules/pi-vision-handoff";
-      # Overrides model vision capability; opt in explicitly.
-      default = false;
+      # Describes images with a vision model for every text-only model; combo
+      # models therefore declare text-only input so images never reach a combo's
+      # gateway-side vision bridge. On by default.
+      default = true;
     }
     {
       name = "supi-context";
@@ -748,8 +750,21 @@ in
 
         pi-vision-handoff.visionModel = lib.mkOption {
           type = lib.types.strMatching "[^/[:space:]]+/[^[:space:]]+";
-          default = "omniroute/cc/claude-haiku-4-5-20251001";
+          default = "omniroute/cc/claude-haiku-5-5";
           description = "Vision-capable provider/model used to describe images for text-only models.";
+        };
+
+        pi-vision-handoff.fallbackModels = lib.mkOption {
+          type = lib.types.listOf (lib.types.strMatching "[^/[:space:]]+/[^[:space:]]+");
+          # Tried in order when the primary vision model's call fails entirely.
+          # ponytail: fixed to the operator's chain; make per-host when a second host needs another order.
+          default = [
+            "omniroute/cmd/minimax/minimax-m3.1-flash"
+            "omniroute/cmd/gpt-6-luna"
+            "omniroute/cmd/deepseek/deepseek-v4-flash"
+            "omniroute/ds/deepseek-flash"
+          ];
+          description = "Fallback vision models, tried in order after the primary vision model's call fails.";
         };
 
         pi-blackhole.settings = {
@@ -965,7 +980,8 @@ in
       lib.hm.dag.entryAfter [ "writeBoundary" ] ''
         run ${lib.getExe visionHandoffConfigUpdater} \
           ${lib.escapeShellArg "${cfg.configDir}/extensions/pi-vision-handoff.json"} \
-          ${lib.escapeShellArg visionHandoffPlugin.visionModel}
+          ${lib.escapeShellArg visionHandoffPlugin.visionModel} \
+          ${lib.escapeShellArgs visionHandoffPlugin.fallbackModels}
       ''
     );
 

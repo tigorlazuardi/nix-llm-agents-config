@@ -93,6 +93,7 @@ let
     builtins.deepSeq invalidVisionHandoffModel.config.home.activationPackage true
   );
   visionHandoffActivation = visionHandoffConfigured.config.home.activation.visionHandoffConfig.data;
+  defaultVisionHandoffActivation = default.config.home.activation.visionHandoffConfig.data;
   expectedVisionHandoffConfigPath = "${default.config.programs.pi-coding-agent.configDir}/extensions/pi-vision-handoff.json";
   relayConfigured = evaluate {
     services.remote-pi-relay = {
@@ -559,6 +560,7 @@ in
           expectedRulesPath
           expectedWebAccessPath
           expectedHerdrSubagentsPath
+          expectedVisionHandoffPath
           expectedSupiContextExtension
           expectedSupiExtrasPath
         ]
@@ -577,13 +579,25 @@ in
     assert !(default.config.home.activation ? remotePiConfig);
     assert
       default.config.programs.pi-coding-agent.plugins.pi-vision-handoff.visionModel
-      == "omniroute/cc/claude-haiku-4-5-20251001";
+      == "omniroute/cc/claude-haiku-5-5";
+    assert
+      default.config.programs.pi-coding-agent.plugins.pi-vision-handoff.fallbackModels == [
+        "omniroute/cmd/minimax/minimax-m3.1-flash"
+        "omniroute/cmd/gpt-6-luna"
+        "omniroute/cmd/deepseek/deepseek-v4-flash"
+        "omniroute/ds/deepseek-flash"
+      ];
     assert
       visionHandoffConfigured.config.programs.pi-coding-agent.plugins.pi-vision-handoff.visionModel
       == "google/gemini-2.5-pro";
+    assert pkgs.lib.hasInfix "omniroute/cc/claude-haiku-5-5" defaultVisionHandoffActivation;
+    assert pkgs.lib.hasInfix "omniroute/cmd/minimax/minimax-m3.1-flash" visionHandoffActivation;
+    assert pkgs.lib.hasInfix "omniroute/cmd/gpt-6-luna" visionHandoffActivation;
+    assert pkgs.lib.hasInfix "omniroute/cmd/deepseek/deepseek-v4-flash" visionHandoffActivation;
+    assert pkgs.lib.hasInfix "omniroute/ds/deepseek-flash" visionHandoffActivation;
     assert !invalidVisionHandoffModelEvaluation.success;
-    assert !(default.config.home.activation ? visionHandoffConfig);
-    assert !default.config.programs.pi-coding-agent.plugins.pi-vision-handoff.enable;
+    assert default.config.home.activation ? visionHandoffConfig;
+    assert default.config.programs.pi-coding-agent.plugins.pi-vision-handoff.enable;
     assert visionHandoffConfigured.config.home.activation ? visionHandoffConfig;
     assert !(pluginsDisabled.config.home.activation ? visionHandoffConfig);
     assert pkgs.lib.hasInfix expectedVisionHandoffConfigPath visionHandoffActivation;
@@ -1115,6 +1129,7 @@ in
         expectedRulesPath
         expectedWebAccessPath
         expectedHerdrSubagentsPath
+        expectedVisionHandoffPath
         expectedSupiContextExtension
         expectedSupiExtrasPath
       ]
