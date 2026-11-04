@@ -928,9 +928,11 @@ in
     assert !(builtins.hasAttr "frontier-reviewer" default.config.programs.pi-coding-agent.agents);
     assert !(builtins.hasAttr "reviewer" default.config.programs.pi-coding-agent.agents);
     assert
-      default.config.programs.pi-coding-agent.agents.implementer.model == "omniroute/personal/implementer";
+      default.config.programs.pi-coding-agent.agents.implementer.model
+      == "omniroute/personal/implementer";
     assert
-      default.config.programs.pi-coding-agent.agents.deep-reviewer.model == "omniroute/personal/deep-reviewer";
+      default.config.programs.pi-coding-agent.agents.deep-reviewer.model
+      == "omniroute/personal/deep-reviewer";
     assert default.config.programs.pi-coding-agent.agents.deep-reviewer.effort == "high";
     assert
       default.config.programs.pi-coding-agent.agents.standards-reviewer.model
@@ -2228,12 +2230,16 @@ in
       ''
         config="$TMPDIR/pi-vision-handoff.json"
         pi-vision-handoff-config-update "$config" zai/glm-5.3
-        jq -e '. == {visionModel: "zai/glm-5.3"}' "$config" >/dev/null
+        jq -e '. == {visionModel: "zai/glm-5.3", fallbackModels: []}' "$config" >/dev/null
         test "$(stat -c %a "$config")" = 600
+
+        pi-vision-handoff-config-update "$config" zai/glm-5.3 cmd/deepseek ds
+        jq -e '. == {visionModel: "zai/glm-5.3", fallbackModels: ["cmd/deepseek", "ds"]}' "$config" >/dev/null
+        rm "$config"
 
         printf '%s\n' '{"enabled":false,"cacheMax":12,"visionModel":"old/model"}' > "$config"
         pi-vision-handoff-config-update "$config" google/gemini-2.5-pro
-        jq -e '. == {enabled: false, cacheMax: 12, visionModel: "google/gemini-2.5-pro"}' "$config" >/dev/null
+        jq -e '. == {enabled: false, cacheMax: 12, visionModel: "google/gemini-2.5-pro", fallbackModels: []}' "$config" >/dev/null
 
         printf '%s\n' 'not-json' > "$config"
         cp "$config" "$TMPDIR/before"
