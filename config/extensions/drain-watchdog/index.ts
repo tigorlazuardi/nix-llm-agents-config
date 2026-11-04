@@ -409,7 +409,7 @@ export function watchdogToolGate(kind: WatchdogToolKind, childSession: boolean, 
 // #30's factory consumes these; all decisions stay pure and asserted here so the
 // ONE test seam of #27 holds. No pi API types appear above the factory below.
 
-export type WatchdogSubcommand = { sub: "prep" | "resume" | "off" | "status"; ref: string | null };
+export type WatchdogSubcommand = { sub: "prep" | "pause" | "resume" | "off" | "status"; ref: string | null };
 
 /**
  * Argument grammar of `/watchdog`: `resume` / `off` / `status` are control
@@ -418,6 +418,7 @@ export type WatchdogSubcommand = { sub: "prep" | "resume" | "off" | "status"; re
 export function parseWatchdogSubcommand(args: string): WatchdogSubcommand {
 	const trimmed = args.trim();
 	const first = (trimmed.split(/\s+/)[0] ?? "").toLowerCase();
+	if (first === "pause") return { sub: "pause", ref: null };
 	if (first === "resume") return { sub: "resume", ref: null };
 	if (first === "off") return { sub: "off", ref: null };
 	if (first === "status") return { sub: "status", ref: null };
@@ -550,6 +551,7 @@ export function watchdogWidgetLines(v: WidgetView): string[] | null {
 
 const WATCHDOG_SUBCOMMANDS: readonly { name: string; description: string }[] = [
 	{ name: "status", description: "Tampilkan fase, target, nudge, dan antrean" },
+	{ name: "pause", description: "Pause run yang sedang jalan (stop nudge; tidak membatalkan turn)" },
 	{ name: "resume", description: "Lanjutkan run yang PAUSED" },
 	{ name: "off", description: "Matikan watchdog dan batalkan PREP" },
 	{ name: "on", description: "Mulai PREP (opsional: on <ref>)" },
@@ -1244,6 +1246,15 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 			case "status":
 				notifyStatus();
 				return;
+			case "pause": {
+				if (state.phase !== "armed" && state.phase !== "backoff") {
+					notify(`drain-watchdog: nothing to pause (phase ${state.phase})`, "warning");
+					return;
+				}
+				apply(transition(state, { type: "llmStop", reason: "paused by operator (/watchdog pause)" }, Date.now()), "pause");
+				refreshWidget();
+				return;
+			}
 			case "off": {
 				if (state.phase === "done" || state.phase === "off") {
 					state = { ...INITIAL_STATE }; // DONE is terminal; off+rearm is a fresh run

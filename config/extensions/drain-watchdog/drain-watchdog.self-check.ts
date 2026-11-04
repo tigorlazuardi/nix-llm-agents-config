@@ -589,6 +589,7 @@ assert.deepEqual(parseWatchdogSubcommand("on #30"), { sub: "prep", ref: "#30" })
 assert.deepEqual(parseWatchdogSubcommand("#30"), { sub: "prep", ref: "#30" });
 assert.deepEqual(parseWatchdogSubcommand("watchdog live loop #30"), { sub: "prep", ref: "watchdog live loop #30" });
 assert.deepEqual(parseWatchdogSubcommand("resume"), { sub: "resume", ref: null });
+assert.deepEqual(parseWatchdogSubcommand("pause"), { sub: "pause", ref: null });
 assert.deepEqual(parseWatchdogSubcommand("off"), { sub: "off", ref: null });
 assert.deepEqual(parseWatchdogSubcommand("status"), { sub: "status", ref: null });
 
@@ -619,7 +620,7 @@ assert(plain(watchdogWidgetLines({ ...baseView, phase: "off", prep: "discover", 
 assert(plain(watchdogWidgetLines({ ...baseView, phase: "off", prep: "proof" })).includes("bukti kesiapan"));
 
 assert.deepEqual(watchdogCompletions("sta")!.map((c) => c.value), ["status"]);
-assert.deepEqual(watchdogCompletions("")!.map((c) => c.value), ["status", "resume", "off", "on"]);
+assert.deepEqual(watchdogCompletions("")!.map((c) => c.value), ["status", "pause", "resume", "off", "on"]);
 assert.deepEqual(watchdogCompletions("o")!.map((c) => c.value), ["off", "on"]);
 assert.deepEqual(watchdogCompletions("RES")!.map((c) => c.value), ["resume"], "completion ignores case");
 assert.equal(watchdogCompletions("zzz"), null);
@@ -1099,6 +1100,26 @@ await withNoAmbientSubagent(() =>
 	}),
 );
 
+
+// `/watchdog pause` pauses a live run (no nudges, timers stopped, persisted) and `resume` continues it;
+// pausing when nothing runs is refused with a notice.
+await withNoAmbientSubagent(() =>
+	withFakeTimers(async (timers, flush, clock) => {
+		const h = makeHarness(makeFixtureCwd());
+		h.entries.push(armedEntry());
+		h.handlers.session_start({}, h.ctx);
+		await h.handlers["command:watchdog"]("pause", h.ctx);
+		assert(h.audits.some((a) => a.type === "paused" && String(a.data.reason).includes("/watchdog pause")), "pause is audited with its reason");
+		assert(timers.every((t) => t.cleared), "pause stops every timer");
+		clock.advance(IDLE_GRACE_MS * 3);
+		await flush();
+		assert.equal(h.sent.length, 0, "a paused run sends no nudge");
+		await h.handlers["command:watchdog"]("pause", h.ctx);
+		assert(h.notifications.some((n) => String(n.message ?? n).includes("nothing to pause")), "pause outside a live run is refused");
+		await h.handlers["command:watchdog"]("resume", h.ctx);
+		assert(timers.some((t) => t.kind === "interval" && !t.cleared), "resume restarts the tick loop");
+	}),
+);
 
 // --- #31: watchdog_handoff / watchdog_stop model tools (harness) ------------------------
 
