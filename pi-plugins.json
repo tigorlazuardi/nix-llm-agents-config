@@ -83,9 +83,9 @@
   "pi-diet-lsp": {
     "strategy": "npm",
     "package": "pi-diet-lsp",
-    "version": "0.1.9",
-    "src": "https://registry.npmjs.org/pi-diet-lsp/-/pi-diet-lsp-0.1.9.tgz",
-    "hash": "sha256-ZMi2ptcjJZFLKQTJjNLylds8gZOxhHrxONa1BMeg+ws=",
+    "version": "0.1.10",
+    "src": "https://registry.npmjs.org/pi-diet-lsp/-/pi-diet-lsp-0.1.10.tgz",
+    "hash": "sha256-EksdrPYunijfjsO6i3jZeYcMjf4E76PJty1wvrORQ+s=",
     "check": "diet-lsp-load"
   },
   "pi-commandcode-provider": {
