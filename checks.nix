@@ -1378,6 +1378,7 @@ in
         mkdir -p drain-watchdog/node_modules/@earendil-works
         piRuntime=${expectedPackage}/lib/node_modules/pi-monorepo
         ln -s "$piRuntime/node_modules/@earendil-works/pi-ai" drain-watchdog/node_modules/@earendil-works/pi-ai
+        ln -s "$piRuntime/node_modules/@earendil-works/pi-tui" drain-watchdog/node_modules/@earendil-works/pi-tui
         ln -s "$piRuntime" drain-watchdog/node_modules/@earendil-works/pi-coding-agent
         # watchdog_* tool schemas (#31) use typebox directly, like dev-journal.
         ln -s "$piRuntime/node_modules/typebox" drain-watchdog/node_modules/typebox

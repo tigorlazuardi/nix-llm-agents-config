@@ -764,7 +764,9 @@ type Harness = {
 	/** pi.sendUserMessage payloads (PREP/discovery instructions). */
 	userMessages: string[];
 	/** Latest ui.setWidget payload for the watchdog key (undefined = cleared). */
-	widget: () => string[] | undefined;
+	widget: (width?: number) => string[] | undefined;
+	/** ui.setWidget calls for the watchdog key, and tui.requestRender repaints. */
+	widgetCalls: { count: number; repaints: number };
 	execCalls: { command: string; args: string[] }[];
 	setExec: (impl: (command: string, args: string[]) => Promise<{ stdout: string; stderr: string; code: number; killed: boolean }>) => void;
 	/** Registered model tools by name (watchdog_target/complete/handoff/sync/done/stop). */
@@ -787,7 +789,9 @@ function makeHarness(cwd: string): Harness {
 	const notifications: { message: string; level: string }[] = [];
 	const sent: { customType: string; content: string }[] = [];
 	const userMessages: string[] = [];
-	let widgetLines: string[] | undefined;
+	let widgetComponent: { render: (width: number) => string[] } | undefined;
+	const widgetCalls = { count: 0, repaints: 0 };
+	const fakeTui = { requestRender: () => { widgetCalls.repaints++; } };
 	const entries: unknown[] = [];
 	let execImpl: (command: string, args: string[]) => Promise<{ stdout: string; stderr: string; code: number; killed: boolean }> = async () => ({
 		stdout: "",
@@ -838,8 +842,10 @@ function makeHarness(cwd: string): Harness {
 					selectCalls.push({ title, options, timeout: opts?.timeout });
 					answerRestore = resolve;
 				}),
-			setWidget: (_key: string, lines: string[] | undefined) => {
-				widgetLines = lines;
+			// The extension installs one live component (factory) and repaints it via requestRender.
+			setWidget: (_key: string, content: unknown) => {
+				widgetCalls.count++;
+				widgetComponent = typeof content === "function" ? (content as (t: unknown) => { render: (w: number) => string[] })(fakeTui) : undefined;
 			},
 		},
 		isIdle: () => true,
@@ -862,7 +868,7 @@ function makeHarness(cwd: string): Harness {
 			}
 		};
 	}
-	return { handlers, restoreDialogFlag: state, audits, notifications, sent, userMessages, widget: () => widgetLines, execCalls, setExec: (impl) => { execImpl = impl; }, tools, ctx, entries, selectCalls, answerRestore: (c) => answerRestore(c) };
+	return { handlers, restoreDialogFlag: state, audits, notifications, sent, userMessages, widget: (width = 200) => widgetComponent?.render(width), widgetCalls, execCalls, setExec: (impl) => { execImpl = impl; }, tools, ctx, entries, selectCalls, answerRestore: (c) => answerRestore(c) };
 }
 
 function makeFixtureCwd(): string {
@@ -1734,6 +1740,54 @@ await withNoAmbientSubagent(() =>
 			assert(h.userMessages[before].includes("#38") && h.userMessages[before].includes("watchdog_target"), "an explicit ref is passed to the model's discovery");
 		} finally {
 			rmSync(cwd, { recursive: true, force: true });
+		}
+	}),
+);
+
+// Anti-flicker: Pi's setWidget deletes + re-adds the widget (moving it to the end of the
+// order) on EVERY call, so a per-second setWidget makes this widget leapfrog other
+// widgets. It must install once, then only repaint, and reinstall after Pi disposes it.
+await withNoAmbientSubagent(() =>
+	withFakeTimers(async (_timers, _flush, clock) => {
+		const h = makeHarness(makeFixtureCwd());
+		h.entries.push(armedEntry());
+		h.handlers.session_start({}, h.ctx);
+		// The harness restores with hasUI=false, so the first live refresh is the install.
+		assert.equal(h.widgetCalls.count, 0, "nothing is installed while there is no UI");
+		for (const t of fakeWidgetTimers) if (!t.cleared) t.fire();
+		const installs = h.widgetCalls.count;
+		assert.equal(installs, 1, "an armed run installs the widget exactly once");
+		const first = plainWidget(h);
+		assert(first.includes("ARMED"), "the live component renders the armed widget");
+
+		// 30 simulated seconds of the 1 s countdown timer: repaint only, never setWidget.
+		const repaintsBefore = h.widgetCalls.repaints;
+		for (let i = 0; i < 30; i++) {
+			clock.advance(1000);
+			for (const t of fakeWidgetTimers) if (!t.cleared) t.fire();
+		}
+		assert.equal(h.widgetCalls.count, installs, "the countdown never calls setWidget again");
+		assert(h.widgetCalls.repaints >= repaintsBefore + 30, "the countdown asks the TUI to repaint instead");
+		assert.notEqual(plainWidget(h), first, "the idle clock still moves between repaints");
+
+		// Pi disposes widgets on reload / session switch: the next refresh must reinstall.
+		h.handlers.session_shutdown();
+		assert.equal(h.widgetCalls.count, installs, "shutdown itself does not touch the widget");
+	}),
+);
+
+// A long row must be clipped to the terminal width (a row wider than the TUI breaks rendering).
+await withNoAmbientSubagent(() =>
+	withFakeTimers(async () => {
+		const h = makeHarness(makeFixtureCwd());
+		h.entries.push(armedEntry({ runTarget: "X".repeat(300) }));
+		h.handlers.session_start({}, h.ctx);
+		for (const t of fakeWidgetTimers) if (!t.cleared) t.fire();
+		const rows = h.widget(40) ?? [];
+		assert(rows.length > 0, "widget is installed for the long-target run");
+		for (const row of rows) {
+			const visible = row.replace(/\x1b\[[0-9;]*m/g, "");
+			assert(visible.length <= 40, `row clipped to the terminal width (got ${visible.length}): ${visible}`);
 		}
 	}),
 );

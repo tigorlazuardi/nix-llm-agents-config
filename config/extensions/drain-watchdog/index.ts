@@ -47,6 +47,7 @@ import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { isRetryableAssistantError, StringEnum } from "@earendil-works/pi-ai";
 import type { AgentToolResult, ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { truncateToWidth } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 
 // --- Types -------------------------------------------------------------------
@@ -1040,6 +1041,15 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 	const WIDGET_KEY = "drain-watchdog";
 	const WIDGET_REFRESH_MS = 1000;
 
+	// Flicker fix: Pi's ui.setWidget does delete+set on its widget Map, so every call moves the
+	// widget to the END of the order and rebuilds the container. Two widgets doing that every
+	// second (this one and pi-herdr-subagents') leapfrog each other. So install ONE live
+	// component per visible stretch and only ask the TUI to repaint it afterwards.
+	// ponytail: fixed to one component; add a second only when another watchdog widget exists.
+	let widgetLines: string[] | null = null;
+	let widgetTui: { requestRender: () => void } | null = null;
+	let widgetInstalled = false;
+
 	/** Redraws the persistent widget from live state; cheap, idempotent, never throws into callers. */
 	const refreshWidget = () => {
 		try {
@@ -1060,7 +1070,33 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 				backoffKind: state.backoffKind,
 				backoffRung: state.backoffRung,
 			});
-			ctx.ui.setWidget(WIDGET_KEY, lines === null ? undefined : lines);
+			widgetLines = lines;
+			if (lines === null) {
+				if (widgetInstalled) {
+					widgetInstalled = false;
+					ctx.ui.setWidget(WIDGET_KEY, undefined);
+				}
+				return;
+			}
+			if (!widgetInstalled) {
+				widgetInstalled = true;
+				ctx.ui.setWidget(WIDGET_KEY, (tui: { requestRender: () => void }) => {
+					widgetTui = tui;
+					return {
+						// One space of left padding, like the string[] path of setWidget; clipped to
+						// the terminal width so a long target/reason never overflows a row.
+						render: (width: number) => (widgetLines ?? []).map((line) => truncateToWidth(` ${line}`, width)),
+						invalidate() {},
+						dispose() {
+							// Pi disposes on reload/session switch too: reinstall on the next refresh.
+							if (widgetTui === tui) widgetTui = null;
+							widgetInstalled = false;
+						},
+					};
+				});
+				return;
+			}
+			widgetTui?.requestRender();
 		} catch {
 			// A UI failure must never break a tick, a tool call, or a state transition.
 		}
