@@ -176,7 +176,11 @@ let
     thinking = "off";
   };
   jsonFormat = pkgs.formats.json { };
-  pinnedPkgs = nixpkgs-unstable.legacyPackages.${pkgs.stdenv.hostPlatform.system};
+  piOverlay = import ../packages/pi-coding-agent-overlay.nix;
+  pinnedPkgs = import nixpkgs-unstable {
+    system = pkgs.stdenv.hostPlatform.system;
+    overlays = [ piOverlay ];
+  };
   # nixpkgs now marks rtk unfree (ASL-2.0 + BUSL-1.1); the pinned input carries no
   # user config, so resolve rtk through a scope that explicitly allowlists it.
   unfreeRtkPkgs = import nixpkgs-unstable {

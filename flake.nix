@@ -37,6 +37,7 @@
             value = f system;
           }) systems
         );
+      piOverlay = import ./packages/pi-coding-agent-overlay.nix;
       piModule = import ./modules/pi-coding-agent.nix {
         inherit mattpocock-skills nixpkgs-unstable pi-messaging-relay;
       };
@@ -57,6 +58,7 @@
           pkgs = import nixpkgs-unstable {
             inherit system;
             config.allowUnfreePredicate = pkg: nixpkgs-unstable.lib.getName pkg == "rtk";
+            overlays = [ piOverlay ];
           };
         }
       );
