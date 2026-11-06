@@ -1,140 +1,10 @@
 {
   "providers": {
-    "zai": {
-      "compat": {
-        "sendSessionAffinityHeaders": true
-      }
-    },
-    "openrouter": {
-      "baseUrl": "https://openrouter.ai/api/v1",
-      "api": "openai-completions",
-      "models": [
-        {
-          "id": "stealth/ox-alpha",
-          "name": "Ox Alpha",
-          "reasoning": true,
-          "contextWindow": 278000,
-          "maxTokens": 128000,
-          "input": [
-            "text",
-            "image"
-          ],
-          "cost": {
-            "input": 0,
-            "output": 0,
-            "cacheRead": 0,
-            "cacheWrite": 0
-          },
-          "compat": {
-            "supportsDeveloperRole": false,
-            "thinkingFormat": "openrouter"
-          }
-        }
-      ]
-    },
     "omniroute": {
       "name": "omniroute",
       "baseUrl": "https://omniroute.tigor.web.id/v1",
       "apiKey": "omniroute-no-api-key",
       "models": [
-        {
-          "id": "cc/claude-fable-5",
-          "reasoning": true,
-          "contextWindow": 1000000,
-          "maxTokens": 128000,
-          "api": "anthropic-messages",
-          "input": [
-            "text",
-            "image"
-          ],
-          "compat": {
-            "forceAdaptiveThinking": true
-          }
-        },
-        {
-          "id": "cc/claude-opus-5",
-          "reasoning": true,
-          "contextWindow": 1000000,
-          "maxTokens": 128000,
-          "api": "anthropic-messages",
-          "input": [
-            "text",
-            "image"
-          ],
-          "compat": {
-            "forceAdaptiveThinking": true
-          }
-        },
-        {
-          "id": "cc/claude-sonnet-5",
-          "reasoning": true,
-          "contextWindow": 1000000,
-          "maxTokens": 128000,
-          "api": "anthropic-messages",
-          "input": [
-            "text",
-            "image"
-          ],
-          "compat": {
-            "forceAdaptiveThinking": true
-          }
-        },
-        {
-          "id": "cc/claude-sonnet-5-5",
-          "reasoning": true,
-          "contextWindow": 1000000,
-          "maxTokens": 128000,
-          "api": "anthropic-messages",
-          "input": [
-            "text",
-            "image"
-          ],
-          "compat": {
-            "forceAdaptiveThinking": true
-          }
-        },
-        {
-          "id": "cc/claude-opus-5-5",
-          "reasoning": true,
-          "contextWindow": 1000000,
-          "maxTokens": 128000,
-          "api": "anthropic-messages",
-          "input": [
-            "text",
-            "image"
-          ],
-          "compat": {
-            "forceAdaptiveThinking": true
-          }
-        },
-        {
-          "id": "cc/claude-haiku-4-5-20251001",
-          "reasoning": true,
-          "contextWindow": 200000,
-          "maxTokens": 64000,
-          "api": "anthropic-messages",
-          "input": [
-            "text",
-            "image"
-          ],
-          "compat": {
-            "forceAdaptiveThinking": true
-          }
-        },
-        {
-          "id": "cc/claude-haiku-5-5",
-          "reasoning": true,
-          "contextWindow": 1000000,
-          "maxTokens": 128000,
-          "api": "anthropic-messages",
-          "input": [
-            "text",
-            "image"
-          ],
-          "compat": {
-            "forceAdaptiveThinking": true
-          }
-        },
         {
           "id": "personal/main",
           "reasoning": true,
@@ -343,25 +213,6 @@
           "compat": {
             "supportsDeveloperRole": false,
             "sendSessionAffinityHeaders": true
-          }
-        },
-        {
-          "id": "ds/deepseek-flash",
-          "name": "DeepSeek V4.1 Flash (omniroute, direct provider)",
-          "reasoning": true,
-          "contextWindow": 1048576,
-          "maxTokens": 393216,
-          "api": "openai-completions",
-          "input": [
-            "text",
-            "image"
-          ],
-          "compat": {
-            "supportsStore": false,
-            "supportsDeveloperRole": false,
-            "maxTokensField": "max_tokens",
-            "thinkingFormat": "deepseek",
-            "requiresReasoningContentOnAssistantMessages": true
           }
         }
       ]
