@@ -209,7 +209,7 @@ let
       pix-optimizer.enable = false;
       pi-blackhole.enable = false;
       pi-sensitive-guard.enable = false;
-      pi-herdr-subagents.enable = false;
+      pi-herdr-agents.enable = false;
       pi-vision-handoff.enable = false;
       pix-todo.enable = false;
     };
@@ -251,7 +251,7 @@ let
         tools.allow = [ "read" ];
         skills = [ "demo" ];
       };
-      plugins.pi-herdr-subagents.agents.custom = { };
+      plugins.pi-herdr-agents.agents.custom = { };
     };
   };
   yamlSafeAgentName = "edge: # [] {}";
@@ -268,14 +268,14 @@ let
           exclude = [ ];
         };
       };
-      plugins.pi-herdr-subagents.agents.${yamlSafeAgentName} = { };
+      plugins.pi-herdr-agents.agents.${yamlSafeAgentName} = { };
     };
   };
   yamlSafeAgentHomeFile =
     yamlSafeAgent.config.home.file."${yamlSafeAgent.config.programs.pi-coding-agent.configDir}/agents/${yamlSafeAgentName}.md";
   yamlSafeAgentText = yamlSafeAgentHomeFile.text;
   invalidPlugin = evaluate {
-    programs.pi-coding-agent.plugins.pi-herdr-subagents.agents.missing = { };
+    programs.pi-coding-agent.plugins.pi-herdr-agents.agents.missing = { };
   };
   invalidPluginEvaluation = builtins.tryEval (
     builtins.deepSeq invalidPlugin.config.home.activationPackage true
@@ -298,17 +298,18 @@ let
   );
   expectedOrchestrator = ''
     ---
-    name: "orchestrator"
+    name: orchestrator
     description: "Deterministic black-box one-shot state machine"
-    model: "omniroute/personal/main"
-    thinking: "high"
-    tools: "read, bash, subagent"
+    model: omniroute/personal/main
+    thinking: high
+    tools: read, bash, subagent
     system-prompt: replace
     session-mode: standalone
     spawning: true
     auto-exit: true
     ---
     ${builtins.readFile ./config/agents/orchestrator.md}'';
+  yamlSafeAgentFixture = pkgs.writeText "managed-yaml-safe-agent.md" yamlSafeAgentText;
   managedImplementerFixture =
     pkgs.writeText "managed-implementer.md"
       default.config.home.file."${default.config.programs.pi-coding-agent.configDir}/agents/implementer.md".text;
@@ -382,8 +383,8 @@ let
   expectedRulesPath = "${expectedRules}/lib/node_modules/@tigorhutasuhut/pi-rules";
   expectedWebAccess = pkgs.callPackage ./packages/pi-web-access.nix { };
   expectedWebAccessPath = "${expectedWebAccess}/lib/node_modules/pi-web-access";
-  expectedHerdrSubagents = pkgs.callPackage ./packages/pi-herdr-subagents.nix { };
-  expectedHerdrSubagentsPath = "${expectedHerdrSubagents}/lib/node_modules/pi-herdr-subagents";
+  expectedHerdrAgents = pkgs.callPackage ./packages/pi-herdr-agents.nix { };
+  expectedHerdrAgentsPath = "${expectedHerdrAgents}/lib/node_modules/pi-herdr-agents";
   expectedVisionHandoff = pkgs.callPackage ./packages/pi-vision-handoff.nix { };
   expectedVisionHandoffPath = "${expectedVisionHandoff}/lib/node_modules/pi-vision-handoff";
   expectedVisionHandoffConfigUpdater =
@@ -433,7 +434,7 @@ in
   prompt-template-model = expectedPromptTemplateModel;
   rules = expectedRules;
   web-access = expectedWebAccess;
-  herdr-subagents = expectedHerdrSubagents;
+  pi-herdr-agents = expectedHerdrAgents;
   vision-handoff = expectedVisionHandoff;
   supi-context = expectedSupiContext;
   supi-extras = expectedSupiExtras;
@@ -559,7 +560,7 @@ in
           expectedPixTodoPath
           expectedRulesPath
           expectedWebAccessPath
-          expectedHerdrSubagentsPath
+          expectedHerdrAgentsPath
           expectedVisionHandoffPath
           expectedSupiContextExtension
           expectedSupiExtrasPath
@@ -945,22 +946,22 @@ in
       resolvedAgent.config.home.file."${resolvedAgent.config.programs.pi-coding-agent.configDir}/agents/custom.md".text
       == ''
         ---
-        name: "custom"
+        name: custom
         description: "Resolver check"
-        tools: "read"
+        tools: read
         system-prompt: replace
         session-mode: standalone
         spawning: false
         auto-exit: true
-        skills: "demo"
+        skills: demo
         ---
         Custom prompt.'';
     assert
       yamlSafeAgentText == ''
         ---
-        name: "edge: # [] {}"
+        name: edge: # [] {}
         description: "line one:\nline two # []"
-        tools: "read, bash"
+        tools: read, bash
         system-prompt: replace
         session-mode: standalone
         spawning: false
@@ -1079,7 +1080,7 @@ in
         ) pluginsDisabled.config.programs.pi-coding-agent.settings.packages
       ) == 0;
     assert
-      !(builtins.elem expectedHerdrSubagentsPath pluginsDisabled.config.programs.pi-coding-agent.settings.packages);
+      !(builtins.elem expectedHerdrAgentsPath pluginsDisabled.config.programs.pi-coding-agent.settings.packages);
     assert
       !(builtins.elem "${expectedPixToolsRoot}/pix-todo" pluginsDisabled.config.programs.pi-coding-agent.settings.packages);
     assert
@@ -1130,7 +1131,7 @@ in
         expectedPixTodoPath
         expectedRulesPath
         expectedWebAccessPath
-        expectedHerdrSubagentsPath
+        expectedHerdrAgentsPath
         expectedVisionHandoffPath
         expectedSupiContextExtension
         expectedSupiExtrasPath
@@ -1563,7 +1564,7 @@ in
         ];
       }
       ''
-        nixfmt --check ${./flake.nix} ${./checks.nix} ${./modules/pi-coding-agent.nix} ${./modules/remote-pi-relay.nix} ${./modules/pi-coding-agent/agents.nix} ${./modules/pi-coding-agent/default-agents.nix} ${./modules/pi-coding-agent/pi-herdr-subagents.nix} ${./packages/pi-diet-lsp.nix} ${./packages/pi-commandcode-provider.nix} ${./packages/pi-effort.nix} ${./packages/pi-timestamps.nix} ${./packages/pi-herdr.nix} ${./packages/pi-herdr-sudo-task.nix} ${./packages/pi-herdr-rename.nix} ${./packages/pi-bg.nix} ${./packages/remote-pi-relay.nix} ${./packages/pi-vimmode.nix} ${./packages/pi-usage.nix} ${./packages/pi-mcp-adapter.nix} ${./packages/browser-goblin.nix} ${./packages/pix-optimizer.nix} ${./packages/pix-tools.nix} ${./packages/pix-sudo.nix} ${./packages/rpiv-ask-user-question.nix} ${./packages/pi-blackhole.nix} ${./packages/pi-sensitive-guard.nix} ${./packages/pi-prompt-template-model.nix} ${./packages/pi-rules.nix} ${./packages/pi-web-access.nix} ${./packages/pi-herdr-subagents.nix} ${./packages/pi-vision-handoff.nix} ${./packages/pi-vision-handoff-config-updater.nix} ${./packages/supi-context.nix} ${./packages/supi-extras.nix} ${./packages/toon.nix}
+        nixfmt --check ${./flake.nix} ${./checks.nix} ${./modules/pi-coding-agent.nix} ${./modules/remote-pi-relay.nix} ${./modules/pi-coding-agent/agents.nix} ${./modules/pi-coding-agent/default-agents.nix} ${./modules/pi-coding-agent/pi-herdr-agents.nix} ${./packages/pi-diet-lsp.nix} ${./packages/pi-commandcode-provider.nix} ${./packages/pi-effort.nix} ${./packages/pi-timestamps.nix} ${./packages/pi-herdr.nix} ${./packages/pi-herdr-agents.nix} ${./packages/pi-herdr-sudo-task.nix} ${./packages/pi-herdr-rename.nix} ${./packages/pi-bg.nix} ${./packages/remote-pi-relay.nix} ${./packages/pi-vimmode.nix} ${./packages/pi-usage.nix} ${./packages/pi-mcp-adapter.nix} ${./packages/browser-goblin.nix} ${./packages/pix-optimizer.nix} ${./packages/pix-tools.nix} ${./packages/pix-sudo.nix} ${./packages/rpiv-ask-user-question.nix} ${./packages/pi-blackhole.nix} ${./packages/pi-sensitive-guard.nix} ${./packages/pi-prompt-template-model.nix} ${./packages/pi-rules.nix} ${./packages/pi-web-access.nix} ${./packages/pi-vision-handoff.nix} ${./packages/pi-vision-handoff-config-updater.nix} ${./packages/supi-context.nix} ${./packages/supi-extras.nix} ${./packages/toon.nix}
         WORKFLOW=${./.github/workflows/daily-update.yml} UPDATER=${./scripts/daily-update.sh} REGISTRY=${./pi-plugins.json} CHECKS=${./checks.nix} MISSING_INTEGRITY_FIXTURE=${./tests/fixtures/npm-lock-missing-integrity.json} CONTROL_RESOLVED_FIXTURE=${./tests/fixtures/npm-lock-control-resolved.json} bash ${./tests/daily-updater-self-check.sh}
         RUNNER=${./scripts/local-update.sh} PROMPT=${./scripts/local-update-recovery.md} bash ${./tests/local-updater-self-check.sh}
         touch $out
@@ -1699,6 +1700,9 @@ in
         test ! -e ${expectedVimModePath}/node_modules
         grep -F '"version": "0.9.0"' ${expectedVimModePath}/package.json
         grep -aF 'registerCommand(`vimmode`' ${expectedVimModePath}/index.js
+        # pi-vimmode is a no-op in subagent children: insert mode would swallow the
+        # first Escape that pi-herdr-agents' single-Escape interrupt relies on.
+        grep -aF 'function Uh(e){if(process.env.PI_SUBAGENT_ID)return;Hh(e)}' ${expectedVimModePath}/index.js
         pi --offline --no-extensions --no-skills --no-prompt-templates --no-context-files \
           -e ${expectedVimModePath} \
           --list-models > pi.log 2>&1
@@ -2271,8 +2275,8 @@ in
         touch $out
       '';
 
-  herdr-subagents-load =
-    pkgs.runCommandLocal "pi-herdr-subagents-load"
+  herdr-agents-load =
+    pkgs.runCommandLocal "pi-herdr-agents-load"
       {
         nativeBuildInputs = [
           expectedPackage
@@ -2285,19 +2289,23 @@ in
         export PI_TELEMETRY=0
         export HERDR_ENV=1
         mkdir -p "$PI_CODING_AGENT_DIR"
-        package=${expectedHerdrSubagentsPath}
+        package=${expectedHerdrAgentsPath}
         entry="$package/pi-extension/subagents/index.ts"
         test -f "$entry"
         test -f "$package/README.md"
+        test -f "$package/skills/pi-herdr-agents/SKILL.md"
         # Pi 1.0+ aliases @sinclair/typebox to its host copy; the package ships no vendored modules.
         test ! -e "$package/node_modules"
-        grep -F 'name: "subagent"' "$entry"
-        grep -F 'name: "subagent_interrupt"' "$entry"
-        grep -F 'name: "subagents_list"' "$entry"
-        grep -F 'name: "subagent_resume"' "$entry"
-        grep -F 'fire-and-forget async tool' "$entry"
-        grep -F 'Spawn a sub-agent in a dedicated terminal herdr pane.' "$entry"
-        grep -F 'creates the herdr pane' "$entry"
+        grep -F 'name: "subagent",' "$package/pi-extension/subagents/launch-tools.ts"
+        grep -F 'name: "subagent_resume",' "$package/pi-extension/subagents/launch-tools.ts"
+        grep -F 'name: "subagent_send",' "$package/pi-extension/subagents/control-tools.ts"
+        grep -F 'name: "subagent_stop",' "$package/pi-extension/subagents/control-tools.ts"
+        grep -F 'name: "subagent_interrupt",' "$package/pi-extension/subagents/control-tools.ts"
+        grep -F 'name: "subagent_cancel",' "$package/pi-extension/subagents/control-tools.ts"
+        grep -F 'name: "subagents_list",' "$package/pi-extension/subagents/control-tools.ts"
+        grep -F 'name: "subagents_write_task_models",' "$package/pi-extension/subagents/task-models.ts"
+        grep -F 'name: "worktree_list",' "$package/pi-extension/subagents/worktree-tools.ts"
+        grep -F 'name: "worktree_remove",' "$package/pi-extension/subagents/worktree-tools.ts"
         cp -R "$package" "$TMPDIR/package"
         chmod -R u+w "$TMPDIR/package"
         mkdir -p "$TMPDIR/package/node_modules/@earendil-works" "$TMPDIR/package/node_modules/@sinclair"
@@ -2311,8 +2319,9 @@ in
           "$TMPDIR/package/node_modules/typebox"
         ln -s ${expectedPackage}/lib/node_modules/pi-monorepo/node_modules/typebox \
           "$TMPDIR/package/node_modules/@sinclair/typebox"
-        node --experimental-strip-types ${./tests/pi-herdr-subagents-policy-self-check.mjs} \
-          "$TMPDIR/package" "$TMPDIR/policy" ${managedImplementerFixture} ${managedOrchestratorFixture}
+        node --experimental-strip-types ${./tests/pi-herdr-agents-policy-self-check.mjs} \
+          "$TMPDIR/package" "$TMPDIR/policy" ${managedImplementerFixture} ${managedOrchestratorFixture} \
+          ${yamlSafeAgentFixture}
         pi --offline --no-extensions --no-skills --no-prompt-templates --no-context-files \
           -e "$package" \
           --list-models > pi.log 2>&1

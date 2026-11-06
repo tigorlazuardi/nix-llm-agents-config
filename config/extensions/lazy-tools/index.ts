@@ -6,7 +6,7 @@ const GROUP_NAMES = ["browser", "subagents", "research", "herdr", "sudo", "journ
 type Group = typeof GROUP_NAMES[number];
 const GROUP_MARKERS: Record<Group, readonly string[]> = {
   browser: ["browser-goblin"],
-  subagents: ["pi-herdr-subagents"],
+  subagents: ["pi-herdr-agents"],
   research: ["pi-web-access", "pi-mcp-adapter"],
   herdr: ["pi-herdr"],
   sudo: ["pix-sudo"],
@@ -22,15 +22,17 @@ const ALWAYS_ACTIVE = new Set(["bash", "bash_bg", "ask_user_question", "rename_h
 const HIDDEN_TOOLS = new Set(["agent_bg"]);
 
 export default function (pi: ExtensionAPI) {
-  const childAllowedTools = process.env.PI_SUBAGENT_ALLOWED_TOOLS
-    ? new Set(process.env.PI_SUBAGENT_ALLOWED_TOOLS.split(",").map((name) => name.trim()).filter(Boolean))
-    : null;
-  const groupTools = (group: Group) => pi.getAllTools()
-    .filter((tool) =>
-      !ALWAYS_ACTIVE.has(tool.name)
-      && (!childAllowedTools || childAllowedTools.has(tool.name))
-      && GROUP_MARKERS[group].some((marker) => tool.sourceInfo.path.includes(marker)))
-    .map((tool) => tool.name);
+  // A child launched by pi-herdr-agents already carries the exact `--tools`
+  // allowlist Pi enforces, so this extension must never widen it: a child session
+  // only drops the permanently hidden tools from the set Pi gave it.
+  const childSession = Boolean(process.env.PI_SUBAGENT_ID);
+  const groupTools = (group: Group) =>
+    pi
+      .getAllTools()
+      .filter((tool) =>
+        !ALWAYS_ACTIVE.has(tool.name)
+        && GROUP_MARKERS[group].some((marker) => tool.sourceInfo.path.includes(marker)))
+      .map((tool) => tool.name);
   const groupOfTool = (name: string): Group | undefined => {
     for (const group of GROUP_NAMES) {
       if (groupTools(group).includes(name)) return group;
@@ -51,6 +53,17 @@ export default function (pi: ExtensionAPI) {
       group: StringEnum(GROUP_NAMES),
     }),
     async execute(_id, { group }) {
+      // Children are not deferred: they keep exactly the tools Pi launched them
+      // with, so a group load could only widen the child's tool set.
+      if (childSession) {
+        return {
+          content: [{
+            type: "text",
+            text: `Tool groups are not loaded in subagent children: ${group}`
+          }],
+          details: { group, matches: [], added: [] },
+        };
+      }
       const matches = groupTools(group);
       const active = pi.getActiveTools();
       const added = matches.filter((name) => !active.includes(name));
@@ -74,7 +87,7 @@ export default function (pi: ExtensionAPI) {
   // answers calls to inactive tools with an opaque "Tool not found" before any tool_call
   // hook runs, so deferred tools must stay active to receive this rejection.
   pi.on("tool_call", (event) => {
-    if (childAllowedTools) return;
+    if (childSession) return;
     const group = groupOfTool(event.toolName);
     if (!group || unlocked.has(group)) return;
     return {
@@ -85,9 +98,8 @@ export default function (pi: ExtensionAPI) {
 
   pi.on("session_start", (event) => {
     const active = pi.getActiveTools();
-    if (childAllowedTools) {
-      pi.setActiveTools(active.filter((name) =>
-        !HIDDEN_TOOLS.has(name) && childAllowedTools.has(name)));
+    if (childSession) {
+      pi.setActiveTools(active.filter((name) => !HIDDEN_TOOLS.has(name)));
       return;
     }
     if (event.reason === "resume" || event.reason === "fork" || event.reason === "reload") {

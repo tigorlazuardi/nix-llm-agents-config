@@ -444,7 +444,7 @@ export function targetToolGate(childSession: boolean, discovering: boolean): Too
 }
 
 export const SUBAGENT_SPAWN_TOOLS = ["subagent", "subagent_resume"] as const;
-/** pi-herdr-subagents surfaces new or resumed running children via these tools.
+/** pi-herdr-agents surfaces new or resumed running children via these tools.
  *  ponytail: fragile pairing — a session restart drops armed counts while
  *  panes keep running; count drifts after a restart until every child exits. */
 export function isSubagentSpawnTool(toolName: string): boolean {
@@ -1043,7 +1043,7 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 
 	// Flicker fix: Pi's ui.setWidget does delete+set on its widget Map, so every call moves the
 	// widget to the END of the order and rebuilds the container. Two widgets doing that every
-	// second (this one and pi-herdr-subagents') leapfrog each other. So install ONE live
+	// second (this one and pi-herdr-agents') leapfrog each other. So install ONE live
 	// component per visible stretch and only ask the TUI to repaint it afterwards.
 	// ponytail: fixed to one component; add a second only when another watchdog widget exists.
 	let widgetLines: string[] | null = null;
@@ -1654,7 +1654,7 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 		bumpIdle();
 	});
 
-	// pi-herdr-subagents runs children as separate pi processes that steer their
+	// pi-herdr-agents runs children as separate pi processes that steer their
 	// completion in; the known fallback (observation) is tool_call minus the
 	// subagent_result completion steers. Counts restart at 0 on session_start.
 	// Count on tool_result, not tool_call: a spawn that errors (e.g. unsupported thinking

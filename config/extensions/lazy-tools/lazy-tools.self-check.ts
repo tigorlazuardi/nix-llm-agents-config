@@ -1,11 +1,26 @@
 import assert from "node:assert/strict";
 import lazyTools from "./index.ts";
+// A real subagent child inherits PI_SUBAGENT_ID; the parent assertions below need
+// the clean parent environment, so stay deterministic about it.
+const ambientSubagentId = process.env.PI_SUBAGENT_ID;
+delete process.env.PI_SUBAGENT_ID;
 
 type Group = "browser" | "subagents" | "research" | "herdr" | "sudo" | "journal" | "artifact" | "memory";
 const core = ["read", "bash", "bash_bg", "agent_bg", "jobs", "monitor", "ask_user_question", "rename_herdr_tab", "todo", "agent_send", "list_peers", "web_search", "fetch_content", "get_search_content"];
 const grouped: Record<Group, string[]> = {
   browser: ["browser_open"],
-  subagents: ["subagent", "subagent_interrupt", "subagents_list", "subagent_resume"],
+  subagents: [
+    "subagent",
+    "subagent_cancel",
+    "subagent_interrupt",
+    "subagent_resume",
+    "subagent_send",
+    "subagent_stop",
+    "subagents_list",
+    "subagents_write_task_models",
+    "worktree_list",
+    "worktree_remove",
+  ],
   research: ["source_check", "mcp", "mcpScript"],
   herdr: ["herdr_layout"],
   sudo: ["sudo_run"],
@@ -20,10 +35,16 @@ const paths: Record<string, string> = {
   ask_user_question: "/nix/store/@juicesharp/rpiv-ask-user-question/src/index.ts",
   rename_herdr_tab: "/nix/store/pi-herdr-rename/index.ts",
   browser_open: "/nix/store/browser-goblin/index.ts",
-  subagent: "/nix/store/pi-herdr-subagents/pi-extension/subagents/index.ts",
-  subagent_interrupt: "/nix/store/pi-herdr-subagents/pi-extension/subagents/index.ts",
-  subagents_list: "/nix/store/pi-herdr-subagents/pi-extension/subagents/index.ts",
-  subagent_resume: "/nix/store/pi-herdr-subagents/pi-extension/subagents/index.ts",
+  subagent: "/nix/store/pi-herdr-agents/pi-extension/subagents/launch-tools.ts",
+  subagent_cancel: "/nix/store/pi-herdr-agents/pi-extension/subagents/control-tools.ts",
+  subagent_interrupt: "/nix/store/pi-herdr-agents/pi-extension/subagents/control-tools.ts",
+  subagent_resume: "/nix/store/pi-herdr-agents/pi-extension/subagents/launch-tools.ts",
+  subagent_send: "/nix/store/pi-herdr-agents/pi-extension/subagents/control-tools.ts",
+  subagent_stop: "/nix/store/pi-herdr-agents/pi-extension/subagents/control-tools.ts",
+  subagents_list: "/nix/store/pi-herdr-agents/pi-extension/subagents/control-tools.ts",
+  subagents_write_task_models: "/nix/store/pi-herdr-agents/pi-extension/subagents/task-models.ts",
+  worktree_list: "/nix/store/pi-herdr-agents/pi-extension/subagents/worktree-tools.ts",
+  worktree_remove: "/nix/store/pi-herdr-agents/pi-extension/subagents/worktree-tools.ts",
   web_search: "/nix/store/pi-web-access/index.ts",
   fetch_content: "/nix/store/pi-web-access/index.ts",
   get_search_content: "/nix/store/pi-web-access/index.ts",
@@ -80,8 +101,14 @@ function harness(initialActive: string[]): Harness {
 // --- Fresh session: deferred tools hidden, model cannot call them at all.
 const fresh = harness([...core, ...Object.values(grouped).flat()]);
 fresh.sessionStart({ reason: "startup" });
-assert(!fresh.active.includes("agent_bg"));
 assert.deepEqual(fresh.active, [...core.filter((name) => name !== "agent_bg"), "load_tools"]);
+// Every pi-herdr-agents parent tool is deferred at session_start.
+for (const tool of grouped.subagents) assert(!fresh.active.includes(tool));
+// load_tools({group: "subagents"}) unlocks exactly the pi-herdr-agents parent toolset.
+const subagentsLoad = (await fresh.loader.execute("x", { group: "subagents" })) as {
+  details: { added: string[] };
+};
+assert.deepEqual([...subagentsLoad.details.added].sort(), [...grouped.subagents].sort());
 assert(!fresh.active.includes("mcpScript"));
 let researchLoaded = false;
 for (const group of Object.keys(grouped) as Group[]) {
@@ -109,6 +136,11 @@ await reloaded.loader.execute("x", { group: "browser" });
 assert(!reloaded.toolCall({ toolName: "browser_open" })?.block);
 // Other groups stay gated after loading only one group.
 assert.equal(reloaded.toolCall({ toolName: "source_check" })?.block, true);
+// A deferred pi-herdr-agents tool is rejected with the "load_tools first" reason.
+const blockedCancel = reloaded.toolCall({ toolName: "subagent_cancel" });
+assert.equal(blockedCancel?.block, true);
+assert.match(blockedCancel?.reason ?? "", /load_tools/);
+assert.match(blockedCancel?.reason ?? "", /subagents/);
 // Web lookup tools are never gated.
 for (const name of ["web_search", "fetch_content", "get_search_content"]) {
   assert(fresh.active.includes(name));
@@ -123,13 +155,17 @@ assert.equal(resumed.toolCall({ toolName: "browser_open" })?.block, true);
 await resumed.loader.execute("x", { group: "browser" });
 assert(!resumed.toolCall({ toolName: "browser_open" })?.block);
 
-// --- Subagent children: fixed allowed set, no gating.
-process.env.PI_SUBAGENT_ALLOWED_TOOLS = "read,bash,agent_bg,subagent,caller_ping,subagent_done";
-const child = harness(["read", "bash", "agent_bg", "subagent", "caller_ping", "subagent_done"]);
+// --- Subagent children: keep exactly the tool set Pi launched them with.
+process.env.PI_SUBAGENT_ID = "subagent-1";
+const childActive = ["read", "bash", "agent_bg", "subagent", "caller_ping", "load_tools"];
+const child = harness(childActive);
 child.sessionStart({ reason: "startup" });
+// Only the permanently hidden tools are dropped; nothing is added.
 assert(!child.active.includes("agent_bg"));
-assert.deepEqual(child.active, ["read", "bash", "subagent", "caller_ping", "subagent_done"]);
-await child.loader.execute("x", { group: "browser" });
-assert.deepEqual(child.active, ["read", "bash", "subagent", "caller_ping", "subagent_done"]);
+assert.deepEqual(child.active, childActive.filter((name) => name !== "agent_bg"));
+await child.loader.execute("x", { group: "subagents" });
+assert.deepEqual(child.active, childActive.filter((name) => name !== "agent_bg"));
+assert(!child.active.includes("browser_open"));
 assert(!child.toolCall({ toolName: "browser_open" })?.block);
-delete process.env.PI_SUBAGENT_ALLOWED_TOOLS;
+delete process.env.PI_SUBAGENT_ID;
+if (ambientSubagentId !== undefined) process.env.PI_SUBAGENT_ID = ambientSubagentId;

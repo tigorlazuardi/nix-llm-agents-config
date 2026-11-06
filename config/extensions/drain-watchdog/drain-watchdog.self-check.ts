@@ -628,7 +628,7 @@ assert.equal(watchdogCompletions("on #3"), null, "no completion after the first 
 assert.equal(watchdogCompletions("#35"), null, "a ref gets no completion");
 
 
-// pi-herdr-subagents counters.
+// pi-herdr-agents counters.
 assert.equal(isSubagentSpawnTool("subagent"), true);
 assert.equal(isSubagentSpawnTool("subagent_resume"), true);
 assert.equal(isSubagentSpawnTool("subagents_list"), false);
@@ -744,7 +744,7 @@ async function withFakeTimers<T>(
 }
 
 // The self-check must not trust the ambient environment: it may itself run inside a
-// pi-herdr-subagents child (PI_SUBAGENT_ID set), so force the "main session" branch.
+// pi-herdr-agents child (PI_SUBAGENT_ID set), so force the "main session" branch.
 async function withNoAmbientSubagent<T>(run: () => Promise<T> | T): Promise<T> {
 	const ambient = process.env.PI_SUBAGENT_ID;
 	delete process.env.PI_SUBAGENT_ID;
@@ -1632,7 +1632,7 @@ const makeMockPi = () => {
 };
 
 // The self-check must not trust the ambient environment: it may itself run
-// inside a pi-herdr-subagents child (PI_SUBAGENT_ID set), so both branches set
+// inside a pi-herdr-agents child (PI_SUBAGENT_ID set), so both branches set
 // the variable explicitly and the real value is restored at the end.
 const ambientSubagentId = process.env.PI_SUBAGENT_ID;
 
