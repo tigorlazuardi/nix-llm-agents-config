@@ -110,6 +110,14 @@ const subagentsLoad = (await fresh.loader.execute("x", { group: "subagents" })) 
 };
 assert.deepEqual([...subagentsLoad.details.added].sort(), [...grouped.subagents].sort());
 assert(!fresh.active.includes("mcpScript"));
+// Group markers are disjoint: "herdr" must not unlock the pi-herdr-agents tools.
+const herdrOnly = harness([...core, ...Object.values(grouped).flat()]);
+herdrOnly.sessionStart({ reason: "startup" });
+const herdrLoad = (await herdrOnly.loader.execute("x", { group: "herdr" })) as {
+  details: { added: string[] };
+};
+assert.deepEqual([...herdrLoad.details.added].sort(), ["herdr_layout"]);
+for (const tool of grouped.subagents) assert(!herdrOnly.active.includes(tool));
 let researchLoaded = false;
 for (const group of Object.keys(grouped) as Group[]) {
   if (!researchLoaded) assert(!fresh.active.includes("mcpScript"));
@@ -167,5 +175,11 @@ await child.loader.execute("x", { group: "subagents" });
 assert.deepEqual(child.active, childActive.filter((name) => name !== "agent_bg"));
 assert(!child.active.includes("browser_open"));
 assert(!child.toolCall({ toolName: "browser_open" })?.block);
+
+// --- Child launched without an allowlist keeps deferred tools, ungated (upstream-intended).
+const bare = harness([...core.filter((name) => name !== "agent_bg"), "browser_open", "subagent_cancel", "load_tools"]);
+bare.sessionStart({ reason: "startup" });
+assert(bare.active.includes("browser_open") && bare.active.includes("subagent_cancel"));
+assert(!bare.toolCall({ toolName: "subagent_cancel" })?.block);
 delete process.env.PI_SUBAGENT_ID;
 if (ambientSubagentId !== undefined) process.env.PI_SUBAGENT_ID = ambientSubagentId;

@@ -26,30 +26,6 @@
       "find"
     ];
   };
-  orchestrator = {
-    description = "Deterministic black-box one-shot state machine";
-    prompt = ../../config/agents/orchestrator.md;
-    model = "omniroute/personal/main";
-    effort = "high";
-    tools.allow = [
-      "read"
-      "bash"
-      "subagent"
-    ];
-  };
-  planner = {
-    description = "Planner and SCOPE/ADR drafter";
-    prompt = ../../config/agents/planner.md;
-    model = "omniroute/personal/planner";
-    effort = "high";
-    tools.allow = [
-      "read"
-      "grep"
-      "find"
-      "bash"
-      "write"
-    ];
-  };
   standards-reviewer = {
     description = "Standards reviewer; standards axis";
     prompt = ../../config/agents/reviewer.md;
@@ -60,31 +36,6 @@
       "grep"
       "find"
       "bash"
-      "write"
-    ];
-  };
-  scout = {
-    description = "Fast read-only code locator";
-    prompt = ../../config/agents/scout.md;
-    model = "omniroute/personal/main";
-    effort = "high";
-    tools.allow = [
-      "read"
-      "grep"
-      "find"
-      "bash"
-    ];
-  };
-  support = {
-    description = "Docs, research, and synthesis";
-    prompt = ../../config/agents/support.md;
-    model = "omniroute/personal/main";
-    effort = "high";
-    tools.allow = [
-      "read"
-      "bash"
-      "grep"
-      "find"
       "write"
     ];
   };

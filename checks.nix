@@ -296,24 +296,32 @@ let
   invalidWebAccessLiteralCredentialEvaluation = builtins.tryEval (
     builtins.deepSeq invalidWebAccessLiteralCredential.config.home.activationPackage true
   );
-  expectedOrchestrator = ''
+  # Unquoted plain scalars throughout: 3.7.2 never unquotes frontmatter values.
+  expectedStandardsReviewer = ''
     ---
-    name: orchestrator
-    description: "Deterministic black-box one-shot state machine"
-    model: omniroute/personal/main
+    name: standards-reviewer
+    description: Standards reviewer; standards axis
+    model: omniroute/personal/standards-reviewer
     thinking: high
-    tools: read, bash, subagent
+    tools: read, grep, find, bash, write
     system-prompt: replace
     session-mode: standalone
-    spawning: true
+    spawning: false
     auto-exit: true
     ---
-    ${builtins.readFile ./config/agents/orchestrator.md}'';
+    ${builtins.readFile ./config/agents/reviewer.md}'';
+  renderedDefaultAgentFiles = builtins.sort builtins.lessThan (
+    builtins.filter (
+      name: pkgs.lib.hasPrefix "${default.config.programs.pi-coding-agent.configDir}/agents/" name
+    ) (builtins.attrNames default.config.home.file)
+  );
+  managedStandardsReviewerFixture = pkgs.writeText "managed-standards-reviewer.md" (
+    default.config.home.file."${default.config.programs.pi-coding-agent.configDir}/agents/standards-reviewer.md".text
+  );
   yamlSafeAgentFixture = pkgs.writeText "managed-yaml-safe-agent.md" yamlSafeAgentText;
   managedImplementerFixture =
     pkgs.writeText "managed-implementer.md"
       default.config.home.file."${default.config.programs.pi-coding-agent.configDir}/agents/implementer.md".text;
-  managedOrchestratorFixture = pkgs.writeText "managed-orchestrator.md" expectedOrchestrator;
 
   pluginLocks = import ./packages/pi-plugin-lock.nix;
   expectedPackage = pkgs.pi-coding-agent;
@@ -924,7 +932,14 @@ in
       default.config.home.file."${default.config.programs.pi-coding-agent.configDir}/skills".source.entries.agents-load
       == ./config/skills/agents-load;
     assert default.config.home.file."${default.config.programs.pi-coding-agent.configDir}/skills".force;
-    assert builtins.length (builtins.attrNames default.config.programs.pi-coding-agent.agents) == 7;
+    assert builtins.length (builtins.attrNames default.config.programs.pi-coding-agent.agents) == 3;
+    # Exactly the three managed agent files are rendered; removed agents stay gone.
+    assert
+      renderedDefaultAgentFiles == [
+        "${default.config.programs.pi-coding-agent.configDir}/agents/deep-reviewer.md"
+        "${default.config.programs.pi-coding-agent.configDir}/agents/implementer.md"
+        "${default.config.programs.pi-coding-agent.configDir}/agents/standards-reviewer.md"
+      ];
     assert !(builtins.hasAttr "frontier-implementer" default.config.programs.pi-coding-agent.agents);
     assert !(builtins.hasAttr "frontier-reviewer" default.config.programs.pi-coding-agent.agents);
     assert !(builtins.hasAttr "reviewer" default.config.programs.pi-coding-agent.agents);
@@ -940,14 +955,14 @@ in
       == "omniroute/personal/standards-reviewer";
     assert default.config.programs.pi-coding-agent.agents.standards-reviewer.effort == "high";
     assert
-      default.config.home.file."${default.config.programs.pi-coding-agent.configDir}/agents/orchestrator.md".text
-      == expectedOrchestrator;
+      default.config.home.file."${default.config.programs.pi-coding-agent.configDir}/agents/standards-reviewer.md".text
+      == expectedStandardsReviewer;
     assert
       resolvedAgent.config.home.file."${resolvedAgent.config.programs.pi-coding-agent.configDir}/agents/custom.md".text
       == ''
         ---
         name: custom
-        description: "Resolver check"
+        description: Resolver check
         tools: read
         system-prompt: replace
         session-mode: standalone
@@ -960,7 +975,7 @@ in
       yamlSafeAgentText == ''
         ---
         name: edge: # [] {}
-        description: "line one:\nline two # []"
+        description: line one: line two # []
         tools: read, bash
         system-prompt: replace
         session-mode: standalone
@@ -1102,7 +1117,7 @@ in
     assert
       !(
         pluginsDisabled.config.home.file
-          ? "${pluginsDisabled.config.programs.pi-coding-agent.configDir}/agents/orchestrator.md"
+          ? "${pluginsDisabled.config.programs.pi-coding-agent.configDir}/agents/implementer.md"
       );
     assert overridden.config.programs.pi-coding-agent.package == overridePackage;
     assert builtins.elem overridePackage overridden.config.home.packages;
@@ -2306,6 +2321,8 @@ in
         grep -F 'name: "subagents_write_task_models",' "$package/pi-extension/subagents/task-models.ts"
         grep -F 'name: "worktree_list",' "$package/pi-extension/subagents/worktree-tools.ts"
         grep -F 'name: "worktree_remove",' "$package/pi-extension/subagents/worktree-tools.ts"
+        # Children rely on the launch passing `--tools`; lazy-tools never widens that set.
+        grep -F '"--tools"' "$package/maestro/adapters/pi/launch.ts"
         cp -R "$package" "$TMPDIR/package"
         chmod -R u+w "$TMPDIR/package"
         mkdir -p "$TMPDIR/package/node_modules/@earendil-works" "$TMPDIR/package/node_modules/@sinclair"
@@ -2320,7 +2337,7 @@ in
         ln -s ${expectedPackage}/lib/node_modules/pi-monorepo/node_modules/typebox \
           "$TMPDIR/package/node_modules/@sinclair/typebox"
         node --experimental-strip-types ${./tests/pi-herdr-agents-policy-self-check.mjs} \
-          "$TMPDIR/package" "$TMPDIR/policy" ${managedImplementerFixture} ${managedOrchestratorFixture} \
+          "$TMPDIR/package" "$TMPDIR/policy" ${managedImplementerFixture} ${managedStandardsReviewerFixture} \
           ${yamlSafeAgentFixture}
         pi --offline --no-extensions --no-skills --no-prompt-templates --no-context-files \
           -e "$package" \
@@ -2489,7 +2506,7 @@ in
           ${./config/prompts}/executor.md
         grep -F 'repair from a temporary worktree at `lastGreenIntegrationSha`' \
           ${./config/prompts}/executor.md
-        grep -F 'intentionally differs from `config/agents/orchestrator.md`' \
+        grep -F 'This executor treats an implementer `FAIL` as one failed pass' \
           ${./config/prompts}/executor.md
         grep -F 'PARALLEL_WIDTH = 3` tickets' \
           ${./config/prompts}/executor.md

@@ -37,6 +37,12 @@ let
     name: cfg.agents.${name}.tools.allow == null || resolveTools cfg.agents.${name} == [ ]
   ) renderablePluginAgentNames;
 
+  flattenDescription =
+    description: lib.trim (lib.replaceStrings [ "\r\n" "\n" "\r" ] [ " " " " " " ] description);
+  quotedDescriptions = builtins.filter (
+    name: lib.hasPrefix "\"" (flattenDescription cfg.agents.${name}.description)
+  ) renderablePluginAgentNames;
+
   renderAgent =
     name:
     let
@@ -46,13 +52,14 @@ let
       # 3.7.2's frontmatter reader does not unquote values: a quoted name, model
       # or thinking level arrives with literal quotes and breaks role lookup and
       # model resolution, and tools/skills are capability scalars that reject
-      # quotes outright. So every launch-relevant value is emitted as an
-      # unquoted plain scalar. Only description stays JSON-quoted: it is not
-      # parsed for behavior and may carry newlines and `#`.
+      # quotes outright. So every value is emitted as an unquoted plain scalar.
+      # description is model-facing prompt text and the reader would keep JSON
+      # quotes and `\n` literally, so it is flattened to one line (`#` and `:`
+      # are read literally); a leading `"` is rejected by an assertion.
       lines = [
         "---"
         "name: ${name}"
-        "description: ${builtins.toJSON agent.description}"
+        "description: ${flattenDescription agent.description}"
       ]
       ++ lib.optional (agent.model != null) "model: ${resolveModel agent.model}"
       ++ lib.optional (agent.effort != null) "thinking: ${agent.effort}"
@@ -112,6 +119,10 @@ in
         message = "Pi agents reference undefined skills: ${lib.concatStringsSep ", " unknownSkills}";
       }
       {
+        assertion = quotedDescriptions == [ ];
+        message = "pi-herdr-agents agent descriptions must not start with a double quote (3.7.2 never unquotes): ${lib.concatStringsSep ", " quotedDescriptions}";
+      }
+      {
         assertion = invalidToolLists == [ ];
         message = "pi-herdr-agents agents require at least one native Pi tool: ${lib.concatStringsSep ", " invalidToolLists}";
       }
@@ -129,11 +140,10 @@ in
           ) renderablePluginAgents
         );
 
-    programs.pi-coding-agent.plugins.pi-herdr-agents.agents = lib.mapAttrsRecursive (_: lib.mkDefault) (
-      lib.genAttrs (builtins.attrNames defaultAgents) (name: {
-        spawning = name == "orchestrator";
-      })
-    );
+    # Every default agent is a plugin-rendered leaf (spawning defaults to false).
+    programs.pi-coding-agent.plugins.pi-herdr-agents.agents =
+      lib.genAttrs (builtins.attrNames defaultAgents)
+        (_: { });
 
     home.file = lib.mapAttrs' (
       name: _: lib.nameValuePair "${cfg.configDir}/agents/${name}.md" { text = renderAgent name; }

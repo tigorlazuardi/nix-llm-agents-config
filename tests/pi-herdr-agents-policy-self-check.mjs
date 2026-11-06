@@ -3,7 +3,7 @@ import { copyFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
-const [packageRoot, root, implementerFixture, orchestratorFixture, yamlSafeFixture] = process.argv.slice(2);
+const [packageRoot, root, implementerFixture, standardsReviewerFixture, yamlSafeFixture] = process.argv.slice(2);
 const agentDir = join(root, "agent");
 const project = join(root, "project");
 mkdirSync(join(agentDir, "agents"), { recursive: true });
@@ -12,7 +12,7 @@ process.env.PI_CODING_AGENT_DIR = agentDir;
 process.chdir(project);
 
 copyFileSync(implementerFixture, join(agentDir, "agents", "implementer.md"));
-copyFileSync(orchestratorFixture, join(agentDir, "agents", "orchestrator.md"));
+copyFileSync(standardsReviewerFixture, join(agentDir, "agents", "standards-reviewer.md"));
 // The rendered "edge: # [] {}" agent: hostile name and description must still
 // render into a definition 3.7.2 discovers instead of rejecting.
 copyFileSync(yamlSafeFixture, join(agentDir, "agents", "hostile-name.md"));
@@ -42,12 +42,12 @@ assert.equal(implementer?.systemPromptMode, "replace");
 assert.equal(implementer?.autoExit, true);
 assert.match(implementer?.body ?? "", /You implement one approved task/);
 
-const orchestrator = loadAgentDefaults("orchestrator");
-assert.equal(orchestrator?.source, "global");
-assert.equal(orchestrator?.model, "omniroute/personal/main");
-assert.equal(orchestrator?.thinking, "high");
-assert.equal(orchestrator?.tools, "read, bash, subagent");
-assert.equal(orchestrator?.spawning, true);
+const standardsReviewer = loadAgentDefaults("standards-reviewer");
+assert.equal(standardsReviewer?.source, "global");
+assert.equal(standardsReviewer?.model, "omniroute/personal/standards-reviewer");
+assert.equal(standardsReviewer?.thinking, "high");
+assert.equal(standardsReviewer?.tools, "read, grep, find, bash, write");
+assert.equal(standardsReviewer?.spawning, false);
 assert.equal(loadAgentDefaults("missing"), null);
 
 // A hostile name survives as the launch key: it is emitted unquoted, so no
@@ -58,7 +58,11 @@ assert.ok(
   `hostile-name role missing: ${JSON.stringify(catalog.agents.map((agent) => agent.name))}`,
 );
 assert.deepEqual(hostile.role.allowedTools, ["read", "bash"]);
-assert.match(hostile.description ?? "", /line one/);
+// Descriptions reach model-facing prompt text: no JSON quotes, no literal `\n`.
+assert.equal(hostile.description, "line one: line two # []");
+for (const agent of catalog.agents) {
+  assert.ok(!/^"|"$|\\n/.test(agent.description ?? ""), `quoted description: ${agent.description}`);
+}
 
 // --- Child tool allowlist: 3.7.2 drops subagent_done, always adds caller_ping,
 // and re-adds subagent_done only for non-auto-exit children.
@@ -67,8 +71,8 @@ assert.equal(
   "read,bash,edit,write,grep,find,caller_ping",
 );
 assert.equal(
-  buildSubagentToolAllowlist(orchestrator?.tools, orchestrator?.autoExit),
-  "read,bash,subagent,caller_ping",
+  buildSubagentToolAllowlist(standardsReviewer?.tools, standardsReviewer?.autoExit),
+  "read,grep,find,bash,write,caller_ping",
 );
 assert.equal(
   buildSubagentToolAllowlist(implementer?.tools, false),
@@ -76,7 +80,8 @@ assert.equal(
 );
 assert.equal(buildSubagentToolAllowlist(undefined, true), null);
 
-// --- Project precedence wins over the global render (accepted 3.7.2 behavior).
+// --- Project precedence wins over the global render. Accepted by decision, not a
+// regression: see docs/adr/0001-subagent-roles-resolve-project-over-global.md.
 writeFileSync(
   join(project, ".pi", "agents", "implementer.md"),
   "---\nname: implementer\ntools: write\nspawning: true\n---\nproject\n",
@@ -86,5 +91,5 @@ const projectImplementer = loadAgentDefaults("implementer");
 assert.equal(projectImplementer?.source, "project");
 assert.equal(projectImplementer?.tools, "write");
 assert.equal(projectImplementer?.spawning, true);
-assert.equal(loadAgentDefaults("orchestrator")?.source, "global");
+assert.equal(loadAgentDefaults("standards-reviewer")?.source, "global");
 assert.equal(loadAgentDefaults("custom")?.source, "project");

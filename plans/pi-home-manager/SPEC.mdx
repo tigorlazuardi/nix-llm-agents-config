@@ -635,7 +635,7 @@ Superseded by `browser-goblin`, which owns browser automation and its configured
 
 <Decision title="Replace pi-subagents with Herdr-tab delegation" status="accepted">
 
-`pi-herdr-subagents@0.1.7` uses managed Pi peers plus a pinned `@sinclair/typebox` runtime dependency. Each pass gets a fresh Herdr pane; spawn returns immediately and plugin-delivered steer is the only completion signal. Managed agent names resolve exact global definitions so project-local shadows cannot widen child capabilities. All four plugin tools (`subagent`, `subagent_interrupt`, `subagents_list`, `subagent_resume`) stay deferred until the `subagents` tool group is explicitly loaded.
+`pi-herdr-subagents@0.1.7` uses managed Pi peers plus a pinned `@sinclair/typebox` runtime dependency. Each pass gets a fresh Herdr pane; spawn returns immediately and plugin-delivered steer is the only completion signal. Project `.pi/agents/<name>.md` definitions shadow the rendered global roles of the same name; no guard is kept (see `docs/adr/0001-subagent-roles-resolve-project-over-global.md`). All four plugin tools (`subagent`, `subagent_interrupt`, `subagents_list`, `subagent_resume`) stay deferred until the `subagents` tool group is explicitly loaded.
 
 Upstream 0.4.0 parses named-agent files but drops `tools`, so packaging applies a bounded child-only patch. When `HERDR_SUBAGENT=1`, valid non-empty list-form `tools` are passed to `pi.setActiveTools`; missing or invalid allowlists resolve to no active tools. Parent sessions keep their existing tool surface. Remove the patch once upstream enforces named-agent tools.
 

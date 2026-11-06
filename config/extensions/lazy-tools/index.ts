@@ -8,7 +8,8 @@ const GROUP_MARKERS: Record<Group, readonly string[]> = {
   browser: ["browser-goblin"],
   subagents: ["pi-herdr-agents"],
   research: ["pi-web-access", "pi-mcp-adapter"],
-  herdr: ["pi-herdr"],
+  // Anchored: a bare "pi-herdr" is a substring of ".../pi-herdr-agents/..." and would unlock the subagents group.
+  herdr: ["/pi-herdr/"],
   sudo: ["pix-sudo"],
   journal: ["dev-journal"],
   artifact: ["artifact-preview"],
@@ -22,9 +23,11 @@ const ALWAYS_ACTIVE = new Set(["bash", "bash_bg", "ask_user_question", "rename_h
 const HIDDEN_TOOLS = new Set(["agent_bg"]);
 
 export default function (pi: ExtensionAPI) {
-  // A child launched by pi-herdr-agents already carries the exact `--tools`
-  // allowlist Pi enforces, so this extension must never widen it: a child session
-  // only drops the permanently hidden tools from the set Pi gave it.
+  // A child launched by pi-herdr-agents with a tool allowlist gets `--tools`, which
+  // Pi enforces, so this extension must never widen it: a child session only drops
+  // the permanently hidden tools from the set Pi gave it. Children launched without
+  // an allowlist (`buildSubagentToolAllowlist(undefined, true) === null`) keep every
+  // registered tool, deferred ones included, and are not gated here (upstream-intended).
   const childSession = Boolean(process.env.PI_SUBAGENT_ID);
   const groupTools = (group: Group) =>
     pi
