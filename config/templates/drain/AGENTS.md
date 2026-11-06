@@ -24,13 +24,13 @@ No package namespace or fallback model. Strict minimum tool allowlist. Only `bui
 
 | Agent | Model | Thinking | Source role |
 |---|---|---|---|
-| `build-lead` | `zai/glm-5.3` | high | writer |
-| `build-worker` | `zai/glm-5.3-flash` | high | writer |
-| `scout` | `zai/glm-5.3-flash` | high | read-only |
-| `quick-reviewer` | `zai/glm-5.3-flash` | medium | read-only |
-| `deep-reviewer` | `zai/glm-5.3` | high | read-only |
-| `housekeeper` | `zai/glm-5.3-flash` | medium | no project-source writes |
-| `note-taker` | `zai/glm-5.3-flash` | medium | report writer |
+| `build-lead` | `omniroute/personal/implementer` | high | writer |
+| `build-worker` | `omniroute/personal/implementer` | high | writer |
+| `scout` | `omniroute/personal/main` | high | read-only |
+| `quick-reviewer` | `omniroute/personal/standards-reviewer` | medium | read-only |
+| `deep-reviewer` | `omniroute/personal/deep-reviewer` | high | read-only |
+| `housekeeper` | `omniroute/personal/main` | medium | no project-source writes |
+| `note-taker` | `omniroute/personal/main` | medium | report writer |
 
 Main performs tracker/SCM delivery mutations. Among rendered agents, provider/tracker/SCM/deployment tools belong only to housekeeper. Builders/reviewers receive no outward mutation tools. Housekeeper alone receives deployment watch/trigger capability and, only when configured, notifier capability.
 

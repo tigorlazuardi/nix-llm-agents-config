@@ -754,7 +754,7 @@ in
 
         pi-vision-handoff.visionModel = lib.mkOption {
           type = lib.types.strMatching "[^/[:space:]]+/[^[:space:]]+";
-          default = "omniroute/cc/claude-haiku-5-5";
+          default = "omniroute/personal/main";
           description = "Vision-capable provider/model used to describe images for text-only models.";
         };
 
@@ -763,10 +763,7 @@ in
           # Tried in order when the primary vision model's call fails entirely.
           # ponytail: fixed to the operator's chain; make per-host when a second host needs another order.
           default = [
-            "omniroute/cmd/minimax/minimax-m3.1-flash"
-            "omniroute/cmd/gpt-6-luna"
-            "omniroute/cmd/deepseek/deepseek-v4-flash"
-            "omniroute/ds/deepseek-flash"
+            "omniroute/bareksa/main"
           ];
           description = "Fallback vision models, tried in order after the primary vision model's call fails.";
         };
