@@ -2508,7 +2508,7 @@ in
           ${./config/prompts}/executor.md
         grep -F 'This executor treats an implementer `FAIL` as one failed pass' \
           ${./config/prompts}/executor.md
-        grep -F 'PARALLEL_WIDTH = 3` tickets' \
+        grep -F 'PARALLEL_WIDTH = 4` tickets' \
           ${./config/prompts}/executor.md
         grep -F 'gh pr list --head integration/<slug>' \
           ${./config/prompts}/executor.md

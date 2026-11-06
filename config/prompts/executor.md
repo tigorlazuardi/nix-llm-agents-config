@@ -10,7 +10,7 @@ One run = a frontier loop over the target's tickets. Each ticket gets its own wo
 
 The invoking message, never the ticket bodies alone, supplies: target number (a spec/epic whose tickets are native sub-issues, or one ticket), risk route (`standard|frontier`), exact `checkCommand`, standards doc pointer, preserved-changes pointer, failed-pass budget, and optionally `closing: pr|branch` (missing = `branch`). Never change route, check command, standards doc, preserved changes, or acceptance criteria mid-run. Missing or contradictory input → terminal `BLOCKED` before any mutation. Fixed axis budgets: standards: 10 minutes, spec: 20 minutes — an over-budget completed FAIL triggers SPLIT, a within-budget FAIL enters the fix loop. The failed-pass budget is per ticket, defaults to ten failed passes, and is never raised above ten.
 
-Parallel width: `PARALLEL_WIDTH = 3` tickets with a live implementer or reviewer child at once (the merger and the executor's own check do not count). ponytail: fixed to 3; make configurable when a run needs a different width, then as an invoking-message field.
+Parallel width: `PARALLEL_WIDTH = 4` tickets with a live implementer or reviewer child at once. The watchdog enforces a hard cap of 4 live child sessions in total, the merger included: a `subagent` call over the cap is blocked, so spawn the merger only when a slot is free (the executor's own check does not count). ponytail: fixed to 4; make configurable when a run needs a different width, then as an invoking-message field.
 
 ## Authority mode
 

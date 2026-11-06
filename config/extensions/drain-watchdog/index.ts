@@ -451,6 +451,21 @@ export function isSubagentSpawnTool(toolName: string): boolean {
 	return (SUBAGENT_SPAWN_TOOLS as readonly string[]).includes(toolName);
 }
 
+/** Hard semaphore on live children while a run is active (RAM guard). Prompt text alone
+ *  was ignored by the model: 6 sessions ran at once. Max 4 tickets in parallel = 4 live children
+ *  (the serialized merger counts too and waits for a free slot).
+ *  ponytail: fixed to 4; make configurable when a host needs another width. */
+export const MAX_LIVE_CHILDREN = 4;
+
+/** Gate for a spawn tool call: `live` = confirmed children, `reserved` = calls admitted but not yet resulted. */
+export function spawnGate(active: boolean, live: number, reserved: number, max: number = MAX_LIVE_CHILDREN): { block: false } | { block: true; reason: string } {
+	if (!active || live + reserved < max) return { block: false };
+	return {
+		block: true,
+		reason: `drain-watchdog: ${live + reserved} of ${max} child sessions already running (RAM limit). Do not spawn more; wait for a child to finish (its subagent_result wakes you), then spawn the next pipeline step.`,
+	};
+}
+
 /** Child completion arrives in the main session as a `subagent_result` steer.
  *  `subagent_status`/`subagent_ping` steers arrive mid-run and must NOT be
  *  counted as completion. */
@@ -474,7 +489,7 @@ export function buildNudgeText(p: { target: string | null; pickable: number; che
 	}
 	const checkClause = p.checkCommand ? `the operator's checkCommand \`${p.checkCommand}\` exactly as written` : "the exact checkCommand";
 	return [
-		`drain-watchdog: unattended run on ${target}; you are idle with ${p.pickable} pickable ticket(s) in the watchdog ticket tree. Do not ask the user — continue the drain flow you are running now. Work in parallel, not one ticket at a time: read the frontier fresh and, while slots are free (PARALLEL_WIDTH), start every independent pickable ticket at once, each in its own worktree. All work merges into the target's integration/<slug> branch, so parallel tickets stay close to the same base and conflicts stay small.`,
+		`drain-watchdog: unattended run on ${target}; you are idle with ${p.pickable} pickable ticket(s) in the watchdog ticket tree. Do not ask the user — continue the drain flow you are running now. Work in parallel, not one ticket at a time: read the frontier fresh and, while slots are free (PARALLEL_WIDTH = 4; the watchdog hard-blocks a 5th live child), start independent pickable tickets, each in its own worktree. All work merges into the target's integration/<slug> branch, so parallel tickets stay close to the same base and conflicts stay small.`,
 		`Do not implement a ticket yourself: stay source-read-only and run the supervise pipeline per ticket, as child agents. Fresh implementer in the ticket's worktree, then fresh standards-reviewer, then you run ${checkClause}, then fresh deep-reviewer (spec). A FAIL goes back to a fresh implementer with the findings pointer. The pipelines of different tickets overlap: when one ticket's child finishes, advance that ticket at once and keep the other tickets' implementers and reviewers running; never wait for one ticket's whole pipeline before starting the next ticket's.`,
 		"Ambiguous or product-question tickets, and low-tolerance work (auth/authz, secrets/credentials, DB migrations, public API contracts, money/billing, data deletion, irreversible operations), must leave the tree through watchdog_handoff (limbo, human review) instead of waiting; finished tickets go through watchdog_complete.",
 		SYNC_REMINDER,
@@ -936,6 +951,7 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 	let widgetTimer: Timer | null = null;
 	let uiPromptDepth = 0;
 	let childCount = 0;
+	const reservedSpawns = new Set<string>();
 	// Last assistant error of the current run; pi emits agent_end per retry attempt, so
 	// only agent_settled decides (the last attempt wins).
 	let lastRunError: string | null = null;
@@ -1115,6 +1131,7 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 		runCheck = check;
 		idleSinceMs = progressSinceMs = Date.now();
 		childCount = 0;
+		reservedSpawns.clear();
 		persist();
 		audit("armed", { target, pickable, tickets: tickets.length });
 		startLoop();
@@ -1259,6 +1276,7 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 		state = { ...INITIAL_STATE };
 		clearTimers();
 		childCount = 0;
+		reservedSpawns.clear();
 		readyDeclared = false;
 		prepTarget = null;
 		prepTickets = [];
@@ -1305,6 +1323,7 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 				prepCheck = null;
 				clearTimers();
 				childCount = 0;
+				reservedSpawns.clear();
 				notify("drain-watchdog: off");
 				refreshWidget();
 				return;
@@ -1565,6 +1584,7 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 		closed = false; // M1: a fresh session may create timers again.
 		clearTimers();
 		childCount = 0;
+		reservedSpawns.clear();
 		uiPromptDepth = 0;
 		prepTarget = null;
 		prepTickets = [];
@@ -1661,7 +1681,25 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 	// level) never yields a subagent_result, so counting at call time left a phantom child
 	// that blocked every nudge.
 	pi.on("tool_result", (event) => {
-		if (isSubagentSpawnTool(event.toolName) && !event.isError) childCount++;
+		if (!isSubagentSpawnTool(event.toolName)) return;
+		reservedSpawns.delete(event.toolCallId);
+		if (!event.isError) childCount++;
+	});
+
+	// Semaphore: reserve a slot at tool_call (sibling calls of one message are preflighted
+	// sequentially before any executes, so counting only at tool_result would let a batch through).
+	pi.on("tool_call", (event) => {
+		if (!isSubagentSpawnTool(event.toolName)) return;
+		const g = spawnGate(isActivePhase(state.phase), childCount, reservedSpawns.size);
+		if (g.block) {
+			audit("spawn-blocked", { tool: event.toolName, children: childCount, reserved: reservedSpawns.size });
+			return { block: true, reason: g.reason };
+		}
+		reservedSpawns.add(event.toolCallId);
+	});
+	// A call that ends without a tool_result (aborted) must not leak its slot.
+	pi.on("tool_execution_end", (event) => {
+		if (isSubagentSpawnTool(event.toolName)) reservedSpawns.delete(event.toolCallId);
 	});
 
 	pi.on("message_end", (event) => {

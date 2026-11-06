@@ -49,6 +49,8 @@ import {
 	buildNudgeText,
 	isSubagentCompletionNotice,
 	isSubagentSpawnTool,
+	MAX_LIVE_CHILDREN,
+	spawnGate,
 	parseWatchdogSubcommand,
 	watchdogCompletions,
 	watchdogWidgetLines,
@@ -637,6 +639,14 @@ assert.equal(isSubagentCompletionNotice("subagent_result"), true);
 assert.equal(isSubagentCompletionNotice("subagent_status"), false, "mid-run status steers are not completion");
 assert.equal(isSubagentCompletionNotice("subagent_ping"), false);
 assert.equal(isSubagentCompletionNotice(undefined), false);
+
+// Spawn semaphore: at most 4 live children while a run is active.
+assert.equal(MAX_LIVE_CHILDREN, 4);
+assert.equal(spawnGate(true, 3, 0).block, false, "3 live: a 4th may start");
+assert.equal(spawnGate(true, 4, 0).block, true, "4 live: a 5th is blocked");
+assert.equal(spawnGate(true, 2, 2).block, true, "reserved (unresulted) calls count against the cap");
+assert.equal(spawnGate(true, 3, 1).block, true, "a sibling batch cannot overshoot");
+assert.equal(spawnGate(false, 9, 0).block, false, "inactive run is never gated");
 
 // Nudge text.
 const nudge = buildNudgeText({ target: "KRIPT-30", pickable: 2 });
