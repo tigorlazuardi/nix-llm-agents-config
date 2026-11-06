@@ -622,6 +622,18 @@ in
 
   options.programs.pi-coding-agent.watchdog = {
     enable = lib.mkEnableOption "the unattended drain live loop via the drain-watchdog extension (/watchdog)";
+
+    maxParallel = lib.mkOption {
+      type = lib.types.ints.positive;
+      default = 4;
+      example = 2;
+      description = ''
+        Maximum live child sessions (implementers, reviewers and the merger) the
+        watchdog allows at once while a run is active; a further subagent spawn is
+        blocked until a child finishes. Lower it on RAM-constrained hosts (1 = one
+        pipeline at a time). Exported to the extension as PI_WATCHDOG_MAX_PARALLEL.
+      '';
+    };
   };
 
   options.programs.pi-coding-agent.plugins =
@@ -1013,6 +1025,9 @@ in
         // lib.optionalAttrs idleCompact.enable {
           PI_IDLE_COMPACT_THRESHOLD_TOKENS = lib.mkDefault (toString idleCompact.thresholdTokens);
           PI_IDLE_COMPACT_DELAY_MS = lib.mkDefault (toString idleCompact.delayMs);
+        }
+        // lib.optionalAttrs watchdog.enable {
+          PI_WATCHDOG_MAX_PARALLEL = lib.mkDefault (toString watchdog.maxParallel);
         }
         // lib.optionalAttrs cfg.plugins.browser-goblin.enable {
           # ponytail: reuse browser-goblin's Nix Chromium for project Playwright; override per project when needed.

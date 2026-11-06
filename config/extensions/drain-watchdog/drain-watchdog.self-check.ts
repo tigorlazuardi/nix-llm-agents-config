@@ -50,6 +50,7 @@ import {
 	isSubagentCompletionNotice,
 	isSubagentSpawnTool,
 	MAX_LIVE_CHILDREN,
+	readMaxLiveChildren,
 	spawnGate,
 	parseWatchdogSubcommand,
 	watchdogCompletions,
@@ -647,6 +648,16 @@ assert.equal(spawnGate(true, 4, 0).block, true, "4 live: a 5th is blocked");
 assert.equal(spawnGate(true, 2, 2).block, true, "reserved (unresulted) calls count against the cap");
 assert.equal(spawnGate(true, 3, 1).block, true, "a sibling batch cannot overshoot");
 assert.equal(spawnGate(false, 9, 0).block, false, "inactive run is never gated");
+assert.equal(spawnGate(true, 1, 0, 2).block, false, "cap 2: second child may start");
+assert.equal(spawnGate(true, 2, 0, 2).block, true, "cap 2: third child is blocked");
+assert.equal(spawnGate(true, 0, 1, 1).block, true, "cap 1: one reserved spawn fills the cap");
+
+// Host cap from PI_WATCHDOG_MAX_PARALLEL; anything invalid falls back to the default.
+assert.equal(readMaxLiveChildren({}), 4, "unset -> default");
+assert.equal(readMaxLiveChildren({ PI_WATCHDOG_MAX_PARALLEL: "2" }), 2);
+assert.equal(readMaxLiveChildren({ PI_WATCHDOG_MAX_PARALLEL: " 1 " }), 1);
+for (const bad of ["", "0", "-1", "abc", "1.5", "2x"]) assert.equal(readMaxLiveChildren({ PI_WATCHDOG_MAX_PARALLEL: bad }), 4, `invalid ${JSON.stringify(bad)} -> default`);
+assert.ok(buildNudgeText({ target: "t", pickable: 2, maxParallel: 2 }).includes("PARALLEL_WIDTH = 2"), "nudge states the configured cap");
 
 // Nudge text.
 const nudge = buildNudgeText({ target: "KRIPT-30", pickable: 2 });

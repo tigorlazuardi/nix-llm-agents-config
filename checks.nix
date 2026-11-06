@@ -42,6 +42,11 @@ let
   localUpdaterEnabled = evaluate { programs.pi-coding-agent.localUpdater.enable = true; };
   watchdogDisabled = evaluate { programs.pi-coding-agent.watchdog.enable = false; };
   watchdogEnabled = evaluate { programs.pi-coding-agent.watchdog.enable = true; };
+  watchdogMaxParallel = evaluate { programs.pi-coding-agent.watchdog.maxParallel = 2; };
+  watchdogMaxParallelInvalid = builtins.tryEval (
+    (evaluate { programs.pi-coding-agent.watchdog.maxParallel = 0; })
+    .config.home.sessionVariables.PI_WATCHDOG_MAX_PARALLEL
+  );
   planningModelConfigured = evaluate {
     programs.pi-coding-agent.planningModel = "omniroute/personal/main";
   };
@@ -825,6 +830,10 @@ in
     assert
       default.config.programs.pi-coding-agent.extensions.drain-watchdog
       == ./config/extensions/drain-watchdog;
+    assert default.config.programs.pi-coding-agent.watchdog.maxParallel == 4;
+    assert default.config.home.sessionVariables.PI_WATCHDOG_MAX_PARALLEL == "4";
+    assert watchdogMaxParallel.config.home.sessionVariables.PI_WATCHDOG_MAX_PARALLEL == "2";
+    assert !watchdogMaxParallelInvalid.success;
     assert !watchdogDisabled.config.programs.pi-coding-agent.watchdog.enable;
     assert !(watchdogDisabled.config.programs.pi-coding-agent.extensions or { } ? drain-watchdog);
     assert
@@ -2502,7 +2511,7 @@ in
           ${./config/prompts}/executor.md
         grep -F 'This executor treats an implementer `FAIL` as one failed pass' \
           ${./config/prompts}/executor.md
-        grep -F 'PARALLEL_WIDTH = 4` tickets' \
+        grep -F 'Parallel width: `PARALLEL_WIDTH` tickets' \
           ${./config/prompts}/executor.md
         grep -F 'gh pr list --head integration/<slug>' \
           ${./config/prompts}/executor.md
