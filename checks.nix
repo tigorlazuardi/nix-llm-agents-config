@@ -241,6 +241,7 @@ let
     };
   };
   nativeMcp = evaluate {
+    programs.pi-coding-agent.plugins.pi-mcp-adapter.enable = false;
     programs.mcp.servers.secret = {
       command = "/bin/secret-mcp";
       env.TOKEN.file = "/run/secrets/token";
@@ -552,6 +553,8 @@ in
           keepRecentTokens = 20000;
         };
         retry.provider.timeoutMs = 300000;
+        projectServers = "allow";
+        extensions = [ "-builtin:mcp" ];
         packages = [
           expectedCommandCodeProviderPath
           expectedEffortPath
@@ -564,6 +567,7 @@ in
           expectedPiBgPath
           expectedVimModePath
           expectedUsagePath
+          expectedMcpAdapterPath
           expectedBrowserGoblinPath
         ]
         ++ [
@@ -621,10 +625,13 @@ in
       };
     assert default.config.programs.pi-coding-agent.models == expectedModels;
     assert default.config.programs.pi-coding-agent.context == ./config/AGENTS.md;
-    # Adapter is default-off (its approval prompts block subagents); native MCP + codemode.
-    assert !default.config.programs.pi-coding-agent.plugins.pi-mcp-adapter.enable;
-    assert !(default.config.programs.pi-coding-agent.settings ? projectServers);
-    assert !(default.config.programs.pi-coding-agent.settings ? extensions);
+    # Adapter is default-on (lazy servers + idle stop); native MCP when disabled.
+    assert default.config.programs.pi-coding-agent.plugins.pi-mcp-adapter.enable;
+    assert default.config.programs.pi-coding-agent.settings.projectServers == "allow";
+    assert default.config.programs.pi-coding-agent.settings.extensions == [ "-builtin:mcp" ];
+    assert !nativeMcp.config.programs.pi-coding-agent.plugins.pi-mcp-adapter.enable;
+    assert !(nativeMcp.config.programs.pi-coding-agent.settings ? projectServers);
+    assert !(nativeMcp.config.programs.pi-coding-agent.settings ? extensions);
     assert builtins.elem "${nativeMcp.config.programs.pi-coding-agent.configDir}/mcp.json" (
       builtins.attrNames nativeMcp.config.home.file
     );
@@ -796,10 +803,10 @@ in
     assert
       default.config.home.file."${default.config.programs.pi-coding-agent.configDir}/extensions/glossary-loader".force;
     assert
-      default.config.programs.pi-coding-agent.extensions.project-mcp-json
+      nativeMcp.config.programs.pi-coding-agent.extensions.project-mcp-json
       == ./config/extensions/project-mcp-json;
     assert
-      default.config.home.file."${default.config.programs.pi-coding-agent.configDir}/extensions/project-mcp-json".force;
+      nativeMcp.config.home.file."${nativeMcp.config.programs.pi-coding-agent.configDir}/extensions/project-mcp-json".force;
     # Adapter already reads .mcp.json; loading both would register servers twice.
     assert !(secretWrappedMcp.config.programs.pi-coding-agent.extensions ? project-mcp-json);
     assert
@@ -1028,9 +1035,7 @@ in
     assert
       default.config.home.file."${default.config.programs.pi-coding-agent.configDir}/templates/drain".force;
     assert
-      !(
-        default.config.home.file ? "${default.config.programs.pi-coding-agent.configDir}/mcp-adapter.json"
-      );
+      default.config.home.file ? "${default.config.programs.pi-coding-agent.configDir}/mcp-adapter.json";
     assert !(default.config.xdg.configFile ? "mcp/mcp.json");
     assert builtins.elem expectedPackage default.config.home.packages;
     assert
@@ -1141,6 +1146,7 @@ in
         expectedPiBgPath
         expectedVimModePath
         expectedUsagePath
+        expectedMcpAdapterPath
         expectedBrowserGoblinPath
       ]
       ++ [
@@ -1990,6 +1996,7 @@ in
       ''
         mcp_config=${secretWrappedMcpConfig}
         jq -e '.mcpServers | has("open-design") | not' "$mcp_config"
+        jq -e '.settings == {"idleTimeout":10,"projectServers":"allow","sampling":false}' "$mcp_config"
         jq -e '.mcpServers.secret.env == {"PUBLIC":"visible"}' "$mcp_config"
         jq -e '.mcpServers.secret | has("args") | not' "$mcp_config"
         ! grep -F '/run/secrets/token' "$mcp_config"

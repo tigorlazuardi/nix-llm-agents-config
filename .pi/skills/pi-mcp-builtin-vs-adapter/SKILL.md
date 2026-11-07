@@ -5,12 +5,23 @@ description: pi 1.0 built-in MCP vs pi-mcp-adapter plugin coexistence. Use when 
 
 # pi built-in MCP vs pi-mcp-adapter
 
-**Current default (2026-10): adapter OFF, native MCP + codemode.** The adapter
-prompts for project-server/tool approval, which blocks subagents; native MCP has
-no approval dialog. `plugins.pi-mcp-adapter.enable = false` renders
-`programs.mcp.servers` to `~/.pi/agent/mcp.json` (read-only symlink) and sets
-`defaultTools = ["+codemode"]`. Setting `enable = true` restores the adapter,
-`-builtin:mcp` and `projectServers = "allow"`; the notes below apply then.
+**Current default (2026-11): adapter ON** for lazy servers + idle stop.
+Native MCP connects every server at startup and never stops it; the adapter
+spawns a server on first tool call and stops it after `settings.idleTimeout`
+minutes (10, pinned in `renderedMcpConfig`; override via
+`plugins.pi-mcp-adapter.settings.idleTimeout`). `lifecycle: "lazy-keep-alive"`
+on a server exempts it from the idle stop. `sampling = false` removes sampling
+confirmations; `projectServers = "allow"` admits project servers without a
+prompt in non-TUI sessions only.
+
+**Approval prompt caveat:** in a TUI session (herdr subagent tabs are TUI) the
+adapter still asks once per new/changed project server (`.mcp.json`), because
+`projectServers = "allow"` is ignored when `ctx.mode === "tui"`. Ways out: keep
+servers in `programs.mcp.servers` (user-global, never asks), or start pi with
+`--mcp-project-servers allow` (needs the project trusted; `defaultProjectTrust =
+"always"` covers that). Approvals persist in `~/.pi/agent/mcp-project-approvals.json`.
+`plugins.pi-mcp-adapter.enable = false` restores native MCP + `project-mcp-json`
+(no lazy, no idle stop, no approval dialog).
 
 Native Pi reads only `.pi/mcp.json`, not a root `.mcp.json`. The local extension
 `config/extensions/project-mcp-json` registers `${cwd}/.mcp.json` servers via

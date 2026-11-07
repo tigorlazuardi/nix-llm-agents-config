@@ -312,9 +312,11 @@ let
     {
       name = "pi-mcp-adapter";
       package = "${mcpAdapter}/lib/node_modules/pi-mcp-adapter";
-      # Default off: the adapter prompts for project/tool approval, which blocks
-      # subagents. Pi's native MCP has no approval dialog; set true to go back.
-      default = false;
+      # Default on: lazy servers (spawned on first call, stopped after idleTimeout).
+      # Native MCP connects every server at startup. Cost: the adapter asks once
+      # per new/changed project server in the TUI; user-global servers
+      # (programs.mcp.servers) never ask. Set false for native MCP.
+      default = true;
     }
     {
       name = "browser-goblin";
@@ -452,9 +454,22 @@ let
       ) enabledMcpServers
     else
       { };
-  renderedMcpConfig =
-    lib.optionalAttrs (mcpPlugin.settings != { }) { settings = mcpPlugin.settings; }
-    // lib.optionalAttrs (renderedMcpServers != { }) { mcpServers = renderedMcpServers; };
+  # Servers are lazy by default in pi-mcp-adapter (spawned on first tool call);
+  # idleTimeout stops an idle stdio server after N minutes and the next call
+  # respawns it. Pinned explicitly so it does not depend on the adapter default.
+  # ponytail: fixed to 10 min; override via plugins.pi-mcp-adapter.settings.idleTimeout.
+  # No-prompt policy: projectServers=allow admits unapproved project servers in
+  # headless sessions (interactive TUI still asks; only --mcp-project-servers allow
+  # or user-global servers skip that); sampling=false drops sampling confirmations.
+  renderedMcpConfig = {
+    settings = {
+      idleTimeout = 10;
+      projectServers = "allow";
+      sampling = false;
+    }
+    // mcpPlugin.settings;
+  }
+  // lib.optionalAttrs (renderedMcpServers != { }) { mcpServers = renderedMcpServers; };
   optimizerStateFile = jsonFormat.generate "pix-optimizer.json" {
     inherit (optimizerPlugin.settings) caveman ponytail;
     rtk = if optimizerPlugin.settings.rtk then "on" else "off";
