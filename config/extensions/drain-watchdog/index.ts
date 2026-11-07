@@ -122,6 +122,7 @@ export type DrainAction =
 	| { type: "wait" }
 	| { type: "nudge" }
 	| { type: "stallNotify" }
+	| { type: "childCheck" }
 	| { type: "pause"; reason: string }
 	| { type: "done" }
 	| { type: "probe"; delayMs: number };
@@ -154,6 +155,8 @@ export type DrainTransition = {
 export const IDLE_GRACE_MS = 60_000;
 export const TICK_MS = 15_000;
 export const STALL_LIMIT_MS = 45 * 60_000;
+/** Main idle this long while children run -> steer the LLM to check its subagents. ponytail: fixed to 10 min; no own cooldown, the model's turn resets the idle clock. */
+export const CHILD_CHECK_IDLE_MS = 10 * 60_000;
 export const BREAKER_K = 4;
 export const HARD_CAP = 30;
 /** Outage budgets: a provider outage longer than this (from backoffStartMs) PAUSES the run. */
@@ -506,6 +509,16 @@ export function buildNudgeText(p: { target: string | null; pickable: number; che
 	].join("\n");
 }
 
+/** Sent when the main has been idle >= CHILD_CHECK_IDLE_MS while children run. */
+export function buildChildCheckText(p: { target: string | null; children: number }): string {
+	const target = p.target === null ? "the accepted tickets" : p.target;
+	return [
+		`drain-watchdog: unattended run on ${target}; you have been idle for over ${CHILD_CHECK_IDLE_MS / 60_000} minutes with ${p.children} child session(s) running.`,
+		"Check the status of every running subagent now (subagent status tools or their herdr panes). Handle each: a finished child's result advances its ticket pipeline at once; a stuck, errored, or silent child gets a steer, a resume, or a fresh replacement (stay within PARALLEL_WIDTH); a healthy child needs nothing. Do not ask the user and do not implement tickets yourself. When every child is healthy and nothing else is actionable, end your turn.",
+		SYNC_REMINDER,
+	].join("\n");
+}
+
 // --- Operator UI (persistent widget + command completion) --------------------
 
 export type WidgetView = {
@@ -843,7 +856,8 @@ function handleTick(state: DrainState, obs: TickObservation, now: number): Drain
 	// Idle grace shields steer deliveries that just landed.
 	if (obs.allIdleForMs < IDLE_GRACE_MS) return stay(state);
 	// Nudge cooldown (design order: cooldown gate sits before the queue observation).
-	if (now < state.nextAllowedAt) return stay(state);
+	// Running children are exempt: the child check below is not a nudge and must not wait on the ladder.
+	if (now < state.nextAllowedAt && obs.childCount === 0) return stay(state);
 
 	if (!obs.queueOk) return toPaused(state, PAUSE_REASON.queue);
 
@@ -856,6 +870,9 @@ function handleTick(state: DrainState, obs: TickObservation, now: number): Drain
 		if (obs.progressAgeMs >= STALL_LIMIT_MS && (state.lastStallNotifyAt === null || now - state.lastStallNotifyAt >= STALL_LIMIT_MS)) {
 			return { state: { ...state, lastStallNotifyAt: now }, action: { type: "stallNotify" }, refusal: null };
 		}
+		// Main idle >= 10 min with children running: steer it to check them. Not a nudge
+		// (no nudgeCount, no breaker, no ladder); the turn it triggers resets the idle clock.
+		if (obs.allIdleForMs >= CHILD_CHECK_IDLE_MS) return { state, action: { type: "childCheck" }, refusal: null };
 		return stay(state);
 	}
 
@@ -1166,6 +1183,10 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 				audit("nudge", { source, streak: state.noProgressStreak, nudgeCount: state.nudgeCount, pickable: pickableIds(state.tickets).length });
 				deliver(NUDGE_MESSAGE_TYPE, buildNudgeText({ target: runTarget, pickable: pickableIds(state.tickets).length, checkCommand: runCheck, maxParallel }));
 				break;
+			case "childCheck":
+				audit("child-check", { children: childCount, idleMs: Date.now() - idleSinceMs });
+				deliver(NUDGE_MESSAGE_TYPE, buildChildCheckText({ target: runTarget, children: childCount }));
+				break;
 			case "stallNotify":
 				audit("stall-notify", { children: childCount, stallLimitMs: STALL_LIMIT_MS });
 				notify(`drain-watchdog: children are running but no progress for ${Math.round(STALL_LIMIT_MS / 60_000)}m — inspect the herdr panes; no nudge sent.`, "warning");
@@ -1207,7 +1228,7 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 			return;
 		}
 		if (now - idleSinceMs < IDLE_GRACE_MS) return;
-		if (now < state.nextAllowedAt) return;
+		if (now < state.nextAllowedAt && childCount === 0) return;
 		tickInFlight = true;
 		try {
 			const q = queueView();

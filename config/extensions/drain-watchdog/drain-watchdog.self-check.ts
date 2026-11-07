@@ -47,6 +47,8 @@ import {
 	transition,
 
 	buildNudgeText,
+	buildChildCheckText,
+	CHILD_CHECK_IDLE_MS,
 	isSubagentCompletionNotice,
 	isSubagentSpawnTool,
 	MAX_LIVE_CHILDREN,
@@ -368,9 +370,24 @@ assert.equal(queueFail.action.type, "pause");
 }
 
 // 7. Children running: progress within stall limit → wait; stalled → notify only, never a nudge.
-assert.deepEqual(transition(armed(), { type: "tick", obs: { ...baseObs(), childCount: 1 } }, T).action, {
+assert.deepEqual(transition(armed(), { type: "tick", obs: { ...baseObs(), childCount: 1, allIdleForMs: IDLE_GRACE_MS } }, T).action, {
 	type: "wait",
 });
+// Main idle >= 10 min with children running: childCheck steer; not a nudge (no count, no ladder, no streak).
+const childCheck = transition(armed(), { type: "tick", obs: { ...baseObs(), childCount: 2, allIdleForMs: CHILD_CHECK_IDLE_MS } }, T);
+assert.deepEqual(childCheck.action, { type: "childCheck" });
+assert.equal(childCheck.state.nudgeCount, 0, "childCheck is not a nudge");
+assert.equal(childCheck.state.noProgressStreak, 0);
+assert.equal(childCheck.state.nextAllowedAt, 0);
+assert.deepEqual(transition(armed(), { type: "tick", obs: { ...baseObs(), childCount: 2, allIdleForMs: CHILD_CHECK_IDLE_MS - 1 } }, T).action, { type: "wait" }, "just under 10 min waits");
+assert.deepEqual(transition(armed(), { type: "tick", obs: { ...baseObs(), childCount: 0, allIdleForMs: CHILD_CHECK_IDLE_MS } }, T).action, { type: "nudge" }, "no children: ordinary nudge");
+const coolingArmed = { ...armed(), nudgeCount: 1, nextAllowedAt: T + 60_000 };
+assert.deepEqual(transition(coolingArmed, { type: "tick", obs: { ...baseObs(), childCount: 1, allIdleForMs: CHILD_CHECK_IDLE_MS } }, T).action, { type: "childCheck" }, "nudge cooldown does not gate the child check");
+assert.deepEqual(transition(coolingArmed, { type: "tick", obs: { ...baseObs(), childCount: 0, allIdleForMs: CHILD_CHECK_IDLE_MS } }, T).action, { type: "wait" }, "cooldown still gates nudges");
+{
+	const text = buildChildCheckText({ target: "#38", children: 2 });
+	assert(text.includes("10 minutes") && text.includes("2 child session(s)") && text.includes("Check the status of every running subagent"));
+}
 const stalled = transition(
 	armed(),
 	{ type: "tick", obs: { ...baseObs(), childCount: 1, progressAgeMs: STALL_LIMIT_MS } },
@@ -381,7 +398,7 @@ assert.equal(stalled.state.phase, "armed");
 assert.equal(stalled.state.lastStallNotifyAt, T, "stallNotify records when it fired");
 // M4: a still-stalled run must NOT re-notify (or re-run anything) on every
 // following tick; only once another full stall window has elapsed.
-const stillStalledSoon = transition(stalled.state, { type: "tick", obs: { ...baseObs(), childCount: 1, progressAgeMs: STALL_LIMIT_MS } }, T + 1000);
+const stillStalledSoon = transition(stalled.state, { type: "tick", obs: { ...baseObs(), childCount: 1, progressAgeMs: STALL_LIMIT_MS, allIdleForMs: IDLE_GRACE_MS } }, T + 1000);
 assert.deepEqual(stillStalledSoon.action, { type: "wait" }, "no repeat stallNotify inside the cooldown window");
 assert.equal(stillStalledSoon.state.lastStallNotifyAt, T, "cooldown timestamp is untouched while it holds");
 const stillStalledLater = transition(stalled.state, { type: "tick", obs: { ...baseObs(), childCount: 1, progressAgeMs: STALL_LIMIT_MS } }, T + STALL_LIMIT_MS);
@@ -390,7 +407,7 @@ assert.equal(stillStalledLater.state.lastStallNotifyAt, T + STALL_LIMIT_MS);
 
 // 8. Children running with frontier 0 is NOT done; running children keep the run alive.
 assert.deepEqual(
-	transition(armed(), { type: "tick", obs: { ...baseObs(), pickable: 0, childCount: 1 } }, T)
+	transition(armed(), { type: "tick", obs: { ...baseObs(), pickable: 0, childCount: 1, allIdleForMs: IDLE_GRACE_MS } }, T)
 		.action,
 	{ type: "wait" },
 );
