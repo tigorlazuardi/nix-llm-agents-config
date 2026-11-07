@@ -226,7 +226,9 @@ let
   pixToolPackages = map (name: {
     name = "pix-${name}";
     package = "${pixToolsRoot}/pix-${name}";
-    default = true;
+    # footer off: it polls `git status` every 2s per session (stale .git/index.lock
+    # on timeout kill) and overfills narrow screens. Set plugins.pix-footer.enable = true to restore.
+    default = name != "footer";
   }) pixToolNames;
   piBlackhole = pinnedPkgs.callPackage ../packages/pi-blackhole.nix { };
   piSensitiveGuard = pinnedPkgs.callPackage ../packages/pi-sensitive-guard.nix { };

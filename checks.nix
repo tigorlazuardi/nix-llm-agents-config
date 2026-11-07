@@ -382,7 +382,12 @@ let
     "footer"
     "grep"
   ];
-  expectedPixToolPaths = map (name: "${expectedPixToolsRoot}/pix-${name}") expectedPixToolNames;
+  # pix-footer is default-off (2s git status polling, wide footer); still part of the tool set.
+  expectedPixEnabledToolNames = builtins.filter (name: name != "footer") expectedPixToolNames;
+  expectedPixToolPaths = map (
+    name: "${expectedPixToolsRoot}/pix-${name}"
+  ) expectedPixEnabledToolNames;
+  expectedPixAllToolPaths = map (name: "${expectedPixToolsRoot}/pix-${name}") expectedPixToolNames;
   # pix-todo ships in the same pix-tools workspace but registers through the
   # plugin registry (replacing pi-todo-herdr), not the pixToolPackages map.
   expectedPixTodoPath = "${expectedPixToolsRoot}/pix-todo";
@@ -659,7 +664,10 @@ in
     assert !default.config.programs.pi-coding-agent.plugins.pix-optimizer.enable;
     assert builtins.all (
       name: default.config.programs.pi-coding-agent.plugins."pix-${name}".enable
-    ) expectedPixToolNames;
+    ) expectedPixEnabledToolNames;
+    assert !default.config.programs.pi-coding-agent.plugins.pix-footer.enable;
+    assert
+      !(builtins.elem "${expectedPixToolsRoot}/pix-footer" default.config.programs.pi-coding-agent.settings.packages);
     # pi-sensitive-guard is default-off (allOutput redaction mangles ls/nix-hash
     # output); wrapped path must be absent from the default package list.
     # store path differs from the unwrapped package, so assert by pattern.
@@ -2134,7 +2142,7 @@ in
         grep -F 'tickCollapse' ${expectedPixToolsRoot}/pix-todo/src/todo.ts
         grep -F 'appendEntry("todo-state")' ${expectedPixToolsRoot}/pix-todo/src/todo.ts
         cat > "$PI_CODING_AGENT_DIR/settings.json" <<'EOF'
-        {"packages":${builtins.toJSON expectedPixToolPaths}}
+        {"packages":${builtins.toJSON expectedPixAllToolPaths}}
         EOF
         pi --offline --no-prompt-templates --no-context-files \
           --list-models > pi.log 2>&1
