@@ -29,6 +29,15 @@ buildNpmPackage {
       fs.writeFileSync("package.json", JSON.stringify(manifest, null, 2) + "\n");
     '
     cp ${./pi-mcp-adapter-package-lock.json} package-lock.json
+
+    # Upstream ignores settings.projectServers = "allow" in TUI sessions, so every
+    # herdr subagent tab (TUI) blocks on an approval dialog. Honour the user-global
+    # policy there too; Pi's project trust gate (projectTrusted) still applies.
+    # --replace-fail: an upstream change to this line breaks the build instead of
+    # silently bringing the dialog back. ponytail: drop when upstream allows it in TUI.
+    substituteInPlace project-server-trust.ts \
+      --replace-fail '(!interactive && loaded.projectServerPolicy === "allow")' \
+                     '(loaded.projectServerPolicy === "allow")'
   '';
 
   npmDepsHash = lock.npmDepsHash;

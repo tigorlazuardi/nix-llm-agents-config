@@ -2005,6 +2005,9 @@ in
         mcp_config=${secretWrappedMcpConfig}
         jq -e '.mcpServers | has("open-design") | not' "$mcp_config"
         jq -e '.settings == {"idleTimeout":10,"projectServers":"allow","sampling":false}' "$mcp_config"
+        # TUI patch applied: policy no longer gated on !interactive.
+        grep -F '(loaded.projectServerPolicy === "allow")' ${expectedMcpAdapterPath}/project-server-trust.ts
+        ! grep -F '!interactive && loaded.projectServerPolicy' ${expectedMcpAdapterPath}/project-server-trust.ts
         jq -e '.mcpServers.secret.env == {"PUBLIC":"visible"}' "$mcp_config"
         jq -e '.mcpServers.secret | has("args") | not' "$mcp_config"
         ! grep -F '/run/secrets/token' "$mcp_config"

@@ -14,12 +14,15 @@ on a server exempts it from the idle stop. `sampling = false` removes sampling
 confirmations; `projectServers = "allow"` admits project servers without a
 prompt in non-TUI sessions only.
 
-**Approval prompt caveat:** in a TUI session (herdr subagent tabs are TUI) the
-adapter still asks once per new/changed project server (`.mcp.json`), because
-`projectServers = "allow"` is ignored when `ctx.mode === "tui"`. Ways out: keep
-servers in `programs.mcp.servers` (user-global, never asks), or start pi with
-`--mcp-project-servers allow` (needs the project trusted; `defaultProjectTrust =
-"always"` covers that). Approvals persist in `~/.pi/agent/mcp-project-approvals.json`.
+**Approval prompt:** upstream ignores `projectServers = "allow"` in TUI sessions
+(`!interactive && ...` in `project-server-trust.ts`), and herdr subagent tabs are
+TUI, so they would block on "Allow project MCP server?". `packages/pi-mcp-adapter.nix`
+patches that line (`substituteInPlace --replace-fail`) so the user-global policy
+also applies in TUI; Pi project trust (`defaultProjectTrust = "always"`) still gates
+it. `--replace-fail` makes an upstream rewrite of the line fail the build and
+`mcp-adapter-load` greps the result: on failure re-read upstream
+`project-server-trust.ts` and redo the patch (or drop it if upstream allows TUI).
+Servers in `programs.mcp.servers` (user-global) never ask either way.
 `plugins.pi-mcp-adapter.enable = false` restores native MCP + `project-mcp-json`
 (no lazy, no idle stop, no approval dialog).
 
