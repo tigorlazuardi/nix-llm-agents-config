@@ -24,6 +24,13 @@ stdenvNoCC.mkDerivation {
   postPatch = ''
     ${nodejs}/bin/node -e 'const fs = require("fs"); const p = require("./package.json"); delete p.devDependencies; delete p.peerDependencies; fs.writeFileSync("package.json", JSON.stringify(p, null, 2) + "\n")'
     rm -rf node_modules
+
+    # ponytail: prompt-level cleanup only; upstream (ADR-0011) rejects auto-reap.
+    # --replace-fail breaks the build loudly if upstream rewrites this sentence.
+    substituteInPlace pi-extension/subagents/launch-tools.ts \
+      --replace-fail \
+        'they are not pushed, merged, or removed automatically. ' \
+        'they are not pushed, merged, or removed automatically. Once you have reviewed the result and it is merged, committed or no longer needed, and the child has finished, call worktree_remove for that worktree so it leaves Herdr (branch and commits are kept; use preserve: true only for dirty work to keep). Never leave finished worktrees behind. '
   '';
 
   installPhase = ''
