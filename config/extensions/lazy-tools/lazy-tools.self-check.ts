@@ -64,6 +64,10 @@ const paths: Record<string, string> = {
   todo: "/nix/store/@xynogen/pix-todo/src/todo.ts",
 };
 const tools = Object.entries(paths).map(([name, path]) => ({ name, description: "", sourceInfo: { path } }));
+// MCP server tools share the adapter's path but must never be activated or gated by a group.
+for (const name of ["mcp__jira__jira_get_issue", "mcp__signoz__signoz_create_alert", "mcp__neon__run_sql"]) {
+  tools.push({ name, description: "", sourceInfo: { path: "/nix/store/pi-mcp-adapter/index.ts" } });
+}
 
 type Harness = {
   active: string[];
@@ -122,6 +126,7 @@ let researchLoaded = false;
 for (const group of Object.keys(grouped) as Group[]) {
   if (!researchLoaded) assert(!fresh.active.includes("mcpScript"));
   await fresh.loader.execute("x", { group });
+  assert(!fresh.active.some((name) => name.startsWith("mcp__")));
   for (const tool of grouped[group]) assert(fresh.active.includes(tool));
   for (const tool of core) if (tool !== "agent_bg") assert(fresh.active.includes(tool));
   if (group === "research") researchLoaded = true;
@@ -130,6 +135,8 @@ for (const group of Object.keys(grouped) as Group[]) {
 // Loaded tools are unlocked: gate must not block them.
 assert(!fresh.toolCall({ toolName: "browser_open" })?.block);
 assert(!fresh.toolCall({ toolName: "bash" })?.block);
+// codemode calls to MCP tools are never blocked behind load_tools.
+assert(!fresh.toolCall({ toolName: "mcp__jira__jira_get_issue" })?.block);
 
 // --- Reload: transcript-restored tools stay active but gated until load_tools.
 const reloaded = harness([...core.filter((name) => name !== "agent_bg"), "browser_open", "source_check", "load_tools"]);

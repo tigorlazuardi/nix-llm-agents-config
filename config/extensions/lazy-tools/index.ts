@@ -34,6 +34,10 @@ export default function (pi: ExtensionAPI) {
       .getAllTools()
       .filter((tool) =>
         !ALWAYS_ACTIVE.has(tool.name)
+        // MCP server tools (mcp__<server>__<tool>) register from the adapter's path but are
+        // deferred: reachable from codemode/tool_search without being declared. Activating them
+        // here would put every server schema (100k+ tokens) in each request.
+        && !tool.name.startsWith("mcp__")
         && GROUP_MARKERS[group].some((marker) => tool.sourceInfo.path.includes(marker)))
       .map((tool) => tool.name);
   const groupOfTool = (name: string): Group | undefined => {
