@@ -5,7 +5,7 @@ import lazyTools from "./index.ts";
 const ambientSubagentId = process.env.PI_SUBAGENT_ID;
 delete process.env.PI_SUBAGENT_ID;
 
-type Group = "browser" | "subagents" | "research" | "herdr" | "sudo" | "journal" | "artifact" | "memory";
+type Group = "browser" | "subagents" | "herdr" | "sudo";
 const core = ["read", "bash", "bash_bg", "agent_bg", "jobs", "monitor", "ask_user_question", "rename_herdr_tab", "todo", "agent_send", "list_peers", "web_search", "fetch_content", "get_search_content"];
 const grouped: Record<Group, string[]> = {
   browser: ["browser_open"],
@@ -21,12 +21,8 @@ const grouped: Record<Group, string[]> = {
     "worktree_list",
     "worktree_remove",
   ],
-  research: ["source_check", "mcp", "mcpScript"],
   herdr: ["herdr_layout"],
   sudo: ["sudo_run"],
-  journal: ["dev_journal"],
-  artifact: ["host_artifact"],
-  memory: ["recall"],
 };
 const paths: Record<string, string> = {
   read: "<builtin:read>",
@@ -51,6 +47,9 @@ const paths: Record<string, string> = {
   source_check: "/nix/store/pi-web-access/index.ts",
   mcp: "/nix/store/pi-mcp-adapter/index.ts",
   mcpScript: "/nix/store/pi-mcp-adapter/index.ts",
+  mcp__jira__jira_get_issue: "/nix/store/pi-mcp-adapter/index.ts",
+  mcp__signoz__signoz_create_alert: "/nix/store/pi-mcp-adapter/index.ts",
+  mcp__neon__run_sql: "/nix/store/pi-mcp-adapter/index.ts",
   herdr_layout: "/nix/store/pi-herdr/index.ts",
   sudo_run: "/nix/store/@xynogen/pix-sudo/src/index.ts",
   jobs: "/nix/store/pi-bg/index.ts",
@@ -64,10 +63,9 @@ const paths: Record<string, string> = {
   todo: "/nix/store/@xynogen/pix-todo/src/todo.ts",
 };
 const tools = Object.entries(paths).map(([name, path]) => ({ name, description: "", sourceInfo: { path } }));
-// MCP server tools share the adapter's path but must never be activated or gated by a group.
-for (const name of ["mcp__jira__jira_get_issue", "mcp__signoz__signoz_create_alert", "mcp__neon__run_sql"]) {
-  tools.push({ name, description: "", sourceInfo: { path: "/nix/store/pi-mcp-adapter/index.ts" } });
-}
+// Eager tools: no group claims these, so they are never deferred, activated, or gated by load_tools.
+const eager = ["source_check", "mcp", "mcpScript", "dev_journal", "host_artifact", "recall", "mcp__jira__jira_get_issue", "mcp__signoz__signoz_create_alert", "mcp__neon__run_sql"];
+
 
 type Harness = {
   active: string[];
@@ -103,9 +101,9 @@ function harness(initialActive: string[]): Harness {
 }
 
 // --- Fresh session: deferred tools hidden, model cannot call them at all.
-const fresh = harness([...core, ...Object.values(grouped).flat()]);
+const fresh = harness([...core, ...eager, ...Object.values(grouped).flat()]);
 fresh.sessionStart({ reason: "startup" });
-assert.deepEqual(fresh.active, [...core.filter((name) => name !== "agent_bg"), "load_tools"]);
+assert.deepEqual(fresh.active, [...core.filter((name) => name !== "agent_bg"), ...eager, "load_tools"]);
 // Every pi-herdr-agents parent tool is deferred at session_start.
 for (const tool of grouped.subagents) assert(!fresh.active.includes(tool));
 // load_tools({group: "subagents"}) unlocks exactly the pi-herdr-agents parent toolset.
@@ -113,30 +111,25 @@ const subagentsLoad = (await fresh.loader.execute("x", { group: "subagents" })) 
   details: { added: string[] };
 };
 assert.deepEqual([...subagentsLoad.details.added].sort(), [...grouped.subagents].sort());
-assert(!fresh.active.includes("mcpScript"));
 // Group markers are disjoint: "herdr" must not unlock the pi-herdr-agents tools.
-const herdrOnly = harness([...core, ...Object.values(grouped).flat()]);
+const herdrOnly = harness([...core, ...eager, ...Object.values(grouped).flat()]);
 herdrOnly.sessionStart({ reason: "startup" });
 const herdrLoad = (await herdrOnly.loader.execute("x", { group: "herdr" })) as {
   details: { added: string[] };
 };
 assert.deepEqual([...herdrLoad.details.added].sort(), ["herdr_layout"]);
 for (const tool of grouped.subagents) assert(!herdrOnly.active.includes(tool));
-let researchLoaded = false;
 for (const group of Object.keys(grouped) as Group[]) {
-  if (!researchLoaded) assert(!fresh.active.includes("mcpScript"));
   await fresh.loader.execute("x", { group });
-  assert(!fresh.active.some((name) => name.startsWith("mcp__")));
   for (const tool of grouped[group]) assert(fresh.active.includes(tool));
   for (const tool of core) if (tool !== "agent_bg") assert(fresh.active.includes(tool));
-  if (group === "research") researchLoaded = true;
-  assert.equal(fresh.active.includes("mcpScript"), researchLoaded);
+  for (const tool of eager) assert(fresh.active.includes(tool));
 }
 // Loaded tools are unlocked: gate must not block them.
 assert(!fresh.toolCall({ toolName: "browser_open" })?.block);
 assert(!fresh.toolCall({ toolName: "bash" })?.block);
-// codemode calls to MCP tools are never blocked behind load_tools.
-assert(!fresh.toolCall({ toolName: "mcp__jira__jira_get_issue" })?.block);
+// Eager tools (research, MCP, journal, artifact, recall) are never gated.
+for (const name of eager) assert(!fresh.toolCall({ toolName: name })?.block);
 
 // --- Reload: transcript-restored tools stay active but gated until load_tools.
 const reloaded = harness([...core.filter((name) => name !== "agent_bg"), "browser_open", "source_check", "load_tools"]);
@@ -149,8 +142,9 @@ assert.match(blockedBrowser?.reason ?? "", /load_tools/);
 assert.match(blockedBrowser?.reason ?? "", /browser/);
 await reloaded.loader.execute("x", { group: "browser" });
 assert(!reloaded.toolCall({ toolName: "browser_open" })?.block);
-// Other groups stay gated after loading only one group.
-assert.equal(reloaded.toolCall({ toolName: "source_check" })?.block, true);
+// Other groups stay gated after loading only one group; eager tools never are.
+assert.equal(reloaded.toolCall({ toolName: "subagent" })?.block, true);
+assert(!reloaded.toolCall({ toolName: "source_check" })?.block);
 // A deferred pi-herdr-agents tool is rejected with the "load_tools first" reason.
 const blockedCancel = reloaded.toolCall({ toolName: "subagent_cancel" });
 assert.equal(blockedCancel?.block, true);

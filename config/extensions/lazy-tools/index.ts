@@ -2,20 +2,17 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { StringEnum } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
 
-const GROUP_NAMES = ["browser", "subagents", "research", "herdr", "sudo", "journal", "artifact", "memory"] as const;
+const GROUP_NAMES = ["browser", "subagents", "herdr", "sudo"] as const;
 type Group = typeof GROUP_NAMES[number];
 const GROUP_MARKERS: Record<Group, readonly string[]> = {
   browser: ["browser-goblin"],
   subagents: ["pi-herdr-agents"],
-  research: ["pi-web-access", "pi-mcp-adapter"],
   // Anchored: a bare "pi-herdr" is a substring of ".../pi-herdr-agents/..." and would unlock the subagents group.
   herdr: ["/pi-herdr/"],
   sudo: ["pix-sudo"],
-  journal: ["dev-journal"],
-  artifact: ["artifact-preview"],
-  memory: ["pi-blackhole"],
 };
-// web_search/fetch_content/get_search_content (pi-web-access) stay eager: basic web lookup every turn.
+// pi-web-access, pi-mcp-adapter, dev-journal, artifact-preview and pi-blackhole tools stay eager: no group claims them.
+// web_search/fetch_content/get_search_content stay in ALWAYS_ACTIVE for clarity.
 const ALWAYS_ACTIVE = new Set(["bash", "bash_bg", "ask_user_question", "rename_herdr_tab", "todo", "load_tools", "web_search", "fetch_content", "get_search_content"]);
 // Permanently hidden every session — NOT deferrable via load_tools. Models mistake
 // agent_bg for a subagent/delegation tool and misfire it; background pi -p work goes
@@ -34,10 +31,6 @@ export default function (pi: ExtensionAPI) {
       .getAllTools()
       .filter((tool) =>
         !ALWAYS_ACTIVE.has(tool.name)
-        // MCP server tools (mcp__<server>__<tool>) register from the adapter's path but are
-        // deferred: reachable from codemode/tool_search without being declared. Activating them
-        // here would put every server schema (100k+ tokens) in each request.
-        && !tool.name.startsWith("mcp__")
         && GROUP_MARKERS[group].some((marker) => tool.sourceInfo.path.includes(marker)))
       .map((tool) => tool.name);
   const groupOfTool = (name: string): Group | undefined => {
@@ -53,9 +46,9 @@ export default function (pi: ExtensionAPI) {
   pi.registerTool({
     name: "load_tools",
     label: "Load Tools",
-    description: "Enable an installed tool group for this session. Groups: browser, subagents, research/MCP/source_check, Herdr/elevation, journal, artifact hosting, memory/recall.",
+    description: "Enable an installed tool group for this session. Groups: browser, subagents, Herdr, sudo/elevation.",
     promptSnippet: "Enable deferred tool groups when needed",
-    promptGuidelines: ["Use load_tools before browser automation; /supervise or delegation; MCP/source_check research; explicit Herdr or elevated work; journal access; artifact preview; or memory recall search. web_search and fetch_content are always available."],
+    promptGuidelines: ["Use load_tools before browser automation; /supervise or delegation; or explicit Herdr or elevated work."],
     parameters: Type.Object({
       group: StringEnum(GROUP_NAMES),
     }),
