@@ -1,7 +1,9 @@
 {
   fetchFromGitHub,
   lib,
+  pkg-config,
   rustPlatform,
+  sqlite,
 }:
 rustPlatform.buildRustPackage {
   pname = "remote-pi-relay";
@@ -13,6 +15,9 @@ rustPlatform.buildRustPackage {
     rev = "b1e09cf68208c76b2ebae26a2ecb619791e43389";
     hash = "sha256-6t4/+bNO+klePXPmQ15iWQOY7qgj2CeA6cCSebi+vAc=";
   };
+
+  nativeBuildInputs = [ pkg-config ];
+  buildInputs = [ sqlite ];
 
   sourceRoot = "source/relay";
   cargoHash = "sha256-ovrWVN/3DuhtJtk5rTY/g6bxmpQV9OBm1Ux7z8c/vAw=";
