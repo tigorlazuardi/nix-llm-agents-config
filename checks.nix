@@ -2344,6 +2344,9 @@ in
         grep -F 'name: "worktree_remove",' "$package/pi-extension/subagents/worktree-tools.ts"
         # Children rely on the launch passing `--tools`; lazy-tools never widens that set.
         grep -F '"--tools"' "$package/maestro/adapters/pi/launch.ts"
+        # Child launches publish relay annotations (role/name/task) for peer disambiguation.
+        grep -F 'PI_RELAY_ANNOTATIONS=' "$package/maestro/adapters/pi/launch.ts"
+        grep -F 'Never leave finished worktrees behind.' "$package/pi-extension/subagents/launch-tools.ts"
         cp -R "$package" "$TMPDIR/package"
         chmod -R u+w "$TMPDIR/package"
         mkdir -p "$TMPDIR/package/node_modules/@earendil-works" "$TMPDIR/package/node_modules/@sinclair"

@@ -18,6 +18,11 @@ stdenvNoCC.mkDerivation {
     hash = lock.hash;
   };
 
+  # Child launches export PI_RELAY_ANNOTATIONS (role/name/task) so
+  # pi-messaging-relay peers can be told apart (tigorlazuardi/pi-messaging-relay#84).
+  # Fails the build loudly if upstream changes the patched hunk.
+  patches = [ ./pi-herdr-agents-relay-annotations.patch ];
+
   # ponytail: Pi 1.0+ provides extension peers; the package ships no runtime
   # dependencies, so strip the declared dev/peer closures instead of installing
   # them (no npm install, no vendored copies).
