@@ -18,7 +18,7 @@ stdenvNoCC.mkDerivation {
     hash = lock.hash;
   };
 
-  # Child launches export PI_RELAY_ANNOTATIONS (role/name/task) so
+  # Child launches export PI_RELAY_ANNOTATIONS (role/name labels only) so
   # pi-messaging-relay peers can be told apart (tigorlazuardi/pi-messaging-relay#84).
   # Fails the build loudly if upstream changes the patched hunk.
   patches = [ ./pi-herdr-agents-relay-annotations.patch ];
