@@ -1,33 +1,38 @@
 --- a/maestro/adapters/pi/launch.ts
 +++ b/maestro/adapters/pi/launch.ts
-@@ -745,6 +745,26 @@
+@@ -745,6 +745,31 @@
  	return { ...session, taskArg, systemPromptFile, acceptFile };
  }
  
 +/**
-+ * Best-effort `PI_RELAY_ANNOTATIONS` for the relay extension: a short label for
++ * Best-effort `PI_RELAY_ANNOTATIONS` for the relay extension: short labels for
 + * who this child is. Display metadata only, never identity or authority.
++ * Only called for real children (`subagent` marks them; `parent` is the
++ * parent's Pi session id, which the relay also publishes as `session`).
 + * Deliberately carries no task or prompt text: roster values reach other
-+ * agents' context, so only a restricted-charset label may pass.
++ * agents' context, so only restricted-charset labels may pass.
 + */
 +function relayAnnotationsAssignment(request: {
 +	name: string;
 +	agent?: string | undefined;
++	parent: { sessionId: string };
 +}): string {
 +	const label = (value: string | undefined): string =>
 +		(value ?? "").replace(/[^A-Za-z0-9._-]/g, "").slice(0, 40);
-+	const annotations: Record<string, string> = {};
++	const annotations: Record<string, string> = { subagent: "true" };
 +	const name = label(request.name);
 +	if (name) annotations.name = name;
 +	const role = label(request.agent);
 +	if (role) annotations.role = role;
++	const parent = label(request.parent.sessionId);
++	if (parent) annotations.parent = parent;
 +	return `PI_RELAY_ANNOTATIONS=${shellQuote(JSON.stringify(annotations))}`;
 +}
 +
  function buildPiCommand(
  	resolved: ResolvedLaunch,
  	artifacts: PreparedArtifacts,
-@@ -800,6 +820,7 @@
+@@ -800,6 +825,7 @@
  			);
  		}
  		env.push(`PI_SUBAGENT_NAME=${shellQuote(request.name)}`);
