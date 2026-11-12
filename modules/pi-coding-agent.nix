@@ -185,8 +185,15 @@ let
   # user config, so resolve rtk through a scope that explicitly allowlists it.
   unfreeRtkPkgs = import nixpkgs-unstable {
     system = pkgs.stdenv.hostPlatform.system;
-    config.allowUnfreePredicate = pkg: nixpkgs-unstable.lib.getName pkg == "rtk";
+    config.allowUnfreePredicate =
+      pkg:
+      builtins.elem (nixpkgs-unstable.lib.getName pkg) [
+        "rtk"
+        "pi-agent-rust"
+      ];
   };
+  # pi-agent-rust is unfree (MIT + OpenAI/Anthropic rider); same allowlisted scope as rtk.
+  piAgentRust = unfreeRtkPkgs.callPackage ../packages/pi-agent-rust.nix { };
   dietLsp = pinnedPkgs.callPackage ../packages/pi-diet-lsp.nix { };
   commandCodeProvider = pinnedPkgs.callPackage ../packages/pi-commandcode-provider.nix { };
   effort = pinnedPkgs.callPackage ../packages/pi-effort.nix { };
@@ -1030,7 +1037,10 @@ in
 
     home = {
       packages = lib.mkIf cfg.enable (
-        [ pinnedPkgs.oscclip ]
+        [
+          pinnedPkgs.oscclip
+          piAgentRust
+        ]
         ++ lib.optional optimizerPlugin.enable unfreeRtkPkgs.rtk
         ++ lib.optional optimizerPlugin.enable toon
       );
