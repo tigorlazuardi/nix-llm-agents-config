@@ -1,10 +1,11 @@
 # Prebuilt Rust port of pi (Dicklesworthstone/pi_agent_rust), installed as `pi-rs`
-# so it can run beside the TypeScript `pi`. ponytail: upstream release binary,
+# so it can run beside the TypeScript `pi`, wrapped to use ~/.pi-rs/agent. ponytail: upstream release binary,
 # pinned to v0.8.0; build from source when a nix-friendly toolchain story exists.
 {
   autoPatchelfHook,
   fetchurl,
   lib,
+  makeWrapper,
   stdenv,
 }:
 let
@@ -26,13 +27,21 @@ stdenv.mkDerivation {
   inherit version;
   src = sources.${stdenv.hostPlatform.system};
   sourceRoot = ".";
-  nativeBuildInputs = lib.optional stdenv.hostPlatform.isLinux autoPatchelfHook;
+  nativeBuildInputs = [
+    makeWrapper
+  ]
+  ++ lib.optional stdenv.hostPlatform.isLinux autoPatchelfHook;
   buildInputs = lib.optional stdenv.hostPlatform.isLinux stdenv.cc.cc.lib;
   dontConfigure = true;
   dontBuild = true;
   installPhase = ''
     runHook preInstall
-    install -Dm755 pi $out/bin/pi-rs
+    install -Dm755 pi $out/libexec/pi-rs
+    # Default to an isolated agent dir: pi 1.x settings/extensions/models in
+    # ~/.pi/agent are not compatible with pi-rs. Only a default; an existing
+    # PI_CODING_AGENT_DIR (or any other PI_* override) wins.
+    makeWrapper $out/libexec/pi-rs $out/bin/pi-rs \
+      --run 'export PI_CODING_AGENT_DIR="''${PI_CODING_AGENT_DIR:-$HOME/.pi-rs/agent}"'
     install -Dm644 LICENSE $out/share/doc/pi-agent-rust/LICENSE
     runHook postInstall
   '';
