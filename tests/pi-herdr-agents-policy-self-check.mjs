@@ -33,7 +33,12 @@ assert.deepEqual(
 );
 const implementer = loadAgentDefaults("implementer");
 assert.equal(implementer?.source, "global");
-assert.equal(implementer?.tools, "read, bash, edit, write, grep, find");
+// Relay tools ride along so a child can ask its parent or a peer; the shipped 3.7.2
+// frontmatter reader and buildSubagentToolAllowlist both pass arbitrary names through.
+assert.equal(
+  implementer?.tools,
+  "read, bash, edit, write, grep, find, relay_list_peers, relay_agent_send",
+);
 assert.equal(implementer?.spawning, false);
 assert.equal(implementer?.model, "omniroute/personal/implementer");
 assert.equal(implementer?.thinking, "high");
@@ -68,7 +73,7 @@ for (const agent of catalog.agents) {
 // and re-adds subagent_done only for non-auto-exit children.
 assert.equal(
   buildSubagentToolAllowlist(implementer?.tools, implementer?.autoExit),
-  "read,bash,edit,write,grep,find,caller_ping",
+  "read,bash,edit,write,grep,find,relay_list_peers,relay_agent_send,caller_ping",
 );
 assert.equal(
   buildSubagentToolAllowlist(standardsReviewer?.tools, standardsReviewer?.autoExit),
@@ -76,7 +81,7 @@ assert.equal(
 );
 assert.equal(
   buildSubagentToolAllowlist(implementer?.tools, false),
-  "read,bash,edit,write,grep,find,caller_ping,subagent_done",
+  "read,bash,edit,write,grep,find,relay_list_peers,relay_agent_send,caller_ping,subagent_done",
 );
 assert.equal(buildSubagentToolAllowlist(undefined, true), null);
 

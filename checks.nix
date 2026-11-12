@@ -2347,6 +2347,9 @@ in
         # Child launches publish relay annotations (subagent/parent/name/role labels only, never task text) for peer disambiguation.
         grep -F 'PI_RELAY_ANNOTATIONS=' "$package/maestro/adapters/pi/launch.ts"
         grep -F 'subagent: "true"' "$package/maestro/adapters/pi/launch.ts"
+        # A real child also learns its parent's Pi session id, so it can address the parent's relay `session` annotation; handoffs and resumes get neither.
+        grep -F 'PI_SUBAGENT_PARENT_SESSION=' "$package/maestro/adapters/pi/launch.ts"
+        grep -F 'function parentSessionAssignment(' "$package/maestro/adapters/pi/launch.ts"
         grep -F 'Never leave finished worktrees behind.' "$package/pi-extension/subagents/launch-tools.ts"
         cp -R "$package" "$TMPDIR/package"
         chmod -R u+w "$TMPDIR/package"
