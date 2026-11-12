@@ -1,9 +1,17 @@
 --- a/maestro/adapters/pi/launch.ts
 +++ b/maestro/adapters/pi/launch.ts
-@@ -745,6 +745,31 @@
+@@ -745,6 +745,48 @@
  	return { ...session, taskArg, systemPromptFile, acceptFile };
  }
  
++/**
++ * Restricted-charset label for anything exported as a relay label: only
++ * `[A-Za-z0-9._-]` survives, capped at 40 characters.
++ */
++function restrictedRelayLabel(value: string | undefined): string {
++	return (value ?? "").replace(/[^A-Za-z0-9._-]/g, "").slice(0, 40);
++}
++
 +/**
 + * Best-effort `PI_RELAY_ANNOTATIONS` for the relay extension: short labels for
 + * who this child is. Display metadata only, never identity or authority.
@@ -17,26 +25,37 @@
 +	agent?: string | undefined;
 +	parent: { sessionId: string };
 +}): string {
-+	const label = (value: string | undefined): string =>
-+		(value ?? "").replace(/[^A-Za-z0-9._-]/g, "").slice(0, 40);
 +	const annotations: Record<string, string> = { subagent: "true" };
-+	const name = label(request.name);
++	const name = restrictedRelayLabel(request.name);
 +	if (name) annotations.name = name;
-+	const role = label(request.agent);
++	const role = restrictedRelayLabel(request.agent);
 +	if (role) annotations.role = role;
-+	const parent = label(request.parent.sessionId);
++	const parent = restrictedRelayLabel(request.parent.sessionId);
 +	if (parent) annotations.parent = parent;
 +	return `PI_RELAY_ANNOTATIONS=${shellQuote(JSON.stringify(annotations))}`;
++}
++
++/**
++ * `PI_SUBAGENT_PARENT_SESSION` for a real child: the parent's Pi session id,
++ * published by the relay as the `session` annotation, so a child can find its
++ * parent with `relay_list_peers`. Same restricted-charset label rule; omitted
++ * entirely when nothing survives, so an empty value is never exported.
++ */
++function parentSessionAssignment(parentSessionId: string): string | null {
++	const label = restrictedRelayLabel(parentSessionId);
++	return label ? `PI_SUBAGENT_PARENT_SESSION=${shellQuote(label)}` : null;
 +}
 +
  function buildPiCommand(
  	resolved: ResolvedLaunch,
  	artifacts: PreparedArtifacts,
-@@ -800,6 +825,7 @@
+@@ -800,6 +842,9 @@
  			);
  		}
  		env.push(`PI_SUBAGENT_NAME=${shellQuote(request.name)}`);
 +		env.push(relayAnnotationsAssignment(request));
++		const parentSession = parentSessionAssignment(request.parent.sessionId);
++		if (parentSession) env.push(parentSession);
  		if (request.agent)
  			env.push(`PI_SUBAGENT_AGENT=${shellQuote(request.agent)}`);
  		env.push(`PI_SUBAGENT_AUTO_EXIT=${request.behavior.autoExit ? "1" : "0"}`);

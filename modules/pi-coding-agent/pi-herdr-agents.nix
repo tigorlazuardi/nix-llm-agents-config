@@ -15,6 +15,8 @@ let
     "find"
     "ls"
     "subagent"
+    "relay_list_peers"
+    "relay_agent_send"
   ];
 
   pluginEnabled = cfg.enable && cfg.plugins.pi-herdr-agents.enable;

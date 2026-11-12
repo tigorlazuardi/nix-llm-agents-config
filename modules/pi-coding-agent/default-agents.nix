@@ -24,6 +24,8 @@
       "write"
       "grep"
       "find"
+      "relay_list_peers"
+      "relay_agent_send"
     ];
   };
   standards-reviewer = {
