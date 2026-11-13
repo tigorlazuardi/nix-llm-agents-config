@@ -902,9 +902,14 @@ in
       default.config.programs.pi-coding-agent.skills.writing-for-agents + "/SKILL.md"
     );
     assert builtins.pathExists (default.config.programs.pi-coding-agent.skills.wait-what + "/SKILL.md");
-    assert builtins.pathExists (
-      default.config.programs.pi-coding-agent.skills.pick-ui-library + "/SKILL.md"
-    );
+    # pick-ui-library is patched to auto-trigger: no manual-only flag, our description.
+    let
+      pickUiLibrarySkillMd = builtins.readFile (
+        default.config.programs.pi-coding-agent.skills.pick-ui-library + "/SKILL.md"
+      );
+    in
+    assert !(pkgs.lib.hasInfix "disable-model-invocation" pickUiLibrarySkillMd);
+    assert pkgs.lib.hasInfix "and none is picked yet" pickUiLibrarySkillMd;
     assert builtins.pathExists (default.config.programs.pi-coding-agent.skills.wizard + "/SKILL.md");
     assert builtins.pathExists (
       default.config.programs.pi-coding-agent.skills.to-questionnaire + "/SKILL.md"

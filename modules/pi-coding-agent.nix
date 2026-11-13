@@ -62,8 +62,20 @@ let
     wait-what = mattpocock-skills + "/skills/productivity/wait-what";
     writing-for-agents = mattpocock-skills + "/skills/productivity/writing-for-agents";
   };
+  # Upstream sets disable-model-invocation and a manual-only description; patch
+  # frontmatter so the model reads it on its own, and skip the "ready" greeting.
+  pickUiLibraryDescription = "Read when doing frontend work that needs a UI library (toasts, charts, drag and drop, command menu, OTP input, virtualization, state, styling, animation) and none is picked yet.";
+  pickUiLibraryAutoInstruction = "When loaded automatically during a frontend task, ignore the Initial Response section: do not greet; pick the library and continue the task.";
   emilSkills = {
-    pick-ui-library = emilkowalski-skills + "/skills/pick-ui-library";
+    pick-ui-library = pkgs.runCommand "emilkowalski-skill-pick-ui-library" { } ''
+      cp -R ${emilkowalski-skills + "/skills/pick-ui-library"} "$out"
+      chmod -R u+w "$out"
+      sed -i \
+        -e '/^disable-model-invocation:/d' \
+        -e ${lib.escapeShellArg "s|^description:.*|description: ${pickUiLibraryDescription}|"} \
+        "$out/SKILL.md"
+      printf '\n%s\n' ${lib.escapeShellArg pickUiLibraryAutoInstruction} >> "$out/SKILL.md"
+    '';
   };
   patchedMattSkills = mattSkills // {
     # ponytail: v1.2 grilling uses frontier rounds; keep local stop patch disabled.
