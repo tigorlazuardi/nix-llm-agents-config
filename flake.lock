@@ -1,5 +1,21 @@
 {
   "nodes": {
+    "emilkowalski-skills": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1794493327,
+        "narHash": "sha256-p8ZITQR99clmNiHjpudCUkBdm++Ri0BkeV9hGuH6nL0=",
+        "owner": "emilkowalski",
+        "repo": "skills",
+        "rev": "f7ce8c02d6e3c8f0d980a44c57bcc41a40254349",
+        "type": "github"
+      },
+      "original": {
+        "owner": "emilkowalski",
+        "repo": "skills",
+        "type": "github"
+      }
+    },
     "home-manager": {
       "inputs": {
         "nixpkgs": [
@@ -111,6 +127,7 @@
     },
     "root": {
       "inputs": {
+        "emilkowalski-skills": "emilkowalski-skills",
         "home-manager": "home-manager",
         "mattpocock-skills": "mattpocock-skills",
         "nixpkgs-unstable": "nixpkgs-unstable",

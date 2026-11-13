@@ -1,5 +1,6 @@
 {
   mattpocock-skills,
+  emilkowalski-skills,
   nixpkgs-unstable,
   pi-messaging-relay,
 }:
@@ -60,6 +61,9 @@ let
     to-questionnaire = mattpocock-skills + "/skills/productivity/to-questionnaire";
     wait-what = mattpocock-skills + "/skills/productivity/wait-what";
     writing-for-agents = mattpocock-skills + "/skills/productivity/writing-for-agents";
+  };
+  emilSkills = {
+    pick-ui-library = emilkowalski-skills + "/skills/pick-ui-library";
   };
   patchedMattSkills = mattSkills // {
     # ponytail: v1.2 grilling uses frontier rounds; keep local stop patch disabled.
@@ -1107,7 +1111,7 @@ in
           project-mcp-json = lib.mkDefault ../config/extensions/project-mcp-json;
         })
       ];
-      skills = lib.mapAttrs (_: lib.mkDefault) (repoSkills // patchedMattSkills);
+      skills = lib.mapAttrs (_: lib.mkDefault) (repoSkills // patchedMattSkills // emilSkills);
     };
 
     home.file = lib.mkIf cfg.enable {

@@ -902,6 +902,9 @@ in
       default.config.programs.pi-coding-agent.skills.writing-for-agents + "/SKILL.md"
     );
     assert builtins.pathExists (default.config.programs.pi-coding-agent.skills.wait-what + "/SKILL.md");
+    assert builtins.pathExists (
+      default.config.programs.pi-coding-agent.skills.pick-ui-library + "/SKILL.md"
+    );
     assert builtins.pathExists (default.config.programs.pi-coding-agent.skills.wizard + "/SKILL.md");
     assert builtins.pathExists (
       default.config.programs.pi-coding-agent.skills.to-questionnaire + "/SKILL.md"

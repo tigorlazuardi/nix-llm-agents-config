@@ -8,6 +8,11 @@
       flake = false;
     };
 
+    emilkowalski-skills = {
+      url = "github:emilkowalski/skills";
+      flake = false;
+    };
+
     pi-messaging-relay.url = "github:tigorlazuardi/pi-messaging-relay";
 
     home-manager = {
@@ -21,6 +26,7 @@
       nixpkgs-unstable,
       home-manager,
       mattpocock-skills,
+      emilkowalski-skills,
       pi-messaging-relay,
       ...
     }:
@@ -39,7 +45,12 @@
         );
       piOverlay = import ./packages/pi-coding-agent-overlay.nix;
       piModule = import ./modules/pi-coding-agent.nix {
-        inherit mattpocock-skills nixpkgs-unstable pi-messaging-relay;
+        inherit
+          mattpocock-skills
+          emilkowalski-skills
+          nixpkgs-unstable
+          pi-messaging-relay
+          ;
       };
     in
     {
