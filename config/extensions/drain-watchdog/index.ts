@@ -190,6 +190,10 @@ export const INITIAL_STATE: DrainState = {
 export const SYNC_REMINDER =
 	"Keep ticket status in sync with the source tracker: move each ticket there when you call watchdog_complete / watchdog_handoff, and call watchdog_sync when the source changes unexpectedly (new, cancelled or re-blocked tickets).";
 
+/** Enforced by prompt only (no hook): a spawn without `agent` falls to the default model + high thinking and burns quota. ponytail: prompt-level; add a tool_call block if models keep ignoring it. */
+export const ROLE_MODEL_RULE =
+	"Every child spawn (subagent spawn, resume, replacement) MUST set `agent` to the role that fits its job: `implementer` for implementation or fix rounds, `standards-reviewer` for the standards/quick review, `deep-reviewer` for the spec/deep review. Each role already carries its own model alias and thinking level, so never spawn without `agent`, never use the default/main model, and never override `model` or `thinking` by hand.";
+
 const TICKET_STATES: readonly TicketState[] = ["open", "done", "limbo"];
 
 /** Boundary validation of model-sent tickets; fails closed on any malformed entry. */
@@ -504,6 +508,7 @@ export function buildNudgeText(p: { target: string | null; pickable: number; che
 		`drain-watchdog: unattended run on ${target}; you are idle with ${p.pickable} pickable ticket(s) in the watchdog ticket tree. Do not ask the user — continue the drain flow you are running now. Work in parallel, not one ticket at a time: read the frontier fresh and, while slots are free (PARALLEL_WIDTH = ${p.maxParallel ?? MAX_LIVE_CHILDREN}; the watchdog hard-blocks a live child beyond that), start independent pickable tickets, each in its own worktree. All work merges into the target's integration/<slug> branch, so parallel tickets stay close to the same base and conflicts stay small.`,
 		`Do not implement a ticket yourself: stay source-read-only and run the supervise pipeline per ticket, as child agents. Fresh implementer in the ticket's worktree, then fresh standards-reviewer, then you run ${checkClause}, then fresh deep-reviewer (spec). A FAIL goes back to a fresh implementer with the findings pointer. The pipelines of different tickets overlap: when one ticket's child finishes, advance that ticket at once and keep the other tickets' implementers and reviewers running; never wait for one ticket's whole pipeline before starting the next ticket's.`,
 		"Ambiguous or product-question tickets, and low-tolerance work (auth/authz, secrets/credentials, DB migrations, public API contracts, money/billing, data deletion, irreversible operations), must leave the tree through watchdog_handoff (limbo, human review) instead of waiting; finished tickets go through watchdog_complete.",
+		ROLE_MODEL_RULE,
 		SYNC_REMINDER,
 		"When no pickable ticket is left and no child is running, finish any closing steps (merge, PR, cleanup), then call watchdog_done; do not open new work.",
 	].join("\n");
@@ -515,6 +520,7 @@ export function buildChildCheckText(p: { target: string | null; children: number
 	return [
 		`drain-watchdog: unattended run on ${target}; you have been idle for over ${CHILD_CHECK_IDLE_MS / 60_000} minutes with ${p.children} child session(s) running.`,
 		"Check the status of every running subagent now (subagent status tools or their herdr panes). Handle each: a finished child's result advances its ticket pipeline at once; a stuck, errored, or silent child gets a steer, a resume, or a fresh replacement (stay within PARALLEL_WIDTH); a healthy child needs nothing. Do not ask the user and do not implement tickets yourself. When every child is healthy and nothing else is actionable, end your turn.",
+		ROLE_MODEL_RULE,
 		SYNC_REMINDER,
 	].join("\n");
 }

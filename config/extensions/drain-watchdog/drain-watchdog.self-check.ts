@@ -47,6 +47,7 @@ import {
 	transition,
 
 	buildNudgeText,
+	ROLE_MODEL_RULE,
 	buildChildCheckText,
 	CHILD_CHECK_IDLE_MS,
 	isSubagentCompletionNotice,
@@ -684,6 +685,9 @@ assert(nudge.includes("watchdog_handoff") && nudge.includes("watchdog_complete")
 assert(nudge.includes(SYNC_REMINDER), "nudge carries the keep-in-sync reminder");
 assert(!nudge.includes("ready-for-human"), "nudge no longer names tracker labels");
 assert(nudge.includes("in parallel") && nudge.includes("integration/<slug>"), "nudge pushes parallel worktrees on the integration branch");
+assert(buildNudgeText({ target: "T", pickable: 1 }).includes(ROLE_MODEL_RULE), "nudge/kickoff enforces role-agent spawns");
+assert(buildChildCheckText({ target: "T", children: 1 }).includes(ROLE_MODEL_RULE), "child-check enforces role-agent spawns");
+assert(!buildNudgeText({ target: "T", pickable: 0 }).includes(ROLE_MODEL_RULE), "no spawn in the closing nudge");
 assert(buildNudgeText({ target: null, pickable: 1 }).includes("the accepted tickets"));
 assert(buildNudgeText({ target: "T", pickable: 1, checkCommand: "make test" }).includes("`make test` exactly as written"), "nudge carries the operator checkCommand");
 assert(buildNudgeText({ target: "T", pickable: 1 }).includes("the exact checkCommand") && !buildNudgeText({ target: "T", pickable: 1 }).includes("exactly as written"), "no checkCommand: neutral wording");
