@@ -417,7 +417,7 @@ export function watchdogToolGate(kind: WatchdogToolKind, childSession: boolean, 
 // #30's factory consumes these; all decisions stay pure and asserted here so the
 // ONE test seam of #27 holds. No pi API types appear above the factory below.
 
-export type WatchdogSubcommand = { sub: "prep" | "pause" | "resume" | "off" | "status"; ref: string | null };
+export type WatchdogSubcommand = { sub: "prep" | "pause" | "resume" | "off" | "status" | "tree"; ref: string | null };
 
 /**
  * Argument grammar of `/watchdog`: `resume` / `off` / `status` are control
@@ -430,6 +430,7 @@ export function parseWatchdogSubcommand(args: string): WatchdogSubcommand {
 	if (first === "resume") return { sub: "resume", ref: null };
 	if (first === "off") return { sub: "off", ref: null };
 	if (first === "status") return { sub: "status", ref: null };
+	if (first === "tree") return { sub: "tree", ref: null };
 	if (first === "") return { sub: "prep", ref: null };
 	if (first === "on") {
 		const rest = trimmed.slice(first.length).trim();
@@ -539,6 +540,8 @@ export type WidgetView = {
 	idleMs: number;
 	/** Time until the watchdog may nudge (idle grace and cooldown); 0 = due at the next tick. */
 	nudgeInMs?: number;
+	/** Time since the run armed (persisted across restarts); undefined = unknown/not running. */
+	runningMs?: number;
 	pausedReason: string | null;
 	backoffKind: "transient" | "quota" | null;
 	backoffRung: number;
@@ -550,6 +553,58 @@ const paint = (color: keyof typeof ANSI, text: string): string => `${ANSI[color]
 function clock(ms: number): string {
 	const total = Math.max(0, Math.floor(ms / 1000));
 	return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}`;
+}
+
+/** Elapsed time for operators: `45s`, `12m 03s`, `2h 05m`. */
+export function formatDuration(ms: number): string {
+	const total = Math.max(0, Math.floor(ms / 1000));
+	const h = Math.floor(total / 3600);
+	const m = Math.floor((total % 3600) / 60);
+	const sec = total % 60;
+	if (h > 0) return `${h}h ${String(m).padStart(2, "0")}m`;
+	if (m > 0) return `${m}m ${String(sec).padStart(2, "0")}s`;
+	return `${sec}s`;
+}
+
+/**
+ * ASCII dependency tree of the ticket list: blockers are parents, the tickets they
+ * block are children. A ticket with several blockers hangs under its first known
+ * blocker and lists the rest inline. Pure; no LLM, no tracker. Cycles and tickets
+ * blocked only by unknown ids are still shown (never silently dropped).
+ * ponytail: plain text, no colour; add ANSI when notify renders it.
+ */
+export function renderTicketTree(tickets: readonly Ticket[]): string {
+	if (tickets.length === 0) return "(no tickets declared)";
+	const byId = new Map(tickets.map((t) => [t.id, t]));
+	const pickable = new Set(pickableIds(tickets));
+	const children = new Map<string, Ticket[]>();
+	const roots: Ticket[] = [];
+	for (const t of tickets) {
+		const parent = t.blockedBy.find((b) => b !== t.id && byId.has(b));
+		if (parent === undefined) roots.push(t);
+		else children.set(parent, [...(children.get(parent) ?? []), t]);
+	}
+	const seen = new Set<string>();
+	const label = (t: Ticket): string => {
+		const mark = t.state === "done" ? "\u2713" : t.state === "limbo" ? "!" : pickable.has(t.id) ? "\u25cf" : "\u25cb";
+		const parent = t.blockedBy.find((b) => b !== t.id && byId.has(b));
+		const extra = t.blockedBy.filter((b) => b !== parent).map((b) => (byId.get(b) === undefined ? `${b}?` : b));
+		const notes = [t.state === "limbo" && t.reason ? `limbo: ${t.reason}` : null, extra.length > 0 ? `also blocked by ${extra.join(", ")}` : null].filter((x) => x !== null);
+		return `${mark} ${t.id}${notes.length > 0 ? ` (${notes.join("; ")})` : ""}`;
+	};
+	const lines: string[] = [];
+	const walk = (t: Ticket, prefix: string, last: boolean, top: boolean) => {
+		seen.add(t.id);
+		lines.push(top ? label(t) : `${prefix}${last ? "\u2514\u2500 " : "\u251c\u2500 "}${label(t)}`);
+		const kids = (children.get(t.id) ?? []).filter((k) => !seen.has(k.id));
+		const next = top ? "" : `${prefix}${last ? "   " : "\u2502  "}`;
+		kids.forEach((k, i) => walk(k, next, i === kids.length - 1, false));
+	};
+	for (const r of roots) walk(r, "", true, true);
+	for (const t of tickets) if (!seen.has(t.id)) walk(t, "", true, true); // cycle members
+	const c = ticketCounts(tickets);
+	lines.push("", `\u2713 done ${c.done} \u00b7 \u25cf pickable ${pickable.size} \u00b7 \u25cb blocked ${c.leftover.length} \u00b7 ! limbo ${c.limbo} \u00b7 total ${tickets.length}`);
+	return lines.join("\n");
 }
 
 /**
@@ -580,7 +635,7 @@ export function watchdogWidgetLines(v: WidgetView): string[] | null {
 		default:
 			[head, color, hint] = [v.prep === "discover" ? "\u2026 PREP: memilih target" : "\u2026 PREP: bukti kesiapan", "cyan", "jawab pertanyaan model \u00b7 /watchdog off batal"];
 	}
-	const ref = v.target === null ? "(target belum dipilih)" : v.target;
+	const ref = (v.target === null ? "(target belum dipilih)" : v.target) + (v.runningMs === undefined ? "" : ` \u00b7 jalan ${formatDuration(v.runningMs)}`);
 	if (v.phase === "paused") body = `${v.pausedReason ?? "alasan tidak tercatat"}`;
 	else if (v.phase === "off" || v.phase === "done") body = `${v.pickable} pickable terakhir`;
 	else if (v.phase === "backoff") body = `error provider \u00b7 ${v.pickable} pickable \u00b7 ${v.children} jalan \u00b7 probe otomatis, percobaan ke-${v.backoffRung + 1}`;
@@ -595,6 +650,7 @@ export function watchdogWidgetLines(v: WidgetView): string[] | null {
 
 const WATCHDOG_SUBCOMMANDS: readonly { name: string; description: string }[] = [
 	{ name: "status", description: "Tampilkan fase, target, nudge, dan antrean" },
+	{ name: "tree", description: "Gambar pohon ticket (ASCII, tanpa LLM)" },
 	{ name: "pause", description: "Pause run yang sedang jalan (stop nudge; tidak membatalkan turn)" },
 	{ name: "resume", description: "Lanjutkan run yang PAUSED" },
 	{ name: "off", description: "Matikan watchdog dan batalkan PREP" },
@@ -709,6 +765,20 @@ export function restoreRunTarget(entries: readonly unknown[]): string | null {
 		if (typeof entry.data !== "object" || entry.data === null) continue;
 		const value = (entry.data as { runTarget?: unknown }).runTarget;
 		return typeof value === "string" && value.trim() !== "" ? value : null;
+	}
+	return null;
+}
+
+/** Arm time (epoch ms) rides the state entry like runTarget so uptime survives a restart; invalid -> null. */
+export function restoreRunStartedMs(entries: readonly unknown[]): number | null {
+	for (let i = entries.length - 1; i >= 0; i--) {
+		const e = entries[i];
+		if (typeof e !== "object" || e === null) continue;
+		const entry = e as { type?: unknown; customType?: unknown; data?: unknown };
+		if (entry.type !== "custom" || entry.customType !== STATE_ENTRY_TYPE) continue;
+		if (typeof entry.data !== "object" || entry.data === null) continue;
+		const value = (entry.data as { runStartedMs?: unknown }).runStartedMs;
+		return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : null;
 	}
 	return null;
 }
@@ -991,6 +1061,7 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 	let idleSinceMs = Date.now();
 	let progressSinceMs = idleSinceMs;
 	let runTarget: string | null = null;
+	let runStartedMs: number | null = null; // arm time; persisted so uptime survives a restart.
 	// Optional operator-declared checkCommand: PREP proof -> run; rides the state entry.
 	let runCheck: string | null = null;
 	let prepCheck: string | null = null;
@@ -1048,10 +1119,10 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 	const persist = () => {
 		// runTarget rides along so a restored run keeps its target label.
 		// restoreDrainState ignores the extra key; restoreRunTarget reads it back.
-		pi.appendEntry(STATE_ENTRY_TYPE, { ...state, runTarget, runCheck });
+		pi.appendEntry(STATE_ENTRY_TYPE, { ...state, runTarget, runCheck, runStartedMs });
 		if (latestCtx) {
 			try {
-				writeStateFile(latestCtx.cwd, { ...state, runTarget, runCheck });
+				writeStateFile(latestCtx.cwd, { ...state, runTarget, runCheck, runStartedMs });
 			} catch (error) {
 				notify(`drain-watchdog: cannot write ${stateFilePath(latestCtx.cwd)} (${error instanceof Error ? error.message : String(error)}); the run will not survive a restart`, "warning");
 			}
@@ -1114,6 +1185,7 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 				nudgeCount: state.nudgeCount,
 				noProgressStreak: state.noProgressStreak,
 				idleMs: Date.now() - idleSinceMs,
+				runningMs: runStartedMs === null ? undefined : Date.now() - runStartedMs,
 				nudgeInMs: Math.max(0, IDLE_GRACE_MS - (Date.now() - idleSinceMs), state.nextAllowedAt - Date.now()),
 				pausedReason: state.pausedReason,
 				backoffKind: state.backoffKind,
@@ -1162,6 +1234,7 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 		state = { ...t.state, tickets };
 		runTarget = target;
 		runCheck = check;
+		runStartedMs = Date.now();
 		idleSinceMs = progressSinceMs = Date.now();
 		childCount = 0;
 		reservedSpawns.clear();
@@ -1205,9 +1278,10 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 			case "done":
 				clearTimers();
 				audit("done", { target: runTarget, report: doneReport(state.tickets) });
-				notify(`drain-watchdog ${doneReport(state.tickets)}`, "info");
+				notify(`drain-watchdog ${doneReport(state.tickets)}${runStartedMs === null ? "" : ` (ran ${formatDuration(Date.now() - runStartedMs)})`}`, "info");
 				runTarget = null;
 				runCheck = null;
+				runStartedMs = null;
 				break;
 			case "probe":
 				audit("probe-scheduled", { kind: state.backoffKind, rung: state.backoffRung, delayMs: t.action.delayMs });
@@ -1269,6 +1343,7 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 		const bits = [`phase ${state.phase}`];
 		if (state.pausedReason !== null) bits.push(`reason: ${state.pausedReason}`);
 		if (runTarget !== null) bits.push(`run target ${runTarget}`);
+		if (runStartedMs !== null) bits.push(`running ${formatDuration(Date.now() - runStartedMs)}`);
 		if (state.phase === "backoff") bits.push(`backoff ${state.backoffKind ?? "transient"} rung ${state.backoffRung + 1}`);
 		if (isActivePhase(state.phase)) {
 			bits.push(`nudges ${state.nudgeCount}`, `no-progress ${state.noProgressStreak}`, `pickable ${pickableIds(state.tickets).length}`, `children ${childCount}`);
@@ -1321,6 +1396,7 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 		discovering = false;
 		runTarget = null;
 		runCheck = null;
+		runStartedMs = null;
 
 		// The extension never reads a tracker: the model finds the target and its
 		// ticket tree and hands both back through watchdog_target.
@@ -1336,6 +1412,10 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 		switch (cmd.sub) {
 			case "status":
 				notifyStatus();
+				return;
+			case "tree":
+				// Pure local render: no LLM turn, no tracker call.
+				notify(`drain-watchdog tickets${runTarget === null ? "" : ` (${runTarget})`}\n${renderTicketTree(prepTarget !== null ? prepTickets : state.tickets)}`);
 				return;
 			case "pause": {
 				if (state.phase !== "armed" && state.phase !== "backoff") {
@@ -1354,6 +1434,7 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 				}
 				runTarget = null;
 				runCheck = null;
+				runStartedMs = null;
 				discovering = false;
 				prepTarget = null;
 				prepTickets = [];
@@ -1608,7 +1689,7 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 	// --- Event wiring ------------------------------------------------------------
 
 	pi.registerCommand("watchdog", {
-		description: "Unattended drain watchdog (PREP -> ARMED; also: resume | off | status)",
+		description: "Unattended drain watchdog (PREP -> ARMED; also: resume | off | status | tree)",
 		getArgumentCompletions: watchdogCompletions,
 		handler: async (args, ctx) => {
 			latestCtx = ctx;
@@ -1641,6 +1722,7 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 		// #38 C: keep the run target across a restart (targeted state read).
 		runTarget = restoreRunTarget(entries);
 		runCheck = restoreRunCheck(entries);
+		runStartedMs = restoreRunStartedMs(entries);
 		const activate = () => {
 			if (state.phase === "armed") {
 				audit("restored", { phase: state.phase });

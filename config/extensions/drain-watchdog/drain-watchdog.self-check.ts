@@ -62,6 +62,9 @@ import {
 	restoreDrainState,
 	restoreRunTarget,
 	restoreRunCheck,
+	restoreRunStartedMs,
+	renderTicketTree,
+	formatDuration,
 	stateFilePath,
 
 // The default export is the #30 factory; imported separately so the named list
@@ -640,8 +643,34 @@ assert.equal(watchdogWidgetLines({ ...baseView, phase: "off", prep: null, target
 assert(plain(watchdogWidgetLines({ ...baseView, phase: "off", prep: "discover", target: null })).includes("memilih target"));
 assert(plain(watchdogWidgetLines({ ...baseView, phase: "off", prep: "proof" })).includes("bukti kesiapan"));
 
+assert.deepEqual(parseWatchdogSubcommand("tree"), { sub: "tree", ref: null });
+assert.equal(formatDuration(45_000), "45s");
+assert.equal(formatDuration(723_000), "12m 03s");
+assert.equal(formatDuration(7_500_000), "2h 05m");
+assert(plain(watchdogWidgetLines({ ...baseView, runningMs: 7_500_000 })).includes("#35 \u00b7 jalan 2h 05m"), "widget shows uptime");
+assert(!plain(watchdogWidgetLines(baseView)).includes("jalan 0") && !plain(watchdogWidgetLines(baseView)).includes("\u00b7 jalan"), "no uptime when unknown");
+assert.equal(restoreRunStartedMs([{ type: "custom", customType: "drain-watchdog-state", data: { runStartedMs: 1700000000000 } }]), 1700000000000);
+assert.equal(restoreRunStartedMs([{ type: "custom", customType: "drain-watchdog-state", data: { runStartedMs: "x" } }]), null);
+{
+	const tree = renderTicketTree([
+		{ id: "A", state: "done", blockedBy: [] },
+		{ id: "B", state: "open", blockedBy: ["A"] },
+		{ id: "C", state: "open", blockedBy: ["A", "B"] },
+		{ id: "D", state: "limbo", blockedBy: ["B"], reason: "ambiguous" },
+		{ id: "E", state: "open", blockedBy: ["X"] },
+		{ id: "F", state: "open", blockedBy: ["G"] },
+		{ id: "G", state: "open", blockedBy: ["F"] },
+	]);
+	assert(tree.startsWith("\u2713 A\n"), tree);
+	assert(tree.includes("\u251c\u2500 \u25cf B") && tree.includes("\u2502  \u2514\u2500 ! D (limbo: ambiguous)"), tree);
+	assert(tree.includes("\u2514\u2500 \u25cb C (also blocked by B)"), tree);
+	assert(tree.includes("\u25cb E (also blocked by X?)"), "unknown blocker is flagged, ticket still shown");
+	assert(tree.includes("F") && tree.includes("G"), "cycle members are not dropped");
+	assert(tree.includes("done 1") && tree.includes("total 7"), tree);
+	assert.equal(renderTicketTree([]), "(no tickets declared)");
+}
 assert.deepEqual(watchdogCompletions("sta")!.map((c) => c.value), ["status"]);
-assert.deepEqual(watchdogCompletions("")!.map((c) => c.value), ["status", "pause", "resume", "off", "on"]);
+assert.deepEqual(watchdogCompletions("")!.map((c) => c.value), ["status", "tree", "pause", "resume", "off", "on"]);
 assert.deepEqual(watchdogCompletions("o")!.map((c) => c.value), ["off", "on"]);
 assert.deepEqual(watchdogCompletions("RES")!.map((c) => c.value), ["resume"], "completion ignores case");
 assert.equal(watchdogCompletions("zzz"), null);
