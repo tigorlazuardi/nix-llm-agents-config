@@ -63,6 +63,9 @@ import {
 	restoreRunTarget,
 	restoreRunCheck,
 	restoreRunActiveMs,
+	restoreRunMaxParallel,
+	parseParallelOverride,
+	MAX_PARALLEL_OVERRIDE,
 	renderTicketTree,
 	formatDuration,
 	stateFilePath,
@@ -643,6 +646,17 @@ assert.equal(watchdogWidgetLines({ ...baseView, phase: "off", prep: null, target
 assert(plain(watchdogWidgetLines({ ...baseView, phase: "off", prep: "discover", target: null })).includes("memilih target"));
 assert(plain(watchdogWidgetLines({ ...baseView, phase: "off", prep: "proof" })).includes("bukti kesiapan"));
 
+assert.deepEqual(parseWatchdogSubcommand("parallel 6"), { sub: "parallel", ref: "6" });
+assert.deepEqual(parseWatchdogSubcommand("parallel"), { sub: "parallel", ref: null });
+assert.equal(parseParallelOverride("8"), 8);
+assert.equal(parseParallelOverride(" 6 "), 6);
+for (const bad of [null, "0", "-1", "abc", "2.5", "", String(MAX_PARALLEL_OVERRIDE + 1)]) assert.equal(parseParallelOverride(bad), null, `rejects ${bad}`);
+assert.equal(restoreRunMaxParallel([{ type: "custom", customType: "drain-watchdog-state", data: { runMaxParallel: 8 } }]), 8);
+assert.equal(restoreRunMaxParallel([{ type: "custom", customType: "drain-watchdog-state", data: { runMaxParallel: 99 } }]), null);
+assert.equal(restoreRunMaxParallel([{ type: "custom", customType: "drain-watchdog-state", data: { runMaxParallel: "6" } }]), null);
+// lowering below live children blocks new spawns only; raising frees slots at once
+assert.equal(spawnGate(true, 5, 0, 2).block, true, "cap 2 with 5 live: no new spawn (running ones untouched)");
+assert.equal(spawnGate(true, 5, 0, 8).block, false, "cap raised to 8: new spawn allowed");
 assert.deepEqual(parseWatchdogSubcommand("tree"), { sub: "tree", ref: null });
 assert.equal(formatDuration(45_000), "45s");
 assert.equal(formatDuration(723_000), "12m 03s");
@@ -670,7 +684,7 @@ assert.equal(restoreRunActiveMs([{ type: "custom", customType: "drain-watchdog-s
 	assert.equal(renderTicketTree([]), "(no tickets declared)");
 }
 assert.deepEqual(watchdogCompletions("sta")!.map((c) => c.value), ["status"]);
-assert.deepEqual(watchdogCompletions("")!.map((c) => c.value), ["status", "tree", "pause", "resume", "off", "on"]);
+assert.deepEqual(watchdogCompletions("")!.map((c) => c.value), ["status", "tree", "parallel", "pause", "resume", "off", "on"]);
 assert.deepEqual(watchdogCompletions("o")!.map((c) => c.value), ["off", "on"]);
 assert.deepEqual(watchdogCompletions("RES")!.map((c) => c.value), ["resume"], "completion ignores case");
 assert.equal(watchdogCompletions("zzz"), null);

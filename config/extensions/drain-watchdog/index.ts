@@ -417,7 +417,7 @@ export function watchdogToolGate(kind: WatchdogToolKind, childSession: boolean, 
 // #30's factory consumes these; all decisions stay pure and asserted here so the
 // ONE test seam of #27 holds. No pi API types appear above the factory below.
 
-export type WatchdogSubcommand = { sub: "prep" | "pause" | "resume" | "off" | "status" | "tree"; ref: string | null };
+export type WatchdogSubcommand = { sub: "prep" | "pause" | "resume" | "off" | "status" | "tree" | "parallel"; ref: string | null };
 
 /**
  * Argument grammar of `/watchdog`: `resume` / `off` / `status` are control
@@ -431,6 +431,10 @@ export function parseWatchdogSubcommand(args: string): WatchdogSubcommand {
 	if (first === "off") return { sub: "off", ref: null };
 	if (first === "status") return { sub: "status", ref: null };
 	if (first === "tree") return { sub: "tree", ref: null };
+	if (first === "parallel") {
+		const rest = trimmed.slice(first.length).trim();
+		return { sub: "parallel", ref: rest === "" ? null : rest };
+	}
 	if (first === "") return { sub: "prep", ref: null };
 	if (first === "on") {
 		const rest = trimmed.slice(first.length).trim();
@@ -472,6 +476,15 @@ export function readMaxLiveChildren(env: Record<string, string | undefined>): nu
 	if (!raw || !/^[0-9]+$/.test(raw)) return MAX_LIVE_CHILDREN;
 	const n = Number.parseInt(raw, 10);
 	return n > 0 ? n : MAX_LIVE_CHILDREN;
+}
+
+/** Operator override of the live-child cap (`/watchdog parallel <n>`): a whole number 1..MAX_PARALLEL_OVERRIDE, else null.
+ *  ponytail: ceiling fixed to 32 as a typo/RAM sanity guard; make configurable when a host needs more. */
+export const MAX_PARALLEL_OVERRIDE = 32;
+export function parseParallelOverride(raw: string | null): number | null {
+	if (raw === null || !/^[0-9]+$/.test(raw.trim())) return null;
+	const n = Number.parseInt(raw.trim(), 10);
+	return n >= 1 && n <= MAX_PARALLEL_OVERRIDE ? n : null;
 }
 
 /** Gate for a spawn tool call: `live` = confirmed children, `reserved` = calls admitted but not yet resulted. */
@@ -651,6 +664,7 @@ export function watchdogWidgetLines(v: WidgetView): string[] | null {
 const WATCHDOG_SUBCOMMANDS: readonly { name: string; description: string }[] = [
 	{ name: "status", description: "Tampilkan fase, target, nudge, dan antrean" },
 	{ name: "tree", description: "Gambar pohon ticket (ASCII, tanpa LLM)" },
+	{ name: "parallel", description: "Ubah batas child paralel run ini: parallel <n> (turun tidak menghentikan yang jalan)" },
 	{ name: "pause", description: "Pause run yang sedang jalan (stop nudge; tidak membatalkan turn)" },
 	{ name: "resume", description: "Lanjutkan run yang PAUSED" },
 	{ name: "off", description: "Matikan watchdog dan batalkan PREP" },
@@ -779,6 +793,20 @@ export function restoreRunActiveMs(entries: readonly unknown[]): number | null {
 		if (typeof entry.data !== "object" || entry.data === null) continue;
 		const value = (entry.data as { runActiveMs?: unknown }).runActiveMs;
 		return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null;
+	}
+	return null;
+}
+
+/** Operator override of the child cap rides the state entry like runTarget; invalid -> null (host default). */
+export function restoreRunMaxParallel(entries: readonly unknown[]): number | null {
+	for (let i = entries.length - 1; i >= 0; i--) {
+		const e = entries[i];
+		if (typeof e !== "object" || e === null) continue;
+		const entry = e as { type?: unknown; customType?: unknown; data?: unknown };
+		if (entry.type !== "custom" || entry.customType !== STATE_ENTRY_TYPE) continue;
+		if (typeof entry.data !== "object" || entry.data === null) continue;
+		const value = (entry.data as { runMaxParallel?: unknown }).runMaxParallel;
+		return typeof value === "number" && Number.isInteger(value) && value >= 1 && value <= MAX_PARALLEL_OVERRIDE ? value : null;
 	}
 	return null;
 }
@@ -1054,7 +1082,9 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 	let uiPromptDepth = 0;
 	let childCount = 0;
 	const reservedSpawns = new Set<string>();
-	const maxParallel = readMaxLiveChildren(process.env);
+	const hostMaxParallel = readMaxLiveChildren(process.env);
+	// Live cap for this run: host default until the operator overrides it (/watchdog parallel <n>).
+	let maxParallel = hostMaxParallel;
 	// Last assistant error of the current run; pi emits agent_end per retry attempt, so
 	// only agent_settled decides (the last attempt wins).
 	let lastRunError: string | null = null;
@@ -1131,10 +1161,10 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 	const persist = () => {
 		// runTarget rides along so a restored run keeps its target label.
 		// restoreDrainState ignores the extra key; restoreRunTarget reads it back.
-		pi.appendEntry(STATE_ENTRY_TYPE, { ...state, runTarget, runCheck, runActiveMs: runningMsNow() ?? null });
+		pi.appendEntry(STATE_ENTRY_TYPE, { ...state, runTarget, runCheck, runActiveMs: runningMsNow() ?? null, runMaxParallel: maxParallel === hostMaxParallel ? null : maxParallel });
 		if (latestCtx) {
 			try {
-				writeStateFile(latestCtx.cwd, { ...state, runTarget, runCheck, runActiveMs: runningMsNow() ?? null });
+				writeStateFile(latestCtx.cwd, { ...state, runTarget, runCheck, runActiveMs: runningMsNow() ?? null, runMaxParallel: maxParallel === hostMaxParallel ? null : maxParallel });
 			} catch (error) {
 				notify(`drain-watchdog: cannot write ${stateFilePath(latestCtx.cwd)} (${error instanceof Error ? error.message : String(error)}); the run will not survive a restart`, "warning");
 			}
@@ -1248,6 +1278,7 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 		runCheck = check;
 		runActiveMs = 0;
 		activeSinceMs = Date.now();
+		maxParallel = hostMaxParallel;
 		idleSinceMs = progressSinceMs = Date.now();
 		childCount = 0;
 		reservedSpawns.clear();
@@ -1356,6 +1387,7 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 		const bits = [`phase ${state.phase}`];
 		if (state.pausedReason !== null) bits.push(`reason: ${state.pausedReason}`);
 		if (runTarget !== null) bits.push(`run target ${runTarget}`);
+		if (state.phase !== "off") bits.push(`parallel ${maxParallel}${maxParallel === hostMaxParallel ? "" : ` (override; host default ${hostMaxParallel})`}`);
 		if (runningMsNow() !== undefined) bits.push(`running ${formatDuration(runningMsNow()!)}`);
 		if (state.phase === "backoff") bits.push(`backoff ${state.backoffKind ?? "transient"} rung ${state.backoffRung + 1}`);
 		if (isActivePhase(state.phase)) {
@@ -1411,6 +1443,7 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 		runCheck = null;
 		runActiveMs = null;
 		activeSinceMs = null;
+		maxParallel = hostMaxParallel;
 
 		// The extension never reads a tracker: the model finds the target and its
 		// ticket tree and hands both back through watchdog_target.
@@ -1427,6 +1460,32 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 			case "status":
 				notifyStatus();
 				return;
+			case "parallel": {
+				if (state.phase === "off" || state.phase === "done") {
+					notify(`drain-watchdog: no active run (phase ${state.phase}); parallel applies to a running watchdog`, "warning");
+					return;
+				}
+				if (cmd.ref === null) {
+					notify(`drain-watchdog: parallel ${maxParallel} (host default ${hostMaxParallel}, live children ${childCount})`);
+					return;
+				}
+				const n = parseParallelOverride(cmd.ref);
+				if (n === null) {
+					notify(`drain-watchdog: parallel needs a whole number 1-${MAX_PARALLEL_OVERRIDE}, got ${JSON.stringify(cmd.ref)}`, "error");
+					return;
+				}
+				const before = maxParallel;
+				maxParallel = n;
+				persist();
+				audit("parallel-set", { from: before, to: n, children: childCount });
+				// Lowering never stops running children: spawnGate only blocks NEW spawns until live drops below the cap.
+				notify(
+					n < childCount
+						? `drain-watchdog: parallel ${before} -> ${n}. ${childCount} children keep running; no new spawn until fewer than ${n} are live.`
+						: `drain-watchdog: parallel ${before} -> ${n}${n > before ? "; the next nudge tells the model about the extra slots" : ""}.`,
+				);
+				return;
+			}
 			case "tree":
 				// Pure local render: no LLM turn, no tracker call.
 				notify(`drain-watchdog tickets${runTarget === null ? "" : ` (${runTarget})`}\n${renderTicketTree(prepTarget !== null ? prepTickets : state.tickets)}`);
@@ -1449,7 +1508,8 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 				runTarget = null;
 				runCheck = null;
 				runActiveMs = null;
-		activeSinceMs = null;
+				activeSinceMs = null;
+				maxParallel = hostMaxParallel;
 				discovering = false;
 				prepTarget = null;
 				prepTickets = [];
@@ -1704,7 +1764,7 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 	// --- Event wiring ------------------------------------------------------------
 
 	pi.registerCommand("watchdog", {
-		description: "Unattended drain watchdog (PREP -> ARMED; also: resume | off | status | tree)",
+		description: "Unattended drain watchdog (PREP -> ARMED; also: resume | off | status | tree | parallel <n>)",
 		getArgumentCompletions: watchdogCompletions,
 		handler: async (args, ctx) => {
 			latestCtx = ctx;
@@ -1737,6 +1797,7 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 		// #38 C: keep the run target across a restart (targeted state read).
 		runTarget = restoreRunTarget(entries);
 		runCheck = restoreRunCheck(entries);
+		maxParallel = restoreRunMaxParallel(entries) ?? hostMaxParallel;
 		runActiveMs = restoreRunActiveMs(entries); // downtime is not counted; the ARMED segment restarts in activate()
 		const activate = () => {
 			if (state.phase === "armed") {
