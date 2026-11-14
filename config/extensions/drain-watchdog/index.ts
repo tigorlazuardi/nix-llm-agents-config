@@ -769,16 +769,16 @@ export function restoreRunTarget(entries: readonly unknown[]): string | null {
 	return null;
 }
 
-/** Arm time (epoch ms) rides the state entry like runTarget so uptime survives a restart; invalid -> null. */
-export function restoreRunStartedMs(entries: readonly unknown[]): number | null {
+/** Active run time (ms, ARMED phase only) rides the state entry like runTarget so it survives a restart; invalid -> null. */
+export function restoreRunActiveMs(entries: readonly unknown[]): number | null {
 	for (let i = entries.length - 1; i >= 0; i--) {
 		const e = entries[i];
 		if (typeof e !== "object" || e === null) continue;
 		const entry = e as { type?: unknown; customType?: unknown; data?: unknown };
 		if (entry.type !== "custom" || entry.customType !== STATE_ENTRY_TYPE) continue;
 		if (typeof entry.data !== "object" || entry.data === null) continue;
-		const value = (entry.data as { runStartedMs?: unknown }).runStartedMs;
-		return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : null;
+		const value = (entry.data as { runActiveMs?: unknown }).runActiveMs;
+		return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null;
 	}
 	return null;
 }
@@ -1061,7 +1061,19 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 	let idleSinceMs = Date.now();
 	let progressSinceMs = idleSinceMs;
 	let runTarget: string | null = null;
-	let runStartedMs: number | null = null; // arm time; persisted so uptime survives a restart.
+	// Active run time: only the ARMED phase counts (paused, backoff, downtime do not). null = no run.
+	let runActiveMs: number | null = null;
+	let activeSinceMs: number | null = null; // start of the current ARMED segment
+	const runningMsNow = (): number | undefined => (runActiveMs === null ? undefined : runActiveMs + (activeSinceMs === null ? 0 : Date.now() - activeSinceMs));
+	/** Phase edge bookkeeping for the active clock; call after every phase change. */
+	const syncActiveClock = (from: DrainPhase, to: DrainPhase) => {
+		if (runActiveMs === null || from === to) return;
+		if (from === "armed" && activeSinceMs !== null) {
+			runActiveMs += Date.now() - activeSinceMs;
+			activeSinceMs = null;
+		}
+		if (to === "armed") activeSinceMs = Date.now();
+	};
 	// Optional operator-declared checkCommand: PREP proof -> run; rides the state entry.
 	let runCheck: string | null = null;
 	let prepCheck: string | null = null;
@@ -1119,10 +1131,10 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 	const persist = () => {
 		// runTarget rides along so a restored run keeps its target label.
 		// restoreDrainState ignores the extra key; restoreRunTarget reads it back.
-		pi.appendEntry(STATE_ENTRY_TYPE, { ...state, runTarget, runCheck, runStartedMs });
+		pi.appendEntry(STATE_ENTRY_TYPE, { ...state, runTarget, runCheck, runActiveMs: runningMsNow() ?? null });
 		if (latestCtx) {
 			try {
-				writeStateFile(latestCtx.cwd, { ...state, runTarget, runCheck, runStartedMs });
+				writeStateFile(latestCtx.cwd, { ...state, runTarget, runCheck, runActiveMs: runningMsNow() ?? null });
 			} catch (error) {
 				notify(`drain-watchdog: cannot write ${stateFilePath(latestCtx.cwd)} (${error instanceof Error ? error.message : String(error)}); the run will not survive a restart`, "warning");
 			}
@@ -1185,7 +1197,7 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 				nudgeCount: state.nudgeCount,
 				noProgressStreak: state.noProgressStreak,
 				idleMs: Date.now() - idleSinceMs,
-				runningMs: runStartedMs === null ? undefined : Date.now() - runStartedMs,
+				runningMs: runningMsNow(),
 				nudgeInMs: Math.max(0, IDLE_GRACE_MS - (Date.now() - idleSinceMs), state.nextAllowedAt - Date.now()),
 				pausedReason: state.pausedReason,
 				backoffKind: state.backoffKind,
@@ -1234,7 +1246,8 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 		state = { ...t.state, tickets };
 		runTarget = target;
 		runCheck = check;
-		runStartedMs = Date.now();
+		runActiveMs = 0;
+		activeSinceMs = Date.now();
 		idleSinceMs = progressSinceMs = Date.now();
 		childCount = 0;
 		reservedSpawns.clear();
@@ -1248,6 +1261,7 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 	const apply = (t: DrainTransition, source: string) => {
 		const previous = state;
 		state = t.state;
+		syncActiveClock(previous.phase, state.phase);
 		if (state !== previous) persist();
 		if (state.phase !== "backoff") clearProbeTimer(); // probeOk/leaving BACKOFF leaves no stale probe.
 		// L1: resume/off/restored-paused change phase but
@@ -1278,10 +1292,9 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 			case "done":
 				clearTimers();
 				audit("done", { target: runTarget, report: doneReport(state.tickets) });
-				notify(`drain-watchdog ${doneReport(state.tickets)}${runStartedMs === null ? "" : ` (ran ${formatDuration(Date.now() - runStartedMs)})`}`, "info");
+				notify(`drain-watchdog ${doneReport(state.tickets)}${runningMsNow() === undefined ? "" : ` (ran ${formatDuration(runningMsNow()!)})`}`, "info");
 				runTarget = null;
-				runCheck = null;
-				runStartedMs = null;
+				runCheck = null; // active time stays so the DONE widget shows the final duration until /watchdog off.
 				break;
 			case "probe":
 				audit("probe-scheduled", { kind: state.backoffKind, rung: state.backoffRung, delayMs: t.action.delayMs });
@@ -1343,7 +1356,7 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 		const bits = [`phase ${state.phase}`];
 		if (state.pausedReason !== null) bits.push(`reason: ${state.pausedReason}`);
 		if (runTarget !== null) bits.push(`run target ${runTarget}`);
-		if (runStartedMs !== null) bits.push(`running ${formatDuration(Date.now() - runStartedMs)}`);
+		if (runningMsNow() !== undefined) bits.push(`running ${formatDuration(runningMsNow()!)}`);
 		if (state.phase === "backoff") bits.push(`backoff ${state.backoffKind ?? "transient"} rung ${state.backoffRung + 1}`);
 		if (isActivePhase(state.phase)) {
 			bits.push(`nudges ${state.nudgeCount}`, `no-progress ${state.noProgressStreak}`, `pickable ${pickableIds(state.tickets).length}`, `children ${childCount}`);
@@ -1396,7 +1409,8 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 		discovering = false;
 		runTarget = null;
 		runCheck = null;
-		runStartedMs = null;
+		runActiveMs = null;
+		activeSinceMs = null;
 
 		// The extension never reads a tracker: the model finds the target and its
 		// ticket tree and hands both back through watchdog_target.
@@ -1434,7 +1448,8 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 				}
 				runTarget = null;
 				runCheck = null;
-				runStartedMs = null;
+				runActiveMs = null;
+		activeSinceMs = null;
 				discovering = false;
 				prepTarget = null;
 				prepTickets = [];
@@ -1722,9 +1737,10 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 		// #38 C: keep the run target across a restart (targeted state read).
 		runTarget = restoreRunTarget(entries);
 		runCheck = restoreRunCheck(entries);
-		runStartedMs = restoreRunStartedMs(entries);
+		runActiveMs = restoreRunActiveMs(entries); // downtime is not counted; the ARMED segment restarts in activate()
 		const activate = () => {
 			if (state.phase === "armed") {
+				if (runActiveMs !== null) activeSinceMs = Date.now();
 				audit("restored", { phase: state.phase });
 				startLoop();
 				refreshWidget();

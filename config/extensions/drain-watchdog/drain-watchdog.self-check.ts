@@ -62,7 +62,7 @@ import {
 	restoreDrainState,
 	restoreRunTarget,
 	restoreRunCheck,
-	restoreRunStartedMs,
+	restoreRunActiveMs,
 	renderTicketTree,
 	formatDuration,
 	stateFilePath,
@@ -649,8 +649,8 @@ assert.equal(formatDuration(723_000), "12m 03s");
 assert.equal(formatDuration(7_500_000), "2h 05m");
 assert(plain(watchdogWidgetLines({ ...baseView, runningMs: 7_500_000 })).includes("#35 \u00b7 jalan 2h 05m"), "widget shows uptime");
 assert(!plain(watchdogWidgetLines(baseView)).includes("jalan 0") && !plain(watchdogWidgetLines(baseView)).includes("\u00b7 jalan"), "no uptime when unknown");
-assert.equal(restoreRunStartedMs([{ type: "custom", customType: "drain-watchdog-state", data: { runStartedMs: 1700000000000 } }]), 1700000000000);
-assert.equal(restoreRunStartedMs([{ type: "custom", customType: "drain-watchdog-state", data: { runStartedMs: "x" } }]), null);
+assert.equal(restoreRunActiveMs([{ type: "custom", customType: "drain-watchdog-state", data: { runActiveMs: 90000 } }]), 90000);
+assert.equal(restoreRunActiveMs([{ type: "custom", customType: "drain-watchdog-state", data: { runActiveMs: "x" } }]), null);
 {
 	const tree = renderTicketTree([
 		{ id: "A", state: "done", blockedBy: [] },
