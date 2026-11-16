@@ -586,9 +586,9 @@ export function formatDuration(ms: number): string {
  * block are children. A ticket with several blockers hangs under its first known
  * blocker and lists the rest inline. Pure; no LLM, no tracker. Cycles and tickets
  * blocked only by unknown ids are still shown (never silently dropped).
- * ponytail: plain text, no colour; add ANSI when notify renders it.
+ * `color`: done lines green, limbo lines yellow (ANSI; off by default so tests and plain callers get text).
  */
-export function renderTicketTree(tickets: readonly Ticket[]): string {
+export function renderTicketTree(tickets: readonly Ticket[], color = false): string {
 	if (tickets.length === 0) return "(no tickets declared)";
 	const byId = new Map(tickets.map((t) => [t.id, t]));
 	const pickable = new Set(pickableIds(tickets));
@@ -605,7 +605,8 @@ export function renderTicketTree(tickets: readonly Ticket[]): string {
 		const parent = t.blockedBy.find((b) => b !== t.id && byId.has(b));
 		const extra = t.blockedBy.filter((b) => b !== parent).map((b) => (byId.get(b) === undefined ? `${b}?` : b));
 		const notes = [t.state === "limbo" && t.reason ? `limbo: ${t.reason}` : null, extra.length > 0 ? `also blocked by ${extra.join(", ")}` : null].filter((x) => x !== null);
-		return `${mark} ${t.id}${notes.length > 0 ? ` (${notes.join("; ")})` : ""}`;
+		const text = `${mark} ${t.id}${notes.length > 0 ? ` (${notes.join("; ")})` : ""}`;
+		return color && t.state === "done" ? paint("green", text) : color && t.state === "limbo" ? paint("yellow", text) : text;
 	};
 	const lines: string[] = [];
 	const walk = (t: Ticket, prefix: string, last: boolean, top: boolean) => {
@@ -1506,7 +1507,7 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 			}
 			case "tree":
 				// Pure local render: no LLM turn, no tracker call.
-				notify(`drain-watchdog tickets${runTarget === null ? "" : ` (${runTarget})`}\n${renderTicketTree(prepTarget !== null ? prepTickets : state.tickets)}`);
+				notify(`drain-watchdog tickets${runTarget === null ? "" : ` (${runTarget})`}\n${renderTicketTree(prepTarget !== null ? prepTickets : state.tickets, true)}`);
 				return;
 			case "pause": {
 				if (state.phase !== "armed" && state.phase !== "backoff") {

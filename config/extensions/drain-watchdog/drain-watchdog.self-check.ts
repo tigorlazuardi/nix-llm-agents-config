@@ -695,6 +695,14 @@ assert.equal(restoreRunActiveMs([{ type: "custom", customType: "drain-watchdog-s
 	assert(tree.includes("F") && tree.includes("G"), "cycle members are not dropped");
 	assert(tree.includes("done 1") && tree.includes("total 7"), tree);
 	assert.equal(renderTicketTree([]), "(no tickets declared)");
+	const colored = renderTicketTree([
+		{ id: "A", state: "done", blockedBy: [] },
+		{ id: "B", state: "limbo", blockedBy: ["A"], reason: "r" },
+		{ id: "C", state: "open", blockedBy: ["A"] },
+	], true);
+	assert(colored.includes("\x1b[32m\u2713 A\x1b[0m"), "done is green");
+	assert(colored.includes("\x1b[33m! B (limbo: r)\x1b[0m"), "limbo is yellow");
+	assert(colored.includes("\u25cf C") && !colored.includes("\x1b[32m\u25cf") && !colored.includes("\x1b[33m\u25cf"), "open stays plain");
 }
 assert.deepEqual(watchdogCompletions("sta")!.map((c) => c.value), ["status"]);
 assert.deepEqual(watchdogCompletions("")!.map((c) => c.value), ["status", "tree", "parallel", "pause", "resume", "off", "on"]);
