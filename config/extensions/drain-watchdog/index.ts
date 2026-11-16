@@ -97,6 +97,8 @@ export type TickObservation = {
 	pickable: number;
 	/** Time since the last counted progress event (ticket change, steer, handoff). */
 	progressAgeMs: number;
+	/** Live-child cap. Set = idle main with pickable work and a free slot gets a real (ladder-gated) nudge even while children run. Omitted = off. */
+	maxParallel?: number;
 };
 
 /** What the effect layer saw when the model called watchdog_done. */
@@ -954,6 +956,13 @@ function recordNudge(
 	};
 }
 
+/** Idle main, a free slot, and more pickable tickets than live children.
+ *  ponytail: in-progress tickets stay "pickable" in the tree and each live child works one ticket, so
+ *  `pickable > childCount` approximates "an unstarted ticket exists"; refine when tickets carry an in-progress state. */
+export function hasFreeSlot(obs: { pickable: number; childCount: number; maxParallel?: number }): boolean {
+	return obs.maxParallel !== undefined && obs.childCount < obs.maxParallel && obs.pickable > obs.childCount;
+}
+
 function handleTick(state: DrainState, obs: TickObservation, now: number): DrainTransition {
 	// Cycle-start activity: legitimately busy; the effect layer resets the idle clock.
 	if (obs.running || obs.pendingMessages) return stay(state);
@@ -961,7 +970,8 @@ function handleTick(state: DrainState, obs: TickObservation, now: number): Drain
 	if (obs.allIdleForMs < IDLE_GRACE_MS) return stay(state);
 	// Nudge cooldown (design order: cooldown gate sits before the queue observation).
 	// Running children are exempt: the child check below is not a nudge and must not wait on the ladder.
-	if (now < state.nextAllowedAt && obs.childCount === 0) return stay(state);
+	const cooling = now < state.nextAllowedAt;
+	if (cooling && obs.childCount === 0) return stay(state);
 
 	if (!obs.queueOk) return toPaused(state, PAUSE_REASON.queue);
 
@@ -974,6 +984,9 @@ function handleTick(state: DrainState, obs: TickObservation, now: number): Drain
 		if (obs.progressAgeMs >= STALL_LIMIT_MS && (state.lastStallNotifyAt === null || now - state.lastStallNotifyAt >= STALL_LIMIT_MS)) {
 			return { state: { ...state, lastStallNotifyAt: now }, action: { type: "stallNotify" }, refusal: null };
 		}
+		// Free slot + pickable work while main sits idle: a real nudge (ladder, breaker, hard cap apply)
+		// so a raised parallel cap or a finished child actually gets refilled.
+		if (!cooling && hasFreeSlot(obs)) return recordNudge(state, now, { type: "nudge" });
 		// Main idle >= 10 min with children running: steer it to check them. Not a nudge
 		// (no nudgeCount, no breaker, no ladder); the turn it triggers resets the idle clock.
 		if (obs.allIdleForMs >= CHILD_CHECK_IDLE_MS) return { state, action: { type: "childCheck" }, refusal: null };
@@ -1228,7 +1241,11 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 				noProgressStreak: state.noProgressStreak,
 				idleMs: Date.now() - idleSinceMs,
 				runningMs: runningMsNow(),
-				nudgeInMs: Math.max(0, IDLE_GRACE_MS - (Date.now() - idleSinceMs), state.nextAllowedAt - Date.now()),
+				// With children and no free slot the tick never nudges (observe only): no countdown.
+				nudgeInMs:
+					childCount > 0 && !hasFreeSlot({ pickable: pickableIds(state.tickets).length, childCount, maxParallel })
+						? undefined
+						: Math.max(0, IDLE_GRACE_MS - (Date.now() - idleSinceMs), state.nextAllowedAt - Date.now()),
 				pausedReason: state.pausedReason,
 				backoffKind: state.backoffKind,
 				backoffRung: state.backoffRung,
@@ -1365,6 +1382,7 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 				queueOk: q.ok,
 				pickable: q.pickable,
 				progressAgeMs: observedAt - progressSinceMs,
+				maxParallel,
 			};
 			apply(transition(state, { type: "tick", obs }, observedAt), "tick");
 		} catch (e) {

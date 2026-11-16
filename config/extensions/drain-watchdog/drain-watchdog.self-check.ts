@@ -395,6 +395,19 @@ assert.deepEqual(transition(coolingArmed, { type: "tick", obs: { ...baseObs(), c
 	const text = buildChildCheckText({ target: "#38", children: 2 });
 	assert(text.includes("10 minutes") && text.includes("2 child session(s)") && text.includes("Check the status of every running subagent"));
 }
+// Free slot (raised parallel / a child finished): idle main + unstarted pickable work gets a real nudge even with children running.
+{
+	const slotObs = { ...baseObs(), childCount: 4, pickable: 5, maxParallel: 6, allIdleForMs: IDLE_GRACE_MS };
+	const n = transition(armed(), { type: "tick", obs: slotObs }, T);
+	assert.deepEqual(n.action, { type: "nudge" }, "free slot + pickable > children nudges despite running children");
+	assert.equal(n.state.nudgeCount, 1);
+	assert.equal(n.state.nextAllowedAt, T + 3 * MIN, "ladder applies");
+	assert.deepEqual(transition(n.state, { type: "tick", obs: slotObs }, T + MIN).action, { type: "wait" }, "cooldown gates the free-slot nudge");
+	assert.notEqual(transition(armed(), { type: "tick", obs: { ...slotObs, maxParallel: 4 } }, T).action.type, "nudge", "no free slot: no nudge");
+	assert.notEqual(transition(armed(), { type: "tick", obs: { ...slotObs, pickable: 4 } }, T).action.type, "nudge", "every pickable ticket already has a child: no nudge");
+	assert.notEqual(transition(armed(), { type: "tick", obs: { ...slotObs, maxParallel: undefined } }, T).action.type, "nudge", "no cap observed: feature off");
+	assert.equal(transition(armed({ noProgressStreak: BREAKER_K }), { type: "tick", obs: slotObs }, T).state.phase, "paused", "breaker still bounds it");
+}
 const stalled = transition(
 	armed(),
 	{ type: "tick", obs: { ...baseObs(), childCount: 1, progressAgeMs: STALL_LIMIT_MS } },
@@ -1092,19 +1105,20 @@ await withNoAmbientSubagent(() =>
 );
 
 // A spawn that errors (no subagent_result ever follows) must not count as a live child,
-// or the run never nudges again; a successful spawn still blocks the nudge.
-for (const [isError, expectSent] of [[true, 1], [false, 0]] as const) {
+// or the run never nudges again. Successful spawns: fixture has 2 pickable tickets and cap 4, so one
+// child leaves a free slot (nudge); one child per pickable ticket leaves nothing to start (no nudge).
+for (const [isError, spawns, expectSent] of [[true, 1, 1], [false, 1, 1], [false, 2, 0]] as const) {
 	await withNoAmbientSubagent(() =>
 		withFakeTimers(async (timers, flush, clock) => {
 			const h = makeHarness(makeFixtureCwd());
 			h.entries.push(armedEntry());
 			h.handlers.session_start({}, h.ctx);
-			h.handlers.tool_result({ toolName: "subagent", isError });
+			for (let i = 0; i < spawns; i++) h.handlers.tool_result({ toolName: "subagent", isError });
 			clock.advance(IDLE_GRACE_MS + 1000);
 			timers.find((t) => t.kind === "interval" && !t.cleared)!.fire();
 			await flush();
 			await flush();
-			assert.equal(h.sent.length, expectSent, `spawn isError=${isError}: nudges sent`);
+			assert.equal(h.sent.length, expectSent, `spawn isError=${isError} x${spawns}: nudges sent`);
 		}),
 	);
 }
