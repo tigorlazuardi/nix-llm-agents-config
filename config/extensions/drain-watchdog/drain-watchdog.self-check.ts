@@ -49,6 +49,9 @@ import {
 	buildNudgeText,
 	ROLE_MODEL_RULE,
 	buildChildCheckText,
+	shouldSplit,
+	buildSplitText,
+	SPLIT_BUDGET_S,
 	CHILD_CHECK_IDLE_MS,
 	isSubagentCompletionNotice,
 	isSubagentSpawnTool,
@@ -713,6 +716,28 @@ assert.equal(watchdogCompletions("on #3"), null, "no completion after the first 
 assert.equal(watchdogCompletions("#35"), null, "a ref gets no completion");
 
 
+// Oversized-ticket split: role budget exceeded AND verdict FAIL, nothing else.
+{
+	const fail = "Verdict: FAIL. Details written to `x.md`.";
+	assert.deepEqual(SPLIT_BUDGET_S, { implementer: 600, "standards-reviewer": 600, "deep-reviewer": 900 });
+	assert.equal(shouldSplit("implementer", 601, fail), true);
+	assert.equal(shouldSplit("implementer", 600, fail), false, "exactly at budget is within budget");
+	assert.equal(shouldSplit("standards-reviewer", 601, fail), true);
+	assert.equal(shouldSplit("deep-reviewer", 601, fail), false, "deep reviewer budget is 15 min");
+	assert.equal(shouldSplit("deep-reviewer", 901, fail), true);
+	assert.equal(shouldSplit("implementer", 9999, "VERDICT: PASS"), false, "a slow PASS never splits");
+	assert.equal(shouldSplit("implementer", 9999, "VERDICT: BLOCKED"), false);
+	assert.equal(shouldSplit("implementer", 9999, "verdict: **FAIL**"), true, "markdown-bold verdict still matches");
+	assert.equal(shouldSplit("merger", 9999, fail), false, "other roles never split");
+	assert.equal(shouldSplit(undefined, 9999, fail), false);
+	assert.equal(shouldSplit("implementer", undefined, fail), false);
+	assert.equal(shouldSplit("implementer", 9999, undefined), false);
+	const t = buildSplitText({ target: "#9", child: "build-x", agent: "deep-reviewer", elapsedS: 1000 });
+	assert(t.includes("17 min") && t.includes("15 min budget") && t.includes("to-tickets") && t.includes("watchdog_sync"));
+	assert(t.includes("never rewritten") && t.includes("without asking the human") && t.includes("blocked_by"), "origin stays intact, no human quiz");
+	assert(t.includes(ROLE_MODEL_RULE) && t.includes(SYNC_REMINDER));
+}
+
 // pi-herdr-agents counters.
 assert.equal(isSubagentSpawnTool("subagent"), true);
 assert.equal(isSubagentSpawnTool("subagent_resume"), true);
@@ -1111,6 +1136,31 @@ await withNoAmbientSubagent(() =>
 		assert(h.sent[0]!.content.includes("2 pickable"), "the nudge reports the ticket-tree pickable count");
 	}),
 );
+
+// Live: a slow FAIL result steers a split (not a nudge); a slow PASS or fast FAIL steers nothing.
+for (const [agent, elapsed, content, expectSplit] of [
+	["implementer", 700, "Verdict: FAIL.", true],
+	["implementer", 100, "Verdict: FAIL.", false],
+	["deep-reviewer", 700, "Verdict: FAIL.", false],
+	["deep-reviewer", 1000, "Verdict: PASS.", false],
+] as const) {
+	await withNoAmbientSubagent(() =>
+		withFakeTimers(async (_timers, flush) => {
+			const h = makeHarness(makeFixtureCwd());
+			h.entries.push(armedEntry());
+			h.handlers.session_start({}, h.ctx);
+			await flush();
+			await flush();
+			h.sent.length = 0; // drop the restore nudge
+			h.handlers.tool_result({ toolName: "subagent", isError: false });
+			h.handlers.message_end({ message: { customType: "subagent_result", content, details: { name: "c1", agent, elapsed } } });
+			const splits = h.sent.filter((m) => m.content.includes("too large for one pass"));
+			assert.equal(splits.length, expectSplit ? 1 : 0, `${agent} ${elapsed}s: split steer`);
+			assert.equal(h.audits.some((a) => a.type === "split-trigger"), expectSplit);
+			assert.equal(persistedLatest(h.entries).data.nudgeCount, 1, "the split steer is not a nudge (only the restore nudge counted)");
+		}),
+	);
+}
 
 // A spawn that errors (no subagent_result ever follows) must not count as a live child,
 // or the run never nudges again. Successful spawns: fixture has 2 pickable tickets and cap 4, so one

@@ -2447,7 +2447,7 @@ in
           awk 'NR > 1 && /^---$/ { exit } NR > 1' "$f" > fm.yml
           yq '.' fm.yml > /dev/null
         done
-        grep -F 'standards: 10 minutes, spec: 20 minutes' ${./config/prompts}/executor.md
+        grep -F 'implementer: 10 minutes, standards: 10 minutes, spec: 15 minutes' ${./config/prompts}/executor.md
         grep -F 'repos/{owner}/{repo}/issues/<origin>/dependencies/blocked_by -F issue_id="$child_db"' \
           ${./config/prompts}/executor.md
         # #34 executor parallel topology: load-bearing invariants (each pin fails if its sentence is removed).

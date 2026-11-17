@@ -541,6 +541,41 @@ export function buildChildCheckText(p: { target: string | null; children: number
 	].join("\n");
 }
 
+// --- Oversized-ticket split trigger -----------------------------------------
+
+/** Per-role run budgets (seconds): a child that FAILs after running longer than this means the ticket is too big.
+ *  Mirrors config/prompts/executor.md (SPLIT procedure); change the two together.
+ *  ponytail: fixed to 10/10/15 min; make configurable when a second host needs other budgets. */
+export const SPLIT_BUDGET_S: Readonly<Record<string, number>> = {
+	implementer: 10 * 60,
+	"standards-reviewer": 10 * 60,
+	"deep-reviewer": 15 * 60,
+};
+export const SPLIT_DEPTH_CAP = 5;
+
+/** True when a finished child ran past its role budget AND ended FAIL. A fast FAIL goes to the fix loop, a PASS never splits. */
+export function shouldSplit(agent: unknown, elapsedS: unknown, content: unknown): boolean {
+	if (typeof agent !== "string" || typeof elapsedS !== "number" || typeof content !== "string") return false;
+	const budget = SPLIT_BUDGET_S[agent];
+	if (budget === undefined || elapsedS <= budget) return false;
+	return /\bverdict\s*:\s*\**\s*FAIL\b/i.test(content);
+}
+
+/** Steer sent when `shouldSplit` fires: orchestrator reviews the ticket and splits it into smaller children. Not a nudge (no count, no ladder). */
+export function buildSplitText(p: { target: string | null; child: string; agent: string; elapsedS: number }): string {
+	const target = p.target === null ? "the accepted tickets" : p.target;
+	const budgetMin = (SPLIT_BUDGET_S[p.agent] ?? 0) / 60;
+	return [
+		`drain-watchdog: unattended run on ${target}; child "${p.child}" (${p.agent}) ended with verdict FAIL after ${Math.round(p.elapsedS / 60)} min, over its ${budgetMin} min budget. A FAIL this slow means the ticket is too large for one pass: do not run another fix pass on it as is.`,
+		`Review that ticket's scope against the findings and split it, now, without asking the human. This is the same trigger as the executor SPLIT procedure: if you already split this ticket for this result, do nothing more. Depth cap ${SPLIT_DEPTH_CAP} (origin body marker \`split-depth: N\`); at the cap, or when no strictly smaller scope exists, hand the origin off with watchdog_handoff instead.`,
+		"Write the children by following the to-tickets skill (read it): tracer-bullet vertical slices, each sized for one fresh context window, each with its blocking edges and acceptance criteria. Skip its step 4 (quiz the user): the breakdown is approved by this instruction. Publish to the tracker in dependency order, `ready-for-agent`, each child body carrying `parent: #<origin>` and `split-depth: <N+1>`.",
+		"The original ticket is never rewritten: no edit of its title, body, acceptance criteria or labels, and it is never closed or replaced; the split only adds children. The one change allowed on the origin is the native blocked_by link to each child (executor SPLIT procedure step e), so it waits for them. Keep its worktree and branch; partial work is a pointer for the children.",
+		"Then call watchdog_sync in one call: every child as an open ticket whose blockedBy is the origin's original blockers (resend them in full) plus any sibling it depends on, and the origin with blockedBy = its original blockers plus all the children (blockedBy replaces, so send the whole list). Run the sync before spawning anything for these tickets so the tree matches the tracker.",
+		ROLE_MODEL_RULE,
+		SYNC_REMINDER,
+	].join("\n");
+}
+
 // --- Operator UI (persistent widget + command completion) --------------------
 
 export type WidgetView = {
@@ -1934,6 +1969,14 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 			progressSinceMs = Date.now();
 			// A completion steer is progress; the run stays live (nextAllowedAt reset).
 			apply(transition(state, { type: "progress" }, Date.now()), "child-completion");
+			// Too slow and FAIL: steer the orchestrator to split the ticket. Not a nudge (own trigger per result).
+			const msg = event.message as { content?: unknown; details?: { name?: unknown; agent?: unknown; elapsed?: unknown } };
+			const d = msg.details ?? {};
+			if (state.phase === "armed" && shouldSplit(d.agent, d.elapsed, msg.content)) {
+				const child = typeof d.name === "string" ? d.name : "?";
+				audit("split-trigger", { child, agent: d.agent, elapsedS: d.elapsed });
+				deliver(NUDGE_MESSAGE_TYPE, buildSplitText({ target: runTarget, child, agent: String(d.agent), elapsedS: Number(d.elapsed) }));
+			}
 		}
 	});
 
