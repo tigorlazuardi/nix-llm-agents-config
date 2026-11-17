@@ -1131,35 +1131,22 @@ for (const [isError, spawns, expectSent] of [[true, 1, 1], [false, 1, 1], [false
 	);
 }
 
-// Nudge latency bound: the default grace/tick must put the first nudge within
-// IDLE_GRACE_MS + TICK_MS of going idle, and nothing fires before the grace.
+// Restore after restart: the operator is waiting, so the idle grace is skipped and the first tick
+// nudges (the grace itself stays covered by the pure-core tick checks above).
 assert.equal(IDLE_GRACE_MS, 60_000, "default idle grace is 60s");
 assert.equal(TICK_MS, 15_000, "default tick is 15s");
 await withNoAmbientSubagent(() =>
 	withFakeTimers(async (timers, flush, clock) => {
 		const h = makeHarness(makeFixtureCwd());
-		h.entries.push(armedEntry());
+		h.entries.push(armedEntry({ nextAllowedAt: Date.now() + 30 * 60_000 }));
 		h.handlers.session_start({}, h.ctx);
 		const tickTimer = timers.find((t) => t.kind === "interval" && !t.cleared)!;
 		assert.equal(tickTimer.delay, TICK_MS, "the armed tick interval defaults to TICK_MS");
-		// Tick-by-tick, like the real interval: silent until the grace has elapsed.
-		let elapsed = 0;
-		while (elapsed + TICK_MS < IDLE_GRACE_MS) {
-			clock.advance(TICK_MS);
-			elapsed += TICK_MS;
-			tickTimer.fire();
-			await flush();
-			assert.equal(h.sent.length, 0, `no nudge before the idle grace (idle ${elapsed}ms)`);
-		}
-		clock.advance(IDLE_GRACE_MS - elapsed - 1);
-		tickTimer.fire();
-		await flush();
-		assert.equal(h.sent.length, 0, "no nudge 1ms before the idle grace");
-		clock.advance(1 + TICK_MS); // first tick at/after idle+grace, at most one tick period late
+		clock.advance(TICK_MS);
 		tickTimer.fire();
 		await flush();
 		await flush();
-		assert.equal(h.sent.length, 1, "the nudge fires within IDLE_GRACE_MS + TICK_MS of going idle");
+		assert.equal(h.sent.length, 1, "a restored ARMED run nudges at the first tick: no idle grace, stale cooldown dropped");
 	}),
 );
 

@@ -1026,6 +1026,8 @@ export function transition(state: DrainState, event: DrainEvent, now: number): D
 				backoffRung: 0,
 				backoffStartMs: null,
 				pausedReason: null,
+				// An explicit operator resume starts work at the next tick: no leftover cooldown.
+				nextAllowedAt: now,
 			});
 		case "abort":
 			return toPaused(state, PAUSE_REASON.abort);
@@ -1554,7 +1556,8 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 				const result = transition(state, { type: "resume" }, Date.now());
 				apply(result, "resume");
 				if (result.state.phase === "armed") {
-					idleSinceMs = progressSinceMs = Date.now();
+					progressSinceMs = Date.now();
+					idleSinceMs = progressSinceMs - IDLE_GRACE_MS; // grace already served: first nudge at the next tick
 					startLoop();
 					notify("drain-watchdog resumed");
 				}
@@ -1812,7 +1815,12 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 			state = { ...INITIAL_STATE };
 			return;
 		}
-		state = restored;
+		// A restart is an operator action: skip the idle grace and any leftover nudge cooldown so a
+		// restored ARMED run picks up work at the next tick instead of after grace + ladder.
+		if (restored.phase === "armed") {
+			state = { ...restored, nextAllowedAt: 0 };
+			idleSinceMs = progressSinceMs - IDLE_GRACE_MS;
+		} else state = restored;
 		// #38 C: keep the run target across a restart (targeted state read).
 		runTarget = restoreRunTarget(entries);
 		runCheck = restoreRunCheck(entries);
