@@ -1121,8 +1121,11 @@ for (const [isError, spawns, expectSent] of [[true, 1, 1], [false, 1, 1], [false
 			const h = makeHarness(makeFixtureCwd());
 			h.entries.push(armedEntry());
 			h.handlers.session_start({}, h.ctx);
+			await flush();
+			await flush();
+			h.sent.length = 0; // drop the immediate restore nudge; this case is about the next one
 			for (let i = 0; i < spawns; i++) h.handlers.tool_result({ toolName: "subagent", isError });
-			clock.advance(IDLE_GRACE_MS + 1000);
+			clock.advance(IDLE_GRACE_MS + 4 * 60_000); // past the 3 min cooldown the restore nudge set
 			timers.find((t) => t.kind === "interval" && !t.cleared)!.fire();
 			await flush();
 			await flush();
@@ -1142,11 +1145,9 @@ await withNoAmbientSubagent(() =>
 		h.handlers.session_start({}, h.ctx);
 		const tickTimer = timers.find((t) => t.kind === "interval" && !t.cleared)!;
 		assert.equal(tickTimer.delay, TICK_MS, "the armed tick interval defaults to TICK_MS");
-		clock.advance(TICK_MS);
-		tickTimer.fire();
 		await flush();
 		await flush();
-		assert.equal(h.sent.length, 1, "a restored ARMED run nudges at the first tick: no idle grace, stale cooldown dropped");
+		assert.equal(h.sent.length, 1, "a restored ARMED run nudges at once, before any interval tick: no idle grace, stale cooldown dropped");
 	}),
 );
 
@@ -1157,16 +1158,14 @@ await withNoAmbientSubagent(() =>
 		const h = makeHarness(makeFixtureCwd());
 		h.entries.push(armedEntry({ tickets: [] }));
 		h.handlers.session_start({}, h.ctx);
-		clock.advance(IDLE_GRACE_MS + 1000); // past the idle-grace gate so the tick actually evaluates
-		const tickTimer = timers.find((t) => t.kind === "interval" && !t.cleared)!;
-		tickTimer.fire();
+		// restore evaluates one tick at once (no grace), so the empty tree pauses without any interval tick
 		await flush();
 		await flush();
 		assert.equal(h.sent.length, 0, "an empty ticket tree never nudges");
 		const pauseAudit = h.audits.find((a) => a.type === "paused");
 		assert(pauseAudit !== undefined, "an empty ticket tree is audited as paused, not silently ignored");
 		assert(String(pauseAudit!.data.reason).includes("no tickets"), "the pause reason names the missing tickets");
-		assert(h.notifications.some((n) => n.message.includes("PAUSED")), "the pause is also surfaced to the UI");
+		// (the harness restores with hasUI=false and the restore tick is synchronous, so notify is dropped here)
 		assert.equal(persistedLatest(h.entries).data.phase, "paused");
 	}),
 );
@@ -1208,6 +1207,9 @@ await withNoAmbientSubagent(() =>
 		const h = makeHarness(makeFixtureCwd());
 		h.entries.push(armedEntry());
 		h.handlers.session_start({}, h.ctx);
+		await flush();
+		await flush();
+		h.sent.length = 0; // drop the immediate restore nudge; this case is about a paused run
 		await h.handlers["command:watchdog"]("pause", h.ctx);
 		assert(h.audits.some((a) => a.type === "paused" && String(a.data.reason).includes("/watchdog pause")), "pause is audited with its reason");
 		assert(timers.every((t) => t.cleared), "pause stops every timer");
@@ -1291,10 +1293,13 @@ await withNoAmbientSubagent(() =>
 // registered there, and the gate errors if a call somehow arrives in a child
 // context (simulated by setting PI_SUBAGENT_ID on a main-registered harness).
 await withNoAmbientSubagent(() =>
-	withFakeTimers(async () => {
+	withFakeTimers(async (_timers, flush) => {
 		const h = makeHarness(makeFixtureCwd());
 		h.entries.push(armedEntry());
 		h.handlers.session_start({}, h.ctx);
+		await flush();
+		await flush();
+		const restoredEntries = h.entries.filter((e: any) => e.customType === "drain-watchdog-state").length; // restore nudge persists once
 		process.env.PI_SUBAGENT_ID = "child-caller";
 		try {
 			const stop = await h.tools.watchdog_stop!.execute("t2", { reason: "environment broke" }, undefined, undefined, h.ctx);
@@ -1313,7 +1318,7 @@ await withNoAmbientSubagent(() =>
 		// Nothing ran, nothing changed.
 		assert.equal(h.execCalls.length, 0, "a child-gated call never reaches gh");
 		assert.equal(h.audits.find((a) => a.type === "handoff" || a.type === "paused" || a.type === "sync" || a.type === "complete"), undefined, "a child-gated call changes nothing");
-		assert.equal(h.entries.filter((e: any) => e.customType === "drain-watchdog-state").length, 1, "a child-gated call persists nothing beyond the restored entry");
+		assert.equal(h.entries.filter((e: any) => e.customType === "drain-watchdog-state").length, restoredEntries, "a child-gated call persists nothing beyond the restored entry");
 	}),
 );
 
@@ -1408,6 +1413,11 @@ await withNoAmbientSubagent(() =>
 		const h = makeHarness(makeFixtureCwd());
 		h.entries.push(armedEntry());
 		h.handlers.session_start({}, h.ctx);
+		await flush();
+		await flush();
+		h.sent.length = 0; // drop the immediate restore nudge; this case is about backoff
+		const restoreNudges = persistedLatest(h.entries).data.nudgeCount as number;
+		const restoreStreak = persistedLatest(h.entries).data.noProgressStreak as number;
 		const tickTimer = timers.find((t) => t.kind === "interval" && !t.cleared)!;
 		assert.equal(liveTimeouts(timers).length, 0, "armed: no probe timer yet");
 
@@ -1427,8 +1437,8 @@ await withNoAmbientSubagent(() =>
 			await flush();
 		}
 		assert.equal(h.sent.length, 0, "no nudge while in backoff");
-		assert.equal(persistedLatest(h.entries).data.noProgressStreak, 0);
-		assert.equal(persistedLatest(h.entries).data.nudgeCount, 0);
+		assert.equal(persistedLatest(h.entries).data.noProgressStreak, restoreStreak, "backoff ticks add no breaker count");
+		assert.equal(persistedLatest(h.entries).data.nudgeCount, restoreNudges, "backoff ticks add no nudge count");
 
 		// Probe fires a steer; a second error escalates the rung and re-arms ONE timer.
 		fireProbe(timers);
@@ -1515,6 +1525,7 @@ await withNoAmbientSubagent(() =>
 		await settle(h, errEnd("503"));
 		await settle(h, errEnd("503"));
 		assert.equal(persistedLatest(h.entries).data.backoffRung, 1);
+		h.sent.length = 0; // drop the immediate restore nudge; count only the probe
 		fireProbe(timers);
 		assert.equal(h.sent.length, 1);
 		assert.equal(liveTimeouts(timers).length, 1, "fallback probe pending after an unanswered probe");

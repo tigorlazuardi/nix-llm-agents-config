@@ -1833,6 +1833,8 @@ export default function watchdogExtension(pi: ExtensionAPI) {
 				startLoop();
 				refreshWidget();
 				notify(`drain-watchdog: restored live run (${state.phase}) after restart`);
+				// The restored model is idle until a message lands: evaluate one tick now instead of waiting TICK_MS.
+				void tick();
 			} else {
 				audit("restored", { phase: "backoff", kind: state.backoffKind, rung: state.backoffRung });
 				// The outage budget still measures from the restored backoffStartMs. The
