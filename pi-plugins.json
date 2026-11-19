@@ -275,10 +275,10 @@
   "supi-context": {
     "strategy": "npm",
     "package": "@mrclrchtr/supi-context",
-    "version": "13.0.0",
-    "src": "https://registry.npmjs.org/@mrclrchtr/supi-context/-/supi-context-13.0.0.tgz",
-    "hash": "sha256-TyzuYzfHKLBQUJ7FB5fO0ygslF//BtRoJegv+NK2/Jk=",
-    "npmDepsHash": "sha256-svxOXcQ0Kn72RrOqyS3OVzqaURQNy67QGh+3j2+PIFY=",
+    "version": "14.0.0",
+    "src": "https://registry.npmjs.org/@mrclrchtr/supi-context/-/supi-context-14.0.0.tgz",
+    "hash": "sha256-McYyPL6NJD6DEHfsoeByoScZI4YxHxYk2cp3TXJnnD4=",
+    "npmDepsHash": "sha256-oX66lsnZ1/kKAgr7gsxzQVtiIOrIdTmB33KB+kBN52M=",
     "manifestTransform": {
       "delete": [
         "peerDependencies",
