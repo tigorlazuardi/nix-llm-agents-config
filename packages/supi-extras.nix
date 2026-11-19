@@ -1,6 +1,7 @@
 {
   fetchurl,
   lib,
+  nodejs,
   stdenvNoCC,
 }:
 let
@@ -42,8 +43,7 @@ stdenvNoCC.mkDerivation {
       }
     }
     EOF
-    substituteInPlace package.json \
-      --replace-fail '    "clipboardy": "^5.3.1",' ""
+    ${nodejs}/bin/node -e 'const fs = require("fs"); const p = require("./package.json"); delete p.dependencies.clipboardy; fs.writeFileSync("package.json", JSON.stringify(p, null, 2) + "\n")'
     # ponytail: retain SuPi utilities while pix-footer owns sole footer; remove when upstream adds a footer toggle.
     substituteInPlace src/index.ts \
       --replace-fail 'import supiFooter from "./supi-footer.ts";' "" \
