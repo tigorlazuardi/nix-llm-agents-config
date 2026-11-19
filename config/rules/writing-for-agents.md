@@ -1,5 +1,5 @@
 ---
-paths: "**/{SKILL,CONTEXT,AGENTS,CLAUDE,CODING_STANDARDS}.md"
+paths: "**/{SKILL,GLOSSARY,AGENTS,CLAUDE,CODING_STANDARDS}.md"
 events:
   tool_call:
     - edit

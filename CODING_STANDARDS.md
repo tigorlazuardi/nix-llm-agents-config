@@ -21,7 +21,7 @@ Nix formatting is enforced by `nixfmt` through `checks.x86_64-linux.formatting`;
 
 ## Boundaries and errors
 
-- Use terms in `CONTEXT.md`; read it before domain work and surface ADR conflicts rather than silently overriding them.
+- Use terms in `GLOSSARY.md`; read it before domain work and surface ADR conflicts rather than silently overriding them.
 - Managed configuration is portable and declarative. Keep authentication, sessions, logs, caches, crash/trust state, generated npm/git state, and other mutable Pi runtime state local.
 - Secret references are runtime file paths only. Never read secret content during evaluation or activation; never place it in Git, generated JSON/configuration, Pi environment, or Nix store. Use native MCP file-env wrappers; do not replace them with `builtins.readFile`.
 - Do not recreate paths Home Manager already owns, add writable copies/raw-resource templating, or manage a repository-level `.mcp.json`/`.pi/mcp.json`.
