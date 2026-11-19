@@ -315,7 +315,7 @@ let
     spawning: false
     auto-exit: true
     ---
-    ${builtins.readFile ./config/agents/reviewer.md}'';
+    ${builtins.readFile ./config/agents/standards-reviewer.md}'';
   renderedDefaultAgentFiles = builtins.sort builtins.lessThan (
     builtins.filter (
       name: pkgs.lib.hasPrefix "${default.config.programs.pi-coding-agent.configDir}/agents/" name

@@ -1,7 +1,7 @@
 {
   deep-reviewer = {
     description = "Deep reviewer; spec axis";
-    prompt = ../../config/agents/reviewer.md;
+    prompt = ../../config/agents/deep-reviewer.md;
     model = "omniroute/personal/deep-reviewer";
     effort = "high";
     tools.allow = [
@@ -30,7 +30,7 @@
   };
   standards-reviewer = {
     description = "Standards reviewer; standards axis";
-    prompt = ../../config/agents/reviewer.md;
+    prompt = ../../config/agents/standards-reviewer.md;
     model = "omniroute/personal/standards-reviewer";
     effort = "high";
     tools.allow = [
